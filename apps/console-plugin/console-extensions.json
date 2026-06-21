@@ -1,25 +1,9 @@
 [
   {
-    "type": "console.navigation/href",
+    "type": "console.context-provider",
     "properties": {
-      "id": "cywell-ai-sentinel",
-      "name": "AI Sentinel",
-      "href": "/ai-sentinel",
-      "perspective": "admin",
-      "insertAfter": ["monitoring", "workloads", "home"],
-      "startsWith": ["/ai-sentinel"],
-      "dataAttributes": {
-        "testid": "cywell-ai-sentinel-nav"
-      }
-    }
-  },
-  {
-    "type": "console.page/route",
-    "properties": {
-      "path": "/ai-sentinel",
-      "exact": false,
-      "component": { "$codeRef": "AISentinelRoute" }
+      "provider": { "$codeRef": "CASContextProvider" },
+      "useValueHook": { "$codeRef": "useCASLauncher" }
     }
   }
 ]
-

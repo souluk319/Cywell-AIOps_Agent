@@ -25,7 +25,7 @@ spec:
       containers:
         - name: gateway
           image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-gateway:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: HOST
               value: "0.0.0.0"
@@ -73,4 +73,3 @@ spec:
     - name: https
       port: 9443
       targetPort: https
-

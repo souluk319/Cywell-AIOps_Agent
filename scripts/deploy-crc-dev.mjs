@@ -44,10 +44,12 @@ async function copyBuildContext() {
   await cp(resolve("packages/contracts"), resolve(contextDir, "packages/contracts"), { recursive: true, filter });
 }
 
-function ensurePluginEnabled() {
+function ensureCasReplacesLightspeed() {
   const raw = run("oc", ["get", "console.operator.openshift.io", "cluster", "-o", "json"]);
   const parsed = JSON.parse(raw);
-  const plugins = Array.isArray(parsed?.spec?.plugins) ? parsed.spec.plugins : [];
+  const plugins = (Array.isArray(parsed?.spec?.plugins) ? parsed.spec.plugins : []).filter(
+    (plugin) => plugin !== "lightspeed-console-plugin"
+  );
   if (!plugins.includes("cywell-ai-sentinel")) {
     plugins.push("cywell-ai-sentinel");
   }
@@ -74,12 +76,15 @@ for (const buildName of ["cas-gateway", "cas-console-plugin"]) {
 console.log("Applying CAS manifests");
 run("oc", ["apply", "-k", "deploy/kustomize/base"], { stdio: "inherit" });
 
+console.log("Restarting CAS deployments to pull the latest dev tags");
+run("oc", ["rollout", "restart", "deploy/cas-gateway", "-n", project], { stdio: "inherit" });
+run("oc", ["rollout", "restart", "deploy/cas-console-plugin", "-n", project], { stdio: "inherit" });
+
 console.log("Waiting for CAS deployments");
 run("oc", ["rollout", "status", "deploy/cas-gateway", "-n", project, "--timeout=180s"], { stdio: "inherit" });
 run("oc", ["rollout", "status", "deploy/cas-console-plugin", "-n", project, "--timeout=180s"], { stdio: "inherit" });
 
-ensurePluginEnabled();
+ensureCasReplacesLightspeed();
 
 console.log("Verifying CRC deployment");
 run("node", ["./scripts/verify-crc-deployment.mjs"], { stdio: "inherit", timeoutMs: 120000 });
-

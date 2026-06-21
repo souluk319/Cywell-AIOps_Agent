@@ -13,7 +13,8 @@
     "displayName": "AI Sentinel",
     "description": "Evidence-based AIOps Agent for OpenShift operations.",
     "exposedModules": {
-      "AISentinelRoute": "./src/plugin/AISentinelRoute"
+      "CASContextProvider": "./src/plugin/CASContextProvider",
+      "useCASLauncher": "./src/plugin/useCASLauncher"
     },
     "dependencies": {
       "@console/pluginAPI": ">=4.16.0 <4.22.0"
@@ -23,4 +24,3 @@
     "@cywell-ai-sentinel/contracts": "0.1.0"
   }
 }
-

@@ -61,6 +61,15 @@ function execNode(pod, code, timeoutMs = 30000) {
   return run("oc", ["exec", "-n", namespace, pod, "--", "node", "-e", code], timeoutMs);
 }
 
+function podReady(pod) {
+  return (
+    pod?.status?.phase === "Running" &&
+    !pod?.metadata?.deletionTimestamp &&
+    pod?.status?.conditions?.some((condition) => condition.type === "Ready" && condition.status === "True") &&
+    pod?.status?.containerStatuses?.every((container) => container.ready && container.state?.running)
+  );
+}
+
 const images = getJson("images:istags", ["get", "istag", "-n", namespace]);
 const imageNames = (images?.items ?? []).map((item) => item.metadata?.name);
 expect("images:gateway", imageNames.includes("cas-gateway:dev"), "cas-gateway:dev exists", "cas-gateway:dev missing");
@@ -100,10 +109,16 @@ const consoleOperator = getJson("console:operator", ["get", "console.operator.op
 const enabledPlugins = consoleOperator?.spec?.plugins ?? [];
 expect("console:opslens-still-enabled", enabledPlugins.includes("cywell-opslens"), "cywell-opslens remains enabled");
 expect("console:cas-enabled", enabledPlugins.includes("cywell-ai-sentinel"), "cywell-ai-sentinel is enabled");
+expect(
+  "console:lightspeed-replaced",
+  !enabledPlugins.includes("lightspeed-console-plugin"),
+  "lightspeed-console-plugin is disabled so CAS owns the AI launcher position",
+  "lightspeed-console-plugin is still enabled"
+);
 
 const pods = getJson("runtime:pods", ["get", "pods", "-n", namespace]);
-const gatewayPod = pods?.items?.find((pod) => pod.metadata?.name?.startsWith("cas-gateway-") && pod.status?.phase === "Running");
-const consolePod = pods?.items?.find((pod) => pod.metadata?.name?.startsWith("cas-console-plugin-") && pod.status?.phase === "Running");
+const gatewayPod = pods?.items?.find((pod) => pod.metadata?.name?.startsWith("cas-gateway-") && podReady(pod));
+const consolePod = pods?.items?.find((pod) => pod.metadata?.name?.startsWith("cas-console-plugin-") && podReady(pod));
 
 if (gatewayPod) {
   const health = execNode(
@@ -124,6 +139,21 @@ if (gatewayPod) {
 }
 
 if (consolePod) {
+  const manifest = execNode(
+    consolePod.metadata.name,
+    "const https=require('https');https.get('https://127.0.0.1:9443/plugin-manifest.json',{rejectUnauthorized:false},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,types:j.extensions.map(e=>e.type),refs:JSON.stringify(j.extensions)}));});}).on('error',e=>{console.error(e.message);process.exit(1);});"
+  );
+  expect(
+    "console:launcher-extension",
+    manifest.ok &&
+      manifest.stdout.includes("console.context-provider") &&
+      manifest.stdout.includes("useCASLauncher") &&
+      !manifest.stdout.includes("console.navigation/href") &&
+      !manifest.stdout.includes("console.page/route"),
+    "CAS plugin registers a launcher context-provider without nav/full-screen route",
+    manifest.stderr || manifest.stdout
+  );
+
   const queryCode = [
     "const https=require('https');",
     "const payload=JSON.stringify({question:'default namespace의 api pod가 왜 재시작됐어?',scope:{cluster:'local-cluster',namespaces:['default']},resourceRef:{kind:'Pod',name:'api-7c8d9'},mode:'read_only',stream:false});",

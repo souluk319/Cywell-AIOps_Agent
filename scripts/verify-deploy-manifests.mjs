@@ -58,8 +58,15 @@ for (const file of files) {
       }
     }
     if (file.includes("console-extensions")) {
-      if (text.includes("/ai-sentinel")) pass("console-extension:path", "/ai-sentinel route present");
-      else fail("console-extension:path", "/ai-sentinel route missing");
+      if (text.includes("console.context-provider")) pass("console-extension:launcher", "CAS context-provider launcher present");
+      else fail("console-extension:launcher", "CAS must register a global launcher context-provider");
+      if (text.includes("useCASLauncher")) pass("console-extension:launcher-hook", "useCASLauncher codeRef present");
+      else fail("console-extension:launcher-hook", "useCASLauncher codeRef missing");
+      if (text.includes("console.navigation/href") || text.includes("console.page/route")) {
+        fail("console-extension:no-fullscreen-entry", "CAS must not register nav or full-screen route entry points");
+      } else {
+        pass("console-extension:no-fullscreen-entry", "no nav or full-screen route entry points");
+      }
       if (text.includes("/opslens") || text.includes("cywell-opslens")) {
         fail("console-extension:opslens-isolation", "CAS extension must not reference OpsLens route or plugin id");
       } else {

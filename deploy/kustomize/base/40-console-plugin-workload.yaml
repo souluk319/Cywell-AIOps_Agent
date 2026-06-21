@@ -24,7 +24,7 @@ spec:
       containers:
         - name: console-plugin
           image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-console-plugin:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: HOST
               value: "0.0.0.0"
@@ -74,4 +74,3 @@ spec:
     - name: https
       port: 9443
       targetPort: https
-
