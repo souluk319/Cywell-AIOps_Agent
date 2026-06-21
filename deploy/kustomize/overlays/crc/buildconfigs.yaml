@@ -1,0 +1,46 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: cas-gateway
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+spec:
+  runPolicy: Serial
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: apps/gateway/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: cas-gateway:dev
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: cas-console-plugin
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: console-plugin
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+spec:
+  runPolicy: Serial
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: apps/console-plugin/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: cas-console-plugin:dev
+

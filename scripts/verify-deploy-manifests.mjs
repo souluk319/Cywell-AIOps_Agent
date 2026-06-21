@@ -9,6 +9,8 @@ const files = [
   "deploy/kustomize/base/40-console-plugin-workload.yaml",
   "deploy/kustomize/base/50-consoleplugin.yaml",
   "deploy/kustomize/base/kustomization.yaml",
+  "deploy/kustomize/overlays/crc/buildconfigs.yaml",
+  "deploy/kustomize/overlays/crc/kustomization.yaml",
   "apps/console-plugin/console-extensions.json"
 ];
 
@@ -62,6 +64,12 @@ for (const file of files) {
         fail("console-extension:opslens-isolation", "CAS extension must not reference OpsLens route or plugin id");
       } else {
         pass("console-extension:opslens-isolation", "no OpsLens route or plugin id referenced");
+      }
+    }
+    if (file.includes("buildconfigs")) {
+      for (const expected of ["kind: BuildConfig", "name: cas-gateway", "name: cas-console-plugin", "dockerfilePath: apps/gateway/Dockerfile", "dockerfilePath: apps/console-plugin/Dockerfile"]) {
+        if (text.includes(expected)) pass(`buildconfig:${expected}`, `${expected} present`);
+        else fail(`buildconfig:${expected}`, `${expected} missing`);
       }
     }
   } catch (error) {

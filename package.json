@@ -18,6 +18,8 @@
     "verify:console-plugin": "npm run -w @cywell-ai-sentinel/console-plugin build",
     "verify:crc:connection": "node ./scripts/verify-crc-connection.mjs --require-cluster",
     "verify:crc:connection:preview": "node ./scripts/verify-crc-connection.mjs",
+    "verify:crc:deployment": "node ./scripts/verify-crc-deployment.mjs",
+    "deploy:crc": "node ./scripts/deploy-crc-dev.mjs",
     "verify:deploy:manifests": "node ./scripts/verify-deploy-manifests.mjs"
   },
   "dependencies": {

@@ -47,3 +47,14 @@ Console Plugin 병렬 설치 기준:
 - AI Sentinel path: `/ai-sentinel`
 - OpsLens proxy alias: `opslens-api`
 - AI Sentinel proxy alias: `cas-api`
+
+## CRC Dev Deployment
+
+Docker push가 CRC route CA 신뢰 문제로 막히는 경우, CRC overlay의 OpenShift binary `BuildConfig`를 사용합니다.
+
+```bash
+npm run deploy:crc
+npm run verify:crc:deployment
+```
+
+`deploy:crc`는 `.env`, `deliverables`, `node_modules`를 제외한 최소 build context를 `test-results/cas-build-context`에 만든 뒤 OpenShift binary build로 `cas-gateway:dev`와 `cas-console-plugin:dev` 이미지를 생성합니다. 이후 manifest 적용, rollout 대기, ConsolePlugin 활성화, deployment 검증을 수행합니다.

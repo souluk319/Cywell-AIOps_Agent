@@ -1,0 +1,15 @@
+.env
+.env.*
+.git
+deliverables/
+docs/
+node_modules/
+apps/*/dist/
+packages/*/dist/
+test-results/
+playwright-report/
+coverage/
+*.tsbuildinfo
+*.log
+desktop.ini
+

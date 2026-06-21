@@ -4,6 +4,7 @@ USER 0
 WORKDIR /opt/app-root/src
 
 COPY --chown=1001:0 package.json package-lock.json tsconfig.base.json ./
+COPY --chown=1001:0 apps/gateway/package.json apps/gateway/package.json
 COPY --chown=1001:0 apps/console-plugin/package.json apps/console-plugin/package.json
 COPY --chown=1001:0 packages/contracts/package.json packages/contracts/package.json
 
@@ -22,4 +23,3 @@ ENV PORT=8080
 EXPOSE 8080 9443
 
 CMD ["npm", "run", "-w", "@cywell-ai-sentinel/console-plugin", "serve"]
-
