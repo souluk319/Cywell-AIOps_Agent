@@ -55,6 +55,62 @@ type ChatMessage = {
   result?: RCAResult;
 };
 
+type OverviewAction = {
+  label: string;
+  type: "cas_query" | "console_link";
+  question?: string;
+  href?: string;
+};
+
+type RiskWorkload = {
+  id?: string;
+  namespace: string;
+  kind: string;
+  name: string;
+  status: string;
+  restarts?: number;
+  risk: "high" | "medium" | "low" | string;
+  reason: string;
+  href?: string;
+};
+
+type TimelineItem = {
+  id?: string;
+  ts: string;
+  type: string;
+  summary: string;
+  source: string;
+};
+
+type OverviewResult = {
+  mode?: string;
+  scope?: {
+    cluster?: string;
+    namespaces?: string[];
+  };
+  health?: {
+    score?: number;
+    risk?: string;
+    summary?: string;
+  };
+  signals?: {
+    warning_events?: number;
+    restart_spikes?: number;
+    pending_pods?: number;
+    risky_workloads?: number;
+  };
+  event_reasons?: Array<{ reason: string; count: number }>;
+  risk_workloads?: RiskWorkload[];
+  rca_candidate?: {
+    cause?: string;
+    confidence?: number;
+    evidence_refs?: string[];
+  };
+  evidence_timeline?: TimelineItem[];
+  actions?: OverviewAction[];
+  missing?: MissingEvidence[];
+};
+
 const initialQuestion = "ClusterVersion 상태를 한 문장으로 요약해줘.";
 
 const styles = `
@@ -176,6 +232,161 @@ const styles = `
   gap: 8px;
 }
 
+.cas-cockpit {
+  display: grid;
+  gap: 10px;
+}
+
+.cas-health-strip {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cas-signal-card {
+  background: var(--cas-soft);
+  border: 1px solid var(--cas-line);
+  border-radius: 6px;
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.cas-signal-card span {
+  color: var(--cas-muted);
+  display: block;
+  font-size: 11px;
+}
+
+.cas-signal-card strong {
+  display: block;
+  font-size: 20px;
+  line-height: 1.2;
+  margin-top: 3px;
+}
+
+.cas-cockpit-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.cas-cockpit-panel {
+  background: var(--cas-soft);
+  border: 1px solid var(--cas-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.cas-cockpit-panel[data-wide="true"] {
+  grid-column: 1 / -1;
+}
+
+.cas-panel-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.cas-panel-heading strong {
+  display: block;
+}
+
+.cas-risk-list,
+.cas-action-list,
+.cas-timeline-list,
+.cas-reason-list {
+  display: grid;
+  gap: 7px;
+}
+
+.cas-risk-row,
+.cas-action-row,
+.cas-timeline-row,
+.cas-reason-row {
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 6px;
+  min-width: 0;
+  padding: 8px 9px;
+}
+
+.cas-risk-row {
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.cas-risk-row:hover,
+.cas-risk-row:focus {
+  border-color: rgba(8, 127, 140, 0.42);
+  outline: 2px solid rgba(8, 127, 140, 0.16);
+  outline-offset: 1px;
+}
+
+.cas-risk-row:disabled,
+.cas-link-button:disabled {
+  cursor: progress;
+  opacity: 0.64;
+}
+
+.cas-row-main {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.cas-row-main strong,
+.cas-timeline-row strong {
+  overflow-wrap: anywhere;
+}
+
+.cas-risk-pill {
+  border-radius: 999px;
+  border: 1px solid var(--cas-line);
+  color: var(--cas-muted);
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 3px 6px;
+}
+
+.cas-risk-pill[data-risk="high"] {
+  color: var(--cas-danger);
+}
+
+.cas-risk-pill[data-risk="medium"] {
+  color: var(--cas-warning);
+}
+
+.cas-action-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.cas-link-button {
+  background: transparent;
+  border: 0;
+  color: var(--cas-accent-strong);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  text-decoration: none;
+}
+
+.cas-link-button:hover,
+.cas-link-button:focus {
+  text-decoration: underline;
+}
+
 .cas-badge {
   align-items: center;
   background: var(--cas-soft-strong);
@@ -274,7 +485,7 @@ const styles = `
 .cas-fields {
   display: grid;
   gap: 8px;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
 }
 
 .cas-actions {
@@ -327,6 +538,15 @@ const styles = `
   .cas-actions {
     grid-template-columns: 1fr;
   }
+
+  .cas-health-strip,
+  .cas-cockpit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cas-cockpit-panel[data-wide="true"] {
+    grid-column: auto;
+  }
 }
 `;
 
@@ -367,6 +587,195 @@ function resultProvider(result?: RCAResult) {
 
 function normalizeQuestion(value: string) {
   return value.trim() || initialQuestion;
+}
+
+function confidenceLabel(value?: number) {
+  return `${Math.round(Number(value || 0) * 100)}%`;
+}
+
+function scoreLabel(value?: number) {
+  return Number.isFinite(Number(value)) ? String(Math.round(Number(value))) : "-";
+}
+
+function formatTimelineTime(value?: string) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function OverviewCockpit({
+  overview,
+  status,
+  onRefresh,
+  onRunQuestion,
+  onSelectWorkload,
+  isRunning
+}: {
+  overview: OverviewResult | null;
+  status: "idle" | "loading" | "ready" | "degraded";
+  onRefresh: () => void;
+  onRunQuestion: (question: string, resourceName?: string) => void;
+  onSelectWorkload: (workload: RiskWorkload) => void;
+  isRunning: boolean;
+}) {
+  const signals = overview?.signals ?? {};
+  const riskWorkloads = overview?.risk_workloads ?? [];
+  const timeline = overview?.evidence_timeline ?? [];
+  const actions = overview?.actions ?? [];
+  const eventReasons = overview?.event_reasons ?? [];
+  const missing = overview?.missing ?? [];
+  const candidate = overview?.rca_candidate;
+
+  return (
+    <section className="cas-cockpit" data-test="cas-overview-cockpit">
+      <div className="cas-panel-heading">
+        <strong>RCA Cockpit</strong>
+        <button className="cas-link-button" onClick={onRefresh} type="button">
+          {status === "loading" ? "Refreshing" : "Refresh"}
+        </button>
+      </div>
+
+      <div className="cas-health-strip" data-test="cas-health-strip">
+        <div className="cas-signal-card">
+          <span>Health</span>
+          <strong>{scoreLabel(overview?.health?.score)}</strong>
+          <div className="cas-meta">{overview?.health?.risk ?? status}</div>
+        </div>
+        <div className="cas-signal-card">
+          <span>Warning Events</span>
+          <strong>{signals.warning_events ?? 0}</strong>
+          <div className="cas-meta">최근 scope</div>
+        </div>
+        <div className="cas-signal-card">
+          <span>Restart Spikes</span>
+          <strong>{signals.restart_spikes ?? 0}</strong>
+          <div className="cas-meta">pod restart</div>
+        </div>
+        <div className="cas-signal-card">
+          <span>Risk Workloads</span>
+          <strong>{signals.risky_workloads ?? 0}</strong>
+          <div className="cas-meta">top targets</div>
+        </div>
+      </div>
+
+      <div className="cas-cockpit-grid">
+        <article className="cas-cockpit-panel" data-test="cas-rca-candidate">
+          <div className="cas-panel-heading">
+            <strong>RCA Candidate</strong>
+            <span className="cas-risk-pill" data-risk={overview?.health?.risk ?? "low"}>
+              {overview?.health?.risk ?? "unknown"}
+            </span>
+          </div>
+          <div>{candidate?.cause ?? overview?.health?.summary ?? "Overview를 불러오는 중입니다."}</div>
+          <div className="cas-meta">
+            confidence {confidenceLabel(candidate?.confidence)} · evidence {(candidate?.evidence_refs ?? []).join(", ") || "pending"}
+          </div>
+          {overview?.health?.summary && <div className="cas-meta">{overview.health.summary}</div>}
+        </article>
+
+        <article className="cas-cockpit-panel" data-test="cas-action-queue">
+          <div className="cas-panel-heading">
+            <strong>Action Queue</strong>
+            <span className="cas-meta">{actions.length} actions</span>
+          </div>
+          <div className="cas-action-list">
+            {actions.slice(0, 4).map((action) => (
+              <div className="cas-action-row" key={`${action.type}-${action.label}`}>
+                <span>{action.label}</span>
+                {action.type === "cas_query" && action.question ? (
+                  <button className="cas-link-button" disabled={isRunning} onClick={() => onRunQuestion(action.question ?? "")} type="button">
+                    Run
+                  </button>
+                ) : (
+                  <a className="cas-link-button" href={action.href ?? "/"} rel="noreferrer">
+                    Open
+                  </a>
+                )}
+              </div>
+            ))}
+            {actions.length === 0 && <div className="cas-meta">아직 추천 행동이 없습니다.</div>}
+          </div>
+        </article>
+
+        <article className="cas-cockpit-panel" data-test="cas-risk-workloads">
+          <div className="cas-panel-heading">
+            <strong>Risk Workloads</strong>
+            <span className="cas-meta">Top {riskWorkloads.length}</span>
+          </div>
+          <div className="cas-risk-list">
+            {riskWorkloads.slice(0, 5).map((workload) => (
+              <button
+                className="cas-risk-row"
+                disabled={isRunning}
+                key={`${workload.namespace}-${workload.kind}-${workload.name}`}
+                onClick={() => onSelectWorkload(workload)}
+                type="button"
+              >
+                <div className="cas-row-main">
+                  <strong>{workload.name}</strong>
+                  <span className="cas-risk-pill" data-risk={workload.risk}>
+                    {workload.risk}
+                  </span>
+                </div>
+                <div className="cas-meta">
+                  {workload.namespace} · {workload.kind} · {workload.status} · restarts {workload.restarts ?? 0}
+                </div>
+                <div className="cas-meta">{workload.reason}</div>
+              </button>
+            ))}
+            {riskWorkloads.length === 0 && <div className="cas-meta">현재 scope에서 위험 workload가 없습니다.</div>}
+          </div>
+        </article>
+
+        <article className="cas-cockpit-panel" data-test="cas-event-reasons">
+          <div className="cas-panel-heading">
+            <strong>Event Reasons</strong>
+            <span className="cas-meta">warning</span>
+          </div>
+          <div className="cas-reason-list">
+            {eventReasons.map((item) => (
+              <div className="cas-reason-row" key={item.reason}>
+                <div className="cas-row-main">
+                  <strong>{item.reason}</strong>
+                  <span className="cas-meta">{item.count}</span>
+                </div>
+              </div>
+            ))}
+            {eventReasons.length === 0 && <div className="cas-meta">Warning event reason이 없습니다.</div>}
+          </div>
+        </article>
+
+        <article className="cas-cockpit-panel" data-wide="true" data-test="cas-evidence-timeline">
+          <div className="cas-panel-heading">
+            <strong>Evidence Timeline</strong>
+            <span className="cas-meta">{timeline.length} signals</span>
+          </div>
+          <div className="cas-timeline-list">
+            {timeline.slice(0, 6).map((item, index) => (
+              <div className="cas-timeline-row" key={`${item.ts}-${item.summary}-${index}`}>
+                <strong>{formatTimelineTime(item.ts)} · {item.type}</strong>
+                <div>{item.summary}</div>
+                <div className="cas-meta">{item.source}</div>
+              </div>
+            ))}
+            {timeline.length === 0 && <div className="cas-meta">아직 timeline evidence가 없습니다.</div>}
+          </div>
+        </article>
+      </div>
+
+      {missing.length > 0 && (
+        <div className="cas-missing-list" data-test="cas-overview-missing">
+          {missing.slice(0, 3).map((item) => (
+            <div className="cas-missing-item" key={`${item.type}-${item.reason}`}>
+              <strong>{item.type}</strong>
+              <div className="cas-meta">{item.reason}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function EvidenceSummary({ result }: { result: RCAResult }) {
@@ -423,8 +832,11 @@ function CASLauncher() {
   const [question, setQuestion] = React.useState(initialQuestion);
   const [namespace, setNamespace] = React.useState("default");
   const [resourceName, setResourceName] = React.useState("version");
+  const [resourceKind, setResourceKind] = React.useState("ClusterVersion");
   const [conversationId, setConversationId] = React.useState<string | null>(null);
   const [isRunning, setIsRunning] = React.useState(false);
+  const [overviewStatus, setOverviewStatus] = React.useState<"idle" | "loading" | "ready" | "degraded">("idle");
+  const [overview, setOverview] = React.useState<OverviewResult | null>(null);
   const [brainStatus, setBrainStatus] = React.useState<BrainStatus>({
     state: "checking",
     provider: "openshift-lightspeed",
@@ -472,10 +884,31 @@ function CASLauncher() {
     if (isOpen) void refreshBrainStatus();
   }, [isOpen, refreshBrainStatus]);
 
-  const runQuery = React.useCallback(
-    async (event?: React.FormEvent<HTMLFormElement>) => {
-      event?.preventDefault();
-      const submittedQuestion = normalizeQuestion(question);
+  const refreshOverview = React.useCallback(async () => {
+    setOverviewStatus("loading");
+    try {
+      const response = await fetch(`${API_BASE}/api/aiops/overview?namespace=${encodeURIComponent(namespace || "default")}`, {
+        headers: { accept: "application/json" }
+      });
+      const body = (await response.json()) as OverviewResult;
+      setOverview(body);
+      setOverviewStatus(response.ok && body.mode === "overview_read_only" ? "ready" : "degraded");
+    } catch {
+      setOverview(null);
+      setOverviewStatus("degraded");
+    }
+  }, [namespace]);
+
+  React.useEffect(() => {
+    if (isOpen) void refreshOverview();
+  }, [isOpen]);
+
+  const submitQuestion = React.useCallback(
+    async (questionText: string, nextResourceName?: string, nextNamespace?: string, nextResourceKind?: string) => {
+      const submittedQuestion = normalizeQuestion(questionText);
+      const targetResourceName = nextResourceName ?? resourceName;
+      const targetNamespace = nextNamespace ?? namespace;
+      const targetResourceKind = nextResourceKind ?? resourceKind;
       const userMessage: ChatMessage = {
         id: createMessageId("user"),
         role: "user",
@@ -504,11 +937,11 @@ function CASLauncher() {
             question: submittedQuestion,
             scope: {
               cluster: "local-cluster",
-              namespaces: [namespace || "default"]
+              namespaces: [targetNamespace || "default"]
             },
             resourceRef: {
-              kind: resourceName === "version" ? "ClusterVersion" : "Pod",
-              name: resourceName || "version"
+              kind: targetResourceKind || (targetResourceName === "version" ? "ClusterVersion" : "Pod"),
+              name: targetResourceName || "version"
             },
             mode: "read_only",
             stream: false,
@@ -549,7 +982,34 @@ function CASLauncher() {
         setIsRunning(false);
       }
     },
-    [conversationId, namespace, question, resourceName]
+    [conversationId, namespace, resourceKind, resourceName]
+  );
+
+  const runQuery = React.useCallback(
+    async (event?: React.FormEvent<HTMLFormElement>) => {
+      event?.preventDefault();
+      await submitQuestion(question);
+    },
+    [question, submitQuestion]
+  );
+
+  const runOverviewQuestion = React.useCallback(
+    (nextQuestion: string, nextResourceName?: string, nextNamespace?: string, nextResourceKind?: string) => {
+      setQuestion(nextQuestion);
+      if (nextResourceName) setResourceName(nextResourceName);
+      if (nextNamespace) setNamespace(nextNamespace);
+      if (nextResourceKind) setResourceKind(nextResourceKind);
+      void submitQuestion(nextQuestion, nextResourceName, nextNamespace, nextResourceKind);
+    },
+    [submitQuestion]
+  );
+
+  const selectWorkload = React.useCallback(
+    (workload: RiskWorkload) => {
+      const nextQuestion = `${workload.namespace} namespace ${workload.name} ${workload.kind} 원인 분석해줘`;
+      runOverviewQuestion(nextQuestion, workload.name, workload.namespace, workload.kind);
+    },
+    [runOverviewQuestion]
   );
 
   const resetConversation = React.useCallback(() => {
@@ -595,6 +1055,15 @@ function CASLauncher() {
             </div>
 
             <div className="cas-meta">{brainStatus.detail}</div>
+
+            <OverviewCockpit
+              overview={overview}
+              status={overviewStatus}
+              onRefresh={refreshOverview}
+              onRunQuestion={runOverviewQuestion}
+              onSelectWorkload={selectWorkload}
+              isRunning={isRunning}
+            />
 
             <div className="cas-chat-thread" data-test="cas-chat-thread">
               {messages.map((message) => {
@@ -645,6 +1114,12 @@ function CASLauncher() {
                   onChange={(event) => setResourceName(event.currentTarget.value)}
                   placeholder="resource"
                   value={resourceName}
+                />
+                <input
+                  aria-label="Resource kind"
+                  onChange={(event) => setResourceKind(event.currentTarget.value)}
+                  placeholder="kind"
+                  value={resourceKind}
                 />
               </div>
               <div className="cas-actions">

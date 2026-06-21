@@ -212,6 +212,23 @@ if (consolePod) {
     fail("runtime:lightspeed-query-through-plugin", "could not obtain local oc user token");
   } else {
     const tokenB64 = Buffer.from(token.stdout, "utf8").toString("base64");
+    const overviewCode = [
+      "const https=require('https');",
+      `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/overview?namespace=default',{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,score:j.health?.score,actions:j.actions?.length||0,missing:(j.missing??[]).map(m=>m.type),signals:j.signals}));});});",
+      "req.on('error',e=>{console.error(e.message);process.exit(1);});req.end();"
+    ].join("");
+    const overview = execNode(consolePod.metadata.name, overviewCode, 60000);
+    expect(
+      "runtime:overview-through-plugin",
+      overview.ok &&
+        overview.stdout.includes("overview_read_only") &&
+        overview.stdout.includes("\"metric\"") &&
+        overview.stdout.includes("\"actions\":"),
+      "console plugin forwards user token and CAS overview cockpit returns read-only signals",
+      overview.stderr || overview.stdout
+    );
+
     const liveQueryCode = [
       "const https=require('https');",
       `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,

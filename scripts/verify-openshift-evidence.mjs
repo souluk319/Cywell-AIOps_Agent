@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {
   buildOpenShiftEvidenceContext,
+  collectOpenShiftOverview,
   collectOpenShiftEvidence,
   enrichInputWithOpenShiftEvidence
 } from "../apps/gateway/src/openshiftEvidence.mjs";
@@ -77,6 +78,60 @@ const transport = async (url) => {
             }
           ]
         }
+      })
+    };
+  }
+  if (path === "/api/v1/namespaces/default/pods?limit=50") {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        items: [
+          {
+            metadata: { name: "api-7c8d9" },
+            spec: { nodeName: "crc-node", containers: [{ name: "api" }] },
+            status: {
+              phase: "Running",
+              containerStatuses: [
+                {
+                  name: "api",
+                  restartCount: 2,
+                  state: { running: {} },
+                  lastState: { terminated: { reason: "OOMKilled" } }
+                }
+              ]
+            }
+          },
+          {
+            metadata: { name: "worker-pending" },
+            status: {
+              phase: "Pending",
+              containerStatuses: []
+            }
+          }
+        ]
+      })
+    };
+  }
+  if (path === "/api/v1/namespaces/default/events?limit=80") {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        items: [
+          {
+            type: "Warning",
+            reason: "OOMKilled",
+            message: "Container api was terminated because it used too much memory",
+            involvedObject: { kind: "Pod", name: "api-7c8d9" },
+            lastTimestamp: "2026-06-21T09:12:00Z"
+          },
+          {
+            type: "Warning",
+            reason: "FailedScheduling",
+            message: "0/1 nodes are available: insufficient memory",
+            involvedObject: { kind: "Pod", name: "worker-pending" },
+            lastTimestamp: "2026-06-21T09:13:00Z"
+          }
+        ]
       })
     };
   }
@@ -183,6 +238,54 @@ const enriched = await enrichInputWithOpenShiftEvidence(
   }
 );
 expect("evidence:enriched-input", enriched.cas_evidence_context.includes("openshift:clusterversion:version"), "input is enriched with evidence context");
+
+const overview = await collectOpenShiftOverview(
+  {
+    scope: { cluster: "local-cluster", namespaces: ["default"] }
+  },
+  {
+    authorization: "Bearer test-token",
+    config,
+    transport
+  }
+);
+expect("overview:mode", overview.mode === "overview_read_only", "overview contract mode is read-only");
+expect("overview:health", Number(overview.health?.score) < 100, "overview health score reflects risk signals");
+expect("overview:signals", overview.signals?.warning_events === 2 && overview.signals?.pending_pods === 1, "overview signals summarize events and pods");
+expect("overview:risk-workloads", overview.risk_workloads?.length >= 2, "overview includes risky workloads");
+expect("overview:timeline", overview.evidence_timeline?.some((item) => item.summary.includes("FailedScheduling")), "overview includes evidence timeline");
+expect("overview:actions", overview.actions?.some((item) => item.type === "cas_query"), "overview includes a Run RCA action");
+expect("overview:missing", overview.missing?.some((item) => item.type === "metric"), "overview marks unavailable metric adapter");
+expect(
+  "overview:refs-resolve",
+  overview.rca_candidate?.evidence_refs?.every((ref) => {
+    return (
+      overview.risk_workloads?.some((item) => item.id === ref) ||
+      overview.evidence_timeline?.some((item) => item.id === ref)
+    );
+  }),
+  "overview RCA candidate evidence refs resolve to returned cockpit items"
+);
+
+const forbiddenTransport = async () => ({
+  statusCode: 403,
+  body: JSON.stringify({ message: "forbidden" })
+});
+const degradedOverview = await collectOpenShiftOverview(
+  {
+    scope: { cluster: "local-cluster", namespaces: ["default"] }
+  },
+  {
+    authorization: "Bearer test-token",
+    config,
+    transport: forbiddenTransport
+  }
+);
+expect(
+  "overview:critical-missing-degrades",
+  degradedOverview.health?.risk === "unknown" && degradedOverview.health?.score === 0,
+  "overview degrades instead of reporting healthy when pod/event evidence is unavailable"
+);
 
 const failures = checks.filter((check) => check.status === "FAIL");
 if (failures.length > 0) {

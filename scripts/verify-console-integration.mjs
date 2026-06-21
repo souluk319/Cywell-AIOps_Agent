@@ -43,6 +43,12 @@ expectText(
   "launcher posts questions through the CAS Gateway query endpoint"
 );
 expectText(
+  "console-chat:overview",
+  launcherSource,
+  "/api/aiops/overview",
+  "launcher loads the CAS overview cockpit endpoint"
+);
+expectText(
   "console-chat:conversation",
   launcherSource,
   "conversation_id",
@@ -78,6 +84,36 @@ expectText(
   "UserToken proxy",
   "launcher marks UserToken proxy integration"
 );
+expectText(
+  "console-cockpit:health-strip",
+  launcherSource,
+  "data-test=\"cas-health-strip\"",
+  "launcher renders a health strip for the RCA cockpit"
+);
+expectText(
+  "console-cockpit:rca-candidate",
+  launcherSource,
+  "data-test=\"cas-rca-candidate\"",
+  "launcher renders an RCA candidate card"
+);
+expectText(
+  "console-cockpit:evidence-timeline",
+  launcherSource,
+  "data-test=\"cas-evidence-timeline\"",
+  "launcher renders an evidence timeline"
+);
+expectText(
+  "console-cockpit:action-queue",
+  launcherSource,
+  "data-test=\"cas-action-queue\"",
+  "launcher renders an action queue"
+);
+expectText(
+  "console-cockpit:risk-workloads",
+  launcherSource,
+  "data-test=\"cas-risk-workloads\"",
+  "launcher renders risk workloads"
+);
 rejectText(
   "console-chat:no-route-ui",
   manifest,
@@ -109,10 +145,46 @@ expectText(
   "built launcher bundle contains query integration"
 );
 expectText(
+  "console-chat:bundle-overview",
+  launcherBundle,
+  "/api/aiops/overview",
+  "built launcher bundle contains overview integration"
+);
+expectText(
   "console-chat:bundle-fallback",
   launcherBundle,
   "cas-fallback-notice",
   "built launcher bundle contains fallback notice surface"
+);
+expectText(
+  "console-cockpit:bundle-health-strip",
+  launcherBundle,
+  "cas-health-strip",
+  "built launcher bundle contains health strip surface"
+);
+expectText(
+  "console-cockpit:bundle-rca-candidate",
+  launcherBundle,
+  "cas-rca-candidate",
+  "built launcher bundle contains RCA candidate surface"
+);
+expectText(
+  "console-cockpit:bundle-action-queue",
+  launcherBundle,
+  "cas-action-queue",
+  "built launcher bundle contains action queue surface"
+);
+expectText(
+  "console-cockpit:bundle-risk-workloads",
+  launcherBundle,
+  "cas-risk-workloads",
+  "built launcher bundle contains risk workload surface"
+);
+expectText(
+  "console-cockpit:bundle-evidence-timeline",
+  launcherBundle,
+  "cas-evidence-timeline",
+  "built launcher bundle contains evidence timeline surface"
 );
 
 const failures = checks.filter((check) => check.status === "FAIL");

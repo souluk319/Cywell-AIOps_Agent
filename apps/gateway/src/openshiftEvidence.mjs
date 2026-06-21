@@ -1,5 +1,6 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { createOverviewResult } from "../../../packages/contracts/src/index.js";
 
 const defaultApiUrl = "https://kubernetes.default.svc";
 const defaultTimeoutMs = 8000;
@@ -153,6 +154,133 @@ function missingItem(type, reason) {
     type,
     reason: truncate(reason, 240)
   };
+}
+
+function workloadStatus(pod = {}) {
+  const waiting = (pod.status?.containerStatuses ?? []).find((status) => status.state?.waiting)?.state?.waiting;
+  const terminated = (pod.status?.containerStatuses ?? []).find((status) => status.lastState?.terminated)?.lastState?.terminated;
+  if (waiting?.reason) return waiting.reason;
+  if (terminated?.reason) return terminated.reason;
+  return pod.status?.phase ?? "Unknown";
+}
+
+function workloadRisk(pod = {}, warningEvents = []) {
+  const restartTotal = (pod.status?.containerStatuses ?? []).reduce(
+    (sum, status) => sum + Number(status.restartCount ?? 0),
+    0
+  );
+  const status = workloadStatus(pod);
+  if (["CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "OOMKilled"].includes(status)) return "high";
+  if (pod.status?.phase === "Pending" || restartTotal >= 3 || warningEvents.length >= 2) return "high";
+  if (restartTotal > 0 || warningEvents.length > 0 || pod.status?.phase !== "Running") return "medium";
+  return "low";
+}
+
+function workloadReason(pod = {}, warningEvents = []) {
+  const restartTotal = (pod.status?.containerStatuses ?? []).reduce(
+    (sum, status) => sum + Number(status.restartCount ?? 0),
+    0
+  );
+  const status = workloadStatus(pod);
+  if (status === "OOMKilled") return "previous container terminated with OOMKilled";
+  if (status && status !== "Running") return `${status} status observed`;
+  if (restartTotal > 0 && warningEvents.length > 0) return `restartCount=${restartTotal} with ${warningEvents.length} warning events`;
+  if (restartTotal > 0) return `restartCount=${restartTotal}`;
+  if (warningEvents.length > 0) return `${warningEvents.length} warning events`;
+  return "no active risk signal";
+}
+
+function podRestartTotal(pod = {}) {
+  return (pod.status?.containerStatuses ?? []).reduce((sum, status) => sum + Number(status.restartCount ?? 0), 0);
+}
+
+function podEventList(events = [], podName) {
+  return events.filter((event) => event.involvedObject?.kind === "Pod" && event.involvedObject?.name === podName);
+}
+
+function consoleHrefFor(resource = {}) {
+  const namespace = resource.namespace ?? "default";
+  const name = resource.name ?? "";
+  if (resource.kind === "Deployment") return `/k8s/ns/${namespace}/deployments/${name}`;
+  if (resource.kind === "Pod") return `/k8s/ns/${namespace}/pods/${name}`;
+  return `/k8s/ns/${namespace}/pods`;
+}
+
+function eventTimeline(events = []) {
+  return [...events]
+    .filter((event) => event.type === "Warning" || event.reason)
+    .sort((left, right) => eventTime(right).localeCompare(eventTime(left)))
+    .slice(0, 8)
+    .map((event, index) => ({
+      id: `overview:timeline:${index + 1}`,
+      ts: eventTime(event) || new Date().toISOString(),
+      type: "event",
+      summary: truncate(`${event.reason ?? "Event"}: ${event.message ?? "no message"}`, 180),
+      source: "kubernetes.events"
+    }));
+}
+
+function eventReasonCounts(events = []) {
+  const counts = new Map();
+  for (const event of events) {
+    if (event.type !== "Warning") continue;
+    const reason = event.reason ?? "Warning";
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 5)
+    .map(([reason, count]) => ({ reason, count }));
+}
+
+function riskScore({ warningEvents, restartSpikes, pendingPods, riskyWorkloads }) {
+  const penalty = warningEvents * 2 + restartSpikes * 5 + pendingPods * 8 + riskyWorkloads * 6;
+  return Math.max(0, Math.min(100, 100 - penalty));
+}
+
+function riskLabel(score) {
+  if (score < 60) return "high";
+  if (score < 85) return "medium";
+  return "low";
+}
+
+function topRcaCandidate(riskWorkloads = [], timeline = []) {
+  const top = riskWorkloads[0];
+  if (!top) {
+    return {
+      cause: "No active workload risk detected in selected scope",
+      confidence: 0.35,
+      evidence_refs: timeline.slice(0, 2).map((item) => item.id)
+    };
+  }
+  const confidence = top.risk === "high" ? 0.74 : 0.58;
+  return {
+    cause: top.reason,
+    confidence,
+    evidence_refs: [top.id, ...timeline.slice(0, 2).map((item) => item.id)]
+  };
+}
+
+function overviewActionQueue(namespace, topWorkload) {
+  const actions = [];
+  if (topWorkload) {
+    actions.push({
+      label: `Run RCA for ${topWorkload.name}`,
+      type: "cas_query",
+      question: `${topWorkload.namespace} namespace ${topWorkload.name} ${topWorkload.kind} 원인 분석해줘`
+    });
+    actions.push({
+      label: `Open ${topWorkload.kind} in Console`,
+      type: "console_link",
+      href: consoleHrefFor(topWorkload)
+    });
+  }
+  actions.push({
+    label: "Open namespace events",
+    type: "console_link",
+    href: `/k8s/ns/${namespace}/events`
+  });
+  return actions;
 }
 
 async function captureJson(collection, id, type, source, path, options, summarize) {
@@ -319,6 +447,152 @@ export async function collectOpenShiftEvidence(input = {}, options = {}) {
   }
 
   return collection;
+}
+
+export async function collectOpenShiftOverview(input = {}, options = {}) {
+  const config = options.config ?? getEvidenceConfig();
+  const namespace = input.namespace ?? input.scope?.namespaces?.[0] ?? "default";
+  const scope = {
+    cluster: input.scope?.cluster ?? "local-cluster",
+    namespaces: [namespace]
+  };
+  const missing = [];
+
+  if (config.provider === "none") {
+    return createOverviewResult({
+      scope,
+      health: {
+        score: 0,
+        risk: "unknown",
+        summary: "OpenShift evidence provider is disabled"
+      },
+      missing: [missingItem("openshift_api", "CAS_EVIDENCE_PROVIDER=none")]
+    });
+  }
+
+  const authorization = options.authorization;
+  if (!authorization?.startsWith("Bearer ")) {
+    return createOverviewResult({
+      scope,
+      health: {
+        score: 0,
+        risk: "unknown",
+        summary: "UserToken is required to build the RCA cockpit"
+      },
+      missing: [missingItem("openshift_api", "missing user bearer token for OpenShift overview collection")]
+    });
+  }
+
+  const requestOptions = {
+    authorization,
+    config,
+    transport: options.transport
+  };
+
+  async function getList(type, path) {
+    try {
+      const response = await kubeJson(path, requestOptions);
+      if (response.statusCode >= 200 && response.statusCode < 300 && response.json) {
+        return response.json.items ?? [];
+      }
+      missing.push(missingItem(type, `OpenShift API HTTP ${response.statusCode} for ${path}`));
+    } catch (error) {
+      missing.push(missingItem(type, error?.message ?? `OpenShift API error for ${path}`));
+    }
+    return [];
+  }
+
+  async function getClusterVersion() {
+    try {
+      const response = await kubeJson("/apis/config.openshift.io/v1/clusterversions/version", requestOptions);
+      if (response.statusCode >= 200 && response.statusCode < 300 && response.json) {
+        return summarizeClusterVersion(response.json);
+      }
+      missing.push(missingItem("clusterversion", `OpenShift API HTTP ${response.statusCode} for ClusterVersion`));
+    } catch (error) {
+      missing.push(missingItem("clusterversion", error?.message ?? "ClusterVersion unavailable"));
+    }
+    return "ClusterVersion unavailable";
+  }
+
+  const namespacePath = encodeURIComponent(namespace);
+  const [pods, events, clusterSummary] = await Promise.all([
+    getList("pod", `/api/v1/namespaces/${namespacePath}/pods?limit=50`),
+    getList("event", `/api/v1/namespaces/${namespacePath}/events?limit=80`),
+    getClusterVersion()
+  ]);
+
+  const warningEvents = events.filter((event) => event.type === "Warning");
+  const riskWorkloads = pods
+    .map((pod) => {
+      const podName = pod.metadata?.name ?? "unknown";
+      const podEvents = podEventList(warningEvents, podName);
+      const risk = workloadRisk(pod, podEvents);
+      return {
+        id: `openshift:workload:${namespace}:${podName}`,
+        namespace,
+        kind: "Pod",
+        name: podName,
+        status: workloadStatus(pod),
+        restarts: podRestartTotal(pod),
+        risk,
+        reason: workloadReason(pod, podEvents),
+        href: consoleHrefFor({ namespace, kind: "Pod", name: podName })
+      };
+    })
+    .filter((item) => item.risk !== "low")
+    .sort((left, right) => {
+      const rank = { high: 2, medium: 1, low: 0 };
+      return rank[right.risk] - rank[left.risk] || right.restarts - left.restarts;
+    })
+    .slice(0, 5);
+
+  const pendingPods = pods.filter((pod) => pod.status?.phase === "Pending").length;
+  const restartSpikes = pods.filter((pod) => podRestartTotal(pod) > 0).length;
+  const calculatedScore = riskScore({
+    warningEvents: warningEvents.length,
+    restartSpikes,
+    pendingPods,
+    riskyWorkloads: riskWorkloads.length
+  });
+  const timeline = eventTimeline(events);
+  const candidate = topRcaCandidate(riskWorkloads, timeline);
+  const topWorkload = riskWorkloads[0];
+  const criticalMissing = missing.some((item) => ["pod", "event"].includes(item.type));
+  const score = criticalMissing ? 0 : calculatedScore;
+  const risk = criticalMissing ? "unknown" : riskLabel(score);
+  const summary = criticalMissing
+    ? `Overview degraded for ${namespace}: required pod/event evidence is unavailable`
+    : riskWorkloads.length > 0
+      ? `${riskWorkloads.length} risky workloads detected in ${namespace}. ${clusterSummary}`
+      : `No risky workloads detected in ${namespace}. ${clusterSummary}`;
+
+  const overviewMissing = [
+    ...missing,
+    missingItem("metric", "Prometheus metric adapter is not configured in v0.1.1"),
+    missingItem("runbook", "Runbook RAG adapter is planned after the cockpit flow")
+  ];
+
+  return createOverviewResult({
+    scope,
+    health: {
+      score,
+      risk,
+      summary
+    },
+    signals: {
+      warning_events: warningEvents.length,
+      restart_spikes: restartSpikes,
+      pending_pods: pendingPods,
+      risky_workloads: riskWorkloads.length
+    },
+    event_reasons: eventReasonCounts(events),
+    risk_workloads: riskWorkloads,
+    rca_candidate: candidate,
+    evidence_timeline: timeline,
+    actions: overviewActionQueue(namespace, topWorkload),
+    missing: overviewMissing
+  });
 }
 
 export function buildOpenShiftEvidenceContext(collection = {}) {

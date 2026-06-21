@@ -113,6 +113,38 @@ export function createRcaResult(overrides = {}) {
   };
 }
 
+export function createOverviewResult(overrides = {}) {
+  return {
+    product: PRODUCT.officialName,
+    mode: "overview_read_only",
+    scope: {
+      cluster: "local-cluster",
+      namespaces: ["default"]
+    },
+    health: {
+      score: 82,
+      risk: "medium",
+      summary: "Warning events and restart spikes detected in the selected scope"
+    },
+    signals: {
+      warning_events: 0,
+      restart_spikes: 0,
+      pending_pods: 0,
+      risky_workloads: 0
+    },
+    risk_workloads: [],
+    rca_candidate: {
+      cause: "No high-confidence RCA candidate yet",
+      confidence: 0,
+      evidence_refs: []
+    },
+    evidence_timeline: [],
+    actions: [],
+    missing: [],
+    ...overrides
+  };
+}
+
 export function assertReadOnlyToolPlan(toolPlan) {
   const violations = [];
   if (toolPlan?.execution_policy?.mode !== "read_only") {
@@ -135,4 +167,3 @@ export function assertReadOnlyToolPlan(toolPlan) {
     violations
   };
 }
-

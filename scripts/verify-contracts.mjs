@@ -4,6 +4,7 @@ import {
   assertReadOnlyToolPlan,
   createAnalyzeRequest,
   createEvidenceBundle,
+  createOverviewResult,
   createRcaResult,
   createToolPlan
 } from "../packages/contracts/src/index.js";
@@ -36,6 +37,7 @@ const request = createAnalyzeRequest();
 const toolPlan = createToolPlan();
 const evidence = createEvidenceBundle();
 const rca = createRcaResult();
+const overview = createOverviewResult();
 
 requireField("product:name", PRODUCT, "officialName");
 requireField("product:namespace", PRODUCT, "namespace");
@@ -45,6 +47,10 @@ requireField("request:mode", request, "mode");
 requireField("toolplan:type", toolPlan, "task_type");
 requireField("evidence:run", evidence, "run_id");
 requireField("rca:cause", rca, "cause_candidates");
+requireField("overview:mode", overview, "mode");
+requireField("overview:health", overview, "health.score");
+requireField("overview:signals", overview, "signals.warning_events");
+requireField("overview:actions", overview, "actions");
 
 const guard = assertReadOnlyToolPlan(toolPlan);
 if (guard.ok) {
@@ -71,4 +77,3 @@ if (failures.length > 0) {
 } else {
   console.log(`Contract verification passed with ${checks.length} checks.`);
 }
-

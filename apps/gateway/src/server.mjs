@@ -4,7 +4,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { PRODUCT } from "../../../packages/contracts/src/index.js";
 import { createMockOomKilledRun, streamMockRun } from "./mockRca.mjs";
 import { checkLightspeedReadiness, createLightspeedBackedRun, getBrainConfig } from "./lightspeedBrain.mjs";
-import { enrichInputWithOpenShiftEvidence, getEvidenceConfig } from "./openshiftEvidence.mjs";
+import { collectOpenShiftOverview, enrichInputWithOpenShiftEvidence, getEvidenceConfig } from "./openshiftEvidence.mjs";
 
 const port = Number(process.env.PORT ?? 8080);
 const host = process.env.HOST ?? "0.0.0.0";
@@ -82,6 +82,24 @@ const requestHandler = async (request, response) => {
         product: PRODUCT.officialName,
         brain: readiness
       });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/aiops/overview") {
+      const namespace = url.searchParams.get("namespace") || "default";
+      const overview = await collectOpenShiftOverview(
+        {
+          scope: {
+            cluster: "local-cluster",
+            namespaces: [namespace]
+          }
+        },
+        {
+          authorization: request.headers.authorization,
+          config: evidenceConfig
+        }
+      );
+      sendJson(response, 200, overview);
       return;
     }
 
