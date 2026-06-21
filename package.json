@@ -1,0 +1,20 @@
+{
+  "name": "cywell-ai-sentinel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cywell AI Sentinel - OpenShift-native evidence-based AIOps agent.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "verify": "npm run verify:contracts && npm run verify:crc:connection:preview && npm run verify:deploy:manifests",
+    "verify:contracts": "node ./scripts/verify-contracts.mjs",
+    "verify:crc:connection": "node ./scripts/verify-crc-connection.mjs --require-cluster",
+    "verify:crc:connection:preview": "node ./scripts/verify-crc-connection.mjs",
+    "verify:deploy:manifests": "node ./scripts/verify-deploy-manifests.mjs"
+  },
+  "devDependencies": {}
+}
+

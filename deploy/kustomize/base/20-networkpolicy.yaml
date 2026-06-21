@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cas-gateway-egress
+  namespace: cywell-ai-sentinel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cywell-ai-sentinel
+      app.kubernetes.io/component: gateway
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+
