@@ -245,15 +245,38 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | 항목 | Pass / Fail | 측정 방법 | Evidence | 현재 Gap |
 | --- | --- | --- | --- | --- |
 | CAS launcher 위치 | CAS만 AI launcher로 표시 | console operator spec 확인 | `lightspeed-console-plugin` 없음, `LightspeedButton=Disabled` | 완료 |
-| Overview API | `/api/aiops/overview`가 read-only overview 반환 | Gateway pod 내부 HTTPS 호출 | JSON 응답 | 미구현 |
-| UserToken 보존 | overview/query 모두 UserToken 경유 | ConsolePlugin proxy 확인 | `authorization: UserToken` | query 완료, overview 미구현 |
-| Health Strip | score/risk/signals 표시 | DOM/data-test 또는 bundle verifier | `cas-health-strip` | 미구현 |
-| Risk Workloads | 위험 workload Top 5 표시 | fixture 또는 runtime response | `risk_workloads[]` | 미구현 |
-| RCA Candidate | 원인 후보와 confidence 표시 | UI verifier | `rca_candidate` 카드 | query 결과 일부 있음, overview 미구현 |
-| Evidence Timeline | event/log/metric 순서 표시 | UI verifier | `cas-evidence-timeline` | 증적 수집 완료, timeline UI 미구현 |
-| Action Queue | Run RCA + console deep link 제공 | UI verifier | `actions[]` | 미구현 |
-| Missing Evidence | metric/RAG 미구현 상태를 숨기지 않음 | API/UI 확인 | `missing[]` | query 완료, overview 미구현 |
-| 가독성 | 작은 패널에서 텍스트 겹침 없음 | desktop/mobile visual smoke | screenshot 또는 manual note | 미검증 |
+| Overview API | `/api/aiops/overview`가 read-only overview 반환 | Gateway pod 내부 HTTPS 호출 | `mode=overview_read_only` | 완료 |
+| UserToken 보존 | overview/query 모두 UserToken 경유 | ConsolePlugin proxy 확인 | `authorization: UserToken` runtime PASS | 완료 |
+| Health Strip | score/risk/signals 표시 | DOM/data-test 및 bundle verifier | `cas-health-strip` | 완료 |
+| Risk Workloads | 위험 workload Top 5 표시 | fixture 및 runtime response | `risk_workloads[]` | 완료 |
+| RCA Candidate | 원인 후보와 confidence 표시 | UI verifier | `cas-rca-candidate` | 완료 |
+| Evidence Timeline | event/log/metric 순서 표시 | UI verifier | `cas-evidence-timeline` | 완료 |
+| Action Queue | Run RCA + console deep link 제공 | UI verifier | `actions[]`, `cas-action-queue` | 완료 |
+| Missing Evidence | metric/RAG 미구현 상태를 숨기지 않음 | API/UI 확인 | `missing[]` | 완료 |
+| 가독성 | 작은 패널에서 텍스트 겹침 없음 | desktop/mobile visual smoke | screenshot 또는 manual note | 잔여: 실제 브라우저 스크린샷 QA 필요 |
+
+### 7.1 Implementation Status
+
+2026-06-22 기준 v0.1.1 핵심 구현은 `feat/CAS-v0.1.1` 브랜치에 반영되었다.
+
+| 영역 | 상태 | Evidence |
+| --- | --- | --- |
+| 계약 | 완료 | `createOverviewResult()` 추가, `verify:contracts` PASS |
+| Gateway overview | 완료 | `GET /api/aiops/overview` 추가, critical missing evidence degrade 처리 |
+| OpenShift evidence | 완료 | pods/events/clusterversion read-only 수집, refs resolve 검증 PASS |
+| Console cockpit | 완료 | Health, RCA Candidate, Risk Workloads, Event Reasons, Evidence Timeline, Action Queue 렌더링 |
+| Runtime 배포 | 완료 | `npm run deploy:crc` PASS, overview/query 모두 UserToken proxy로 통과 |
+| 시각 QA | 잔여 | 브라우저 screenshot/manual smoke로 overflow와 mobile width 확인 필요 |
+
+검수에서 발견된 주요 이슈와 처리 결과:
+
+| 이슈 | 처리 |
+| --- | --- |
+| evidence 조회 실패 시 건강 상태가 정상으로 보일 수 있음 | critical missing evidence면 `risk=unknown`, `score=0`으로 degrade |
+| `rca_candidate.evidence_refs`가 실제 반환 item과 연결되지 않음 | `risk_workloads[].id`, `evidence_timeline[].id` 추가 및 resolver 검증 |
+| risk workload 클릭 시 항상 Pod로 질의될 수 있음 | `kind`를 workload/action context에서 넘기도록 수정 |
+| namespace 입력 중 overview 요청이 과도하게 발생할 수 있음 | panel open 기준 fetch로 줄이고 실패 시 stale overview 제거 |
+| bundle verifier가 cockpit 일부만 확인함 | candidate/action/risk/timeline bundle marker 검증 추가 |
 
 ## 8. v0.1.1 화면 세부안
 
@@ -405,15 +428,23 @@ v0.1.1은 아래 조건을 만족해야 완료다.
 
 ## 13. 다음 작업 명령
 
-v0.1.1 브랜치에서 바로 실행할 작업:
+v0.1.1 브랜치에서 수행 완료된 작업:
 
 ```text
-1. createOverviewResult 계약 추가
-2. GET /api/aiops/overview 구현
-3. useCASLauncher에 cockpit state/UI 추가
-4. verify-console-integration/verify-crc-deployment 확장
-5. npm run verify
-6. npm run deploy:crc
+1. createOverviewResult 계약 추가: 완료
+2. GET /api/aiops/overview 구현: 완료
+3. useCASLauncher에 cockpit state/UI 추가: 완료
+4. verify-console-integration/verify-crc-deployment 확장: 완료
+5. npm run verify: PASS
+6. npm run deploy:crc: PASS
+```
+
+잔여 작업:
+
+```text
+1. 브라우저 screenshot/manual smoke로 desktop/mobile overflow 확인
+2. OpenShift native page deep link를 실제 콘솔 URL에서 클릭 검증
+3. 필요하면 v0.1.1-ux-fix 커밋으로 visual polish 반영
 ```
 
 ## 14. Ref Stamp
@@ -424,5 +455,6 @@ v0.1.1 브랜치에서 바로 실행할 작업:
 branch: feat/CAS-v0.1.1
 base: main
 target version: v0.1.1
-current product state: v0.1.0 brain/evidence integration complete
+implementation commit: fdae8397246cdb1efd42c0d117edfb14916f6167
+current product state: v0.1.1 RCA cockpit implemented and CRC runtime verified
 ```
