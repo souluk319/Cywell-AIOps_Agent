@@ -12,10 +12,34 @@ spec:
     - Egress
   egress:
     - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+        - ipBlock:
+            cidr: 10.217.4.10/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 5353
+        - protocol: TCP
+          port: 5353
+    - to:
         - namespaceSelector: {}
       ports:
         - protocol: TCP
           port: 443
         - protocol: TCP
           port: 6443
-
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-lightspeed
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: lightspeed-service-api
+      ports:
+        - protocol: TCP
+          port: 8443

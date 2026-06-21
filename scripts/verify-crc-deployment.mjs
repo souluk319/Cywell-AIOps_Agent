@@ -89,6 +89,15 @@ expect(
   "cas-console-plugin available",
   "cas-console-plugin not available"
 );
+const gatewayEnv = deploymentByName.get("cas-gateway")?.spec?.template?.spec?.containers?.[0]?.env ?? [];
+const gatewayEnvByName = new Map(gatewayEnv.map((item) => [item.name, item.value]));
+expect(
+  "runtime:gateway-brain-env",
+  gatewayEnvByName.get("CAS_BRAIN_PROVIDER") === "openshift-lightspeed" &&
+    gatewayEnvByName.get("CAS_LIGHTSPEED_URL")?.includes("lightspeed-app-server.openshift-lightspeed"),
+  "cas-gateway is configured to use OpenShift Lightspeed as brain",
+  "cas-gateway Lightspeed brain env is missing"
+);
 
 const consolePlugin = getJson("console:plugin-cr", ["get", "consoleplugin", "cywell-ai-sentinel"]);
 const proxy = consolePlugin?.spec?.proxy?.find((item) => item.alias === "cas-api");
@@ -134,6 +143,21 @@ if (gatewayPod) {
     healthOk = false;
   }
   expect("runtime:gateway-health", health.ok && healthOk, "gateway healthz ok", health.stderr || health.stdout);
+
+  const brainz = execNode(
+    gatewayPod.metadata.name,
+    "const https=require('https');https.get('https://127.0.0.1:9443/api/aiops/brainz',{rejectUnauthorized:false},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{console.log(JSON.stringify({status:r.statusCode,body:b}));});}).on('error',e=>{console.error(e.message);process.exit(1);});",
+    30000
+  );
+  let brainzOk = false;
+  try {
+    const parsed = JSON.parse(brainz.stdout);
+    const body = JSON.parse(parsed.body);
+    brainzOk = parsed.status === 200 && body.brain?.provider === "openshift-lightspeed";
+  } catch {
+    brainzOk = false;
+  }
+  expect("runtime:gateway-brainz", brainz.ok && brainzOk, "gateway brainz confirms OpenShift Lightspeed readiness", brainz.stderr || brainz.stdout);
 } else {
   fail("runtime:gateway-health", "no running gateway pod");
 }
@@ -162,13 +186,37 @@ if (consolePod) {
   ].join("");
   const query = execNode(consolePod.metadata.name, queryCode);
   expect(
-    "runtime:mock-query-through-plugin",
-    query.ok && query.stdout.includes("memory limit exceeded") && query.stdout.includes("mock_read_only"),
-    "console plugin proxies mock RCA query to gateway",
+    "runtime:fallback-query-through-plugin",
+    query.ok && query.stdout.includes("memory limit exceeded") && query.stdout.includes("lightspeed_fallback_mock"),
+    "console plugin without token degrades visibly to fallback mock RCA",
     query.stderr || query.stdout
   );
+
+  const token = run("oc", ["whoami", "-t"], 30000);
+  if (!token.ok || !token.stdout) {
+    fail("runtime:lightspeed-query-through-plugin", "could not obtain local oc user token");
+  } else {
+    const tokenB64 = Buffer.from(token.stdout, "utf8").toString("base64");
+    const liveQueryCode = [
+      "const https=require('https');",
+      `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
+      "const payload=JSON.stringify({question:'ClusterVersion 상태를 한 문장으로 요약해줘.',scope:{cluster:'local-cluster',namespaces:['default']},resourceRef:{kind:'ClusterVersion',name:'version'},mode:'read_only',stream:false,locale:'ko-KR'});",
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/query',{method:'POST',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,'content-type':'application/json','content-length':Buffer.byteLength(payload)}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,provider:j.audit?.answer_provider,brain:j.audit?.brain?.status,answerLength:j.rca_result?.answer?.length||0,conversation:!!j.conversation_id}));});});",
+      "req.on('error',e=>{console.error(e.message);process.exit(1);});req.write(payload);req.end();"
+    ].join("");
+    const liveQuery = execNode(consolePod.metadata.name, liveQueryCode, 150000);
+    expect(
+      "runtime:lightspeed-query-through-plugin",
+      liveQuery.ok &&
+        liveQuery.stdout.includes("lightspeed_read_only") &&
+        liveQuery.stdout.includes("openshift-lightspeed") &&
+        liveQuery.stdout.includes("\"brain\":\"ok\""),
+      "console plugin forwards user token and CAS receives a real Lightspeed answer",
+      liveQuery.stderr || liveQuery.stdout
+    );
+  }
 } else {
-  fail("runtime:mock-query-through-plugin", "no running console plugin pod");
+  fail("runtime:fallback-query-through-plugin", "no running console plugin pod");
 }
 
 const failures = checks.filter((check) => check.status === "FAIL");

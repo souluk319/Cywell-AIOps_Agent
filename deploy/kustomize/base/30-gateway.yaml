@@ -35,6 +35,14 @@ spec:
               value: /var/run/secrets/cas/tls/tls.crt
             - name: CAS_TLS_KEY_FILE
               value: /var/run/secrets/cas/tls/tls.key
+            - name: CAS_BRAIN_PROVIDER
+              value: openshift-lightspeed
+            - name: CAS_LIGHTSPEED_URL
+              value: https://lightspeed-app-server.openshift-lightspeed.svc.cluster.local:8443
+            - name: CAS_LIGHTSPEED_TIMEOUT_MS
+              value: "90000"
+            - name: CAS_LIGHTSPEED_TLS_INSECURE
+              value: "true"
           ports:
             - name: https
               containerPort: 9443

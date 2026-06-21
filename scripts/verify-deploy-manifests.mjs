@@ -5,6 +5,7 @@ const files = [
   "deploy/kustomize/base/00-namespace.yaml",
   "deploy/kustomize/base/10-rbac.yaml",
   "deploy/kustomize/base/20-networkpolicy.yaml",
+  "deploy/kustomize/base/21-lightspeed-ingress.yaml",
   "deploy/kustomize/base/30-gateway.yaml",
   "deploy/kustomize/base/40-console-plugin-workload.yaml",
   "deploy/kustomize/base/50-consoleplugin.yaml",
@@ -45,6 +46,35 @@ for (const file of files) {
     if (file.includes("networkpolicy")) {
       if (text.includes("policyTypes") && text.includes("Egress")) pass("networkpolicy:egress", "egress policy present");
       else fail("networkpolicy:egress", "egress policy missing");
+      if (text.includes("openshift-lightspeed") && text.includes("port: 8443")) {
+        pass("networkpolicy:lightspeed-egress", "egress to OpenShift Lightspeed 8443 present");
+      } else {
+        fail("networkpolicy:lightspeed-egress", "egress to OpenShift Lightspeed 8443 missing");
+      }
+      if (text.includes("openshift-dns") && text.includes("protocol: UDP") && text.includes("port: 53") && text.includes("port: 5353")) {
+        pass("networkpolicy:dns-egress", "egress to OpenShift DNS 53/5353 present");
+      } else {
+        fail("networkpolicy:dns-egress", "egress to OpenShift DNS 53/5353 missing");
+      }
+    }
+    if (file.includes("21-lightspeed-ingress")) {
+      if (text.includes("namespace: openshift-lightspeed") && text.includes("cywell-ai-sentinel") && text.includes("port: 8443")) {
+        pass("lightspeed-ingress:cas-gateway", "Lightspeed app server allows CAS gateway ingress on 8443");
+      } else {
+        fail("lightspeed-ingress:cas-gateway", "CAS gateway ingress to Lightspeed app server missing");
+      }
+    }
+    if (file.includes("30-gateway")) {
+      if (text.includes("CAS_BRAIN_PROVIDER") && text.includes("openshift-lightspeed")) {
+        pass("gateway:brain-provider", "gateway is configured for openshift-lightspeed brain");
+      } else {
+        fail("gateway:brain-provider", "gateway must configure openshift-lightspeed brain");
+      }
+      if (text.includes("CAS_LIGHTSPEED_URL") && text.includes("lightspeed-app-server.openshift-lightspeed")) {
+        pass("gateway:lightspeed-url", "gateway points at in-cluster Lightspeed app server");
+      } else {
+        fail("gateway:lightspeed-url", "gateway Lightspeed URL missing");
+      }
     }
     if (file.includes("50-consoleplugin")) {
       if (text.includes("name: cywell-ai-sentinel")) pass("consoleplugin:name", "cywell-ai-sentinel name present");

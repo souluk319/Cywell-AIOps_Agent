@@ -3,11 +3,13 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { PRODUCT } from "../../../packages/contracts/src/index.js";
 import { createMockOomKilledRun, streamMockRun } from "./mockRca.mjs";
+import { checkLightspeedReadiness, createLightspeedBackedRun, getBrainConfig } from "./lightspeedBrain.mjs";
 
 const port = Number(process.env.PORT ?? 8080);
 const host = process.env.HOST ?? "0.0.0.0";
 const tlsCertFile = process.env.CAS_TLS_CERT_FILE;
 const tlsKeyFile = process.env.CAS_TLS_KEY_FILE;
+const brainConfig = getBrainConfig();
 
 function loadTlsOptions() {
   if (!tlsCertFile || !tlsKeyFile) return undefined;
@@ -60,14 +62,35 @@ const requestHandler = async (request, response) => {
         status: "ok",
         service: "cas-gateway",
         product: PRODUCT.officialName,
-        mode: "mock_read_only"
+        mode: brainConfig.provider === "openshift-lightspeed" ? "lightspeed_read_only" : "mock_read_only",
+        brain_provider: brainConfig.provider
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/aiops/brainz") {
+      const readiness =
+        brainConfig.provider === "openshift-lightspeed"
+          ? await checkLightspeedReadiness({ config: brainConfig })
+          : { ok: true, provider: "mock", endpoint: "local" };
+      sendJson(response, readiness.ok ? 200 : 503, {
+        status: readiness.ok ? "ok" : "degraded",
+        service: "cas-gateway",
+        product: PRODUCT.officialName,
+        brain: readiness
       });
       return;
     }
 
     if (request.method === "POST" && url.pathname === "/api/aiops/query") {
       const body = await readJson(request);
-      const run = createMockOomKilledRun(body);
+      const run =
+        brainConfig.provider === "openshift-lightspeed"
+          ? await createLightspeedBackedRun(body, {
+              authorization: request.headers.authorization,
+              config: brainConfig
+            })
+          : createMockOomKilledRun(body);
       const wantsStream =
         body.stream === true ||
         String(request.headers.accept ?? "").includes("text/event-stream") ||
@@ -107,4 +130,3 @@ server.listen(port, host, () => {
   const scheme = tlsOptions ? "https" : "http";
   console.log(`CAS Gateway listening on ${scheme}://${host}:${port}`);
 });
-

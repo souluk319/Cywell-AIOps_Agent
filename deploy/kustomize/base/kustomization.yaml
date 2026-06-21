@@ -4,7 +4,7 @@ resources:
   - 00-namespace.yaml
   - 10-rbac.yaml
   - 20-networkpolicy.yaml
+  - 21-lightspeed-ingress.yaml
   - 30-gateway.yaml
   - 40-console-plugin-workload.yaml
   - 50-consoleplugin.yaml
-
