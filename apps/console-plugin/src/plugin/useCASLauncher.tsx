@@ -129,6 +129,11 @@ const styles = `
   font-family: var(--pf-t--global--font--family--body, "Red Hat Text", "Noto Sans KR", "Segoe UI", Arial, sans-serif);
 }
 
+.cas-launcher-root,
+.cas-launcher-root * {
+  box-sizing: border-box;
+}
+
 .cas-launcher-button {
   align-items: center;
   background: var(--cas-surface);
@@ -159,6 +164,12 @@ const styles = `
 .cas-launcher-button svg {
   height: 30px;
   width: 30px;
+}
+
+.cas-panel-header > svg {
+  flex: 0 0 34px;
+  height: 34px;
+  width: 34px;
 }
 
 .cas-panel {
@@ -201,6 +212,11 @@ const styles = `
 .cas-conversation {
   color: var(--cas-muted);
   font-size: 12px;
+}
+
+.cas-panel-title strong,
+.cas-panel-title span {
+  overflow-wrap: anywhere;
 }
 
 .cas-close {
@@ -371,6 +387,11 @@ const styles = `
   justify-content: space-between;
 }
 
+.cas-action-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .cas-link-button {
   background: transparent;
   border: 0;
@@ -525,8 +546,9 @@ const styles = `
 @media (max-width: 620px) {
   .cas-panel {
     bottom: calc(var(--pf-t--global--spacer--2xl, 48px) + 22px);
+    left: 8px;
     right: 8px;
-    width: calc(100vw - 16px);
+    width: auto;
   }
 
   .cas-launcher-button {
@@ -537,6 +559,11 @@ const styles = `
   .cas-fields,
   .cas-actions {
     grid-template-columns: 1fr;
+  }
+
+  .cas-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .cas-health-strip,

@@ -253,7 +253,7 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | Evidence Timeline | event/log/metric 순서 표시 | UI verifier | `cas-evidence-timeline` | 완료 |
 | Action Queue | Run RCA + console deep link 제공 | UI verifier | `actions[]`, `cas-action-queue` | 완료 |
 | Missing Evidence | metric/RAG 미구현 상태를 숨기지 않음 | API/UI 확인 | `missing[]` | 완료 |
-| 가독성 | 작은 패널에서 텍스트 겹침 없음 | desktop/mobile visual smoke | screenshot 또는 manual note | 잔여: 실제 브라우저 스크린샷 QA 필요 |
+| 가독성 | 작은 패널에서 텍스트 겹침 없음 | desktop/mobile visual smoke | `npm run verify:console:visual`, screenshot | 완료 |
 
 ### 7.1 Implementation Status
 
@@ -266,7 +266,7 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | OpenShift evidence | 완료 | pods/events/clusterversion read-only 수집, refs resolve 검증 PASS |
 | Console cockpit | 완료 | Health, RCA Candidate, Risk Workloads, Event Reasons, Evidence Timeline, Action Queue 렌더링 |
 | Runtime 배포 | 완료 | `npm run deploy:crc` PASS, overview/query 모두 UserToken proxy로 통과 |
-| 시각 QA | 잔여 | 브라우저 screenshot/manual smoke로 overflow와 mobile width 확인 필요 |
+| 시각 QA | 완료 | `npm run verify:console:visual` PASS, `test-results/visual/cas-cockpit-desktop.png`, `test-results/visual/cas-cockpit-mobile-500.png` |
 
 검수에서 발견된 주요 이슈와 처리 결과:
 
@@ -277,6 +277,7 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | risk workload 클릭 시 항상 Pod로 질의될 수 있음 | `kind`를 workload/action context에서 넘기도록 수정 |
 | namespace 입력 중 overview 요청이 과도하게 발생할 수 있음 | panel open 기준 fetch로 줄이고 실패 시 stale overview 제거 |
 | bundle verifier가 cockpit 일부만 확인함 | candidate/action/risk/timeline bundle marker 검증 추가 |
+| 패널 헤더 아이콘과 form field가 좁은 폭에서 레이아웃을 밀 수 있음 | SVG 크기 고정, box-sizing, mobile left/right panel layout, visual smoke verifier 추가 |
 
 ## 8. v0.1.1 화면 세부안
 
@@ -437,14 +438,15 @@ v0.1.1 브랜치에서 수행 완료된 작업:
 4. verify-console-integration/verify-crc-deployment 확장: 완료
 5. npm run verify: PASS
 6. npm run deploy:crc: PASS
+7. npm run verify:console:visual: PASS
 ```
 
-잔여 작업:
+후속 수동 확인:
 
 ```text
-1. 브라우저 screenshot/manual smoke로 desktop/mobile overflow 확인
-2. OpenShift native page deep link를 실제 콘솔 URL에서 클릭 검증
-3. 필요하면 v0.1.1-ux-fix 커밋으로 visual polish 반영
+1. 로그인된 브라우저 세션에서 CAS 패널을 실제로 열어 스크린샷 확인
+2. OpenShift native page deep link를 실제 콘솔 URL에서 클릭 확인
+3. 후속 디자인 단계에서 icon/brand asset polish 반영
 ```
 
 ## 14. Ref Stamp
@@ -455,6 +457,6 @@ v0.1.1 브랜치에서 수행 완료된 작업:
 branch: feat/CAS-v0.1.1
 base: main
 target version: v0.1.1
-implementation commit: fdae8397246cdb1efd42c0d117edfb14916f6167
-current product state: v0.1.1 RCA cockpit implemented and CRC runtime verified
+implementation baseline: fdae8397246cdb1efd42c0d117edfb14916f6167
+current product state: v0.1.1 RCA cockpit implemented, visual smoke verified, CRC runtime verified
 ```

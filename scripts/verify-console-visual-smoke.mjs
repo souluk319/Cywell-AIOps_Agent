@@ -1,0 +1,193 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = resolve(__dirname, "..");
+const outDir = resolve(root, "test-results", "visual");
+const harnessPath = resolve(outDir, "cas-cockpit-smoke.html");
+const sourcePath = resolve(root, "apps", "console-plugin", "src", "plugin", "useCASLauncher.tsx");
+
+const checks = [];
+
+function record(id, ok, detail, failureDetail = detail) {
+  checks.push({ id, ok, detail: ok ? detail : failureDetail });
+  console.log(`[${ok ? "PASS" : "FAIL"}] ${id}: ${ok ? detail : failureDetail}`);
+}
+
+function chromeCandidates() {
+  const candidates = [];
+  if (process.env.CHROME_PATH) candidates.push(process.env.CHROME_PATH);
+
+  if (process.platform === "win32") {
+    const programFiles = [process.env.ProgramFiles, process.env["ProgramFiles(x86)"]].filter(Boolean);
+    for (const base of programFiles) {
+      candidates.push(resolve(base, "Google", "Chrome", "Application", "chrome.exe"));
+      candidates.push(resolve(base, "Microsoft", "Edge", "Application", "msedge.exe"));
+    }
+  } else if (process.platform === "darwin") {
+    candidates.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+    candidates.push("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge");
+  } else {
+    candidates.push("/usr/bin/google-chrome");
+    candidates.push("/usr/bin/google-chrome-stable");
+    candidates.push("/usr/bin/chromium");
+    candidates.push("/usr/bin/chromium-browser");
+    candidates.push("/usr/bin/microsoft-edge");
+  }
+
+  return candidates;
+}
+
+function findChrome() {
+  return chromeCandidates().find((candidate) => candidate && existsSync(candidate));
+}
+
+function extractLauncherStyles() {
+  const source = readFileSync(sourcePath, "utf8");
+  const match = source.match(/const styles = `([\s\S]*?)`;\n\nfunction SentinelIcon/);
+  if (!match) {
+    throw new Error("Could not extract CAS launcher styles from useCASLauncher.tsx");
+  }
+  return match[1];
+}
+
+function buildHarness(styles) {
+  const icon = `<svg aria-hidden="true" viewBox="0 0 48 48" role="img"><path d="M24 5.5 38 10v11.4c0 9.1-5.4 16.8-14 21.1-8.6-4.3-14-12-14-21.1V10l14-4.5Z" fill="currentColor" opacity="0.16"></path><path d="M24 9.7 34 13v8.4c0 6.7-3.8 12.7-10 16.4-6.2-3.7-10-9.7-10-16.4V13l10-3.3Z" fill="none" stroke="currentColor" stroke-width="2.6"></path><path d="M20 24.2h8M24 18.4v11.7" stroke="currentColor" stroke-linecap="round" stroke-width="2.6"></path></svg>`;
+
+  return `<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CAS cockpit visual smoke</title>
+<style>
+html, body { margin: 0; min-height: 100%; background: #eef2f6; font-family: "Segoe UI", "Noto Sans KR", Arial, sans-serif; }
+.fake-console { min-height: 100vh; color: #1f2933; }
+.fake-topbar { height: 56px; background: #151515; color: #fff; display: flex; align-items: center; padding: 0 24px; font-weight: 700; }
+.fake-main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 56px); }
+.fake-nav { background: #fff; border-right: 1px solid #d7dee7; padding: 18px; display: grid; align-content: start; gap: 10px; }
+.fake-content { padding: 24px; }
+.fake-card { background: #fff; border: 1px solid #d7dee7; border-radius: 8px; padding: 18px; max-width: 760px; }
+.qa-result { position: fixed; left: 8px; bottom: 8px; z-index: 20; max-width: 46vw; background: rgba(255,255,255,.92); border: 1px solid #d7dee7; border-radius: 4px; color: #16212c; font: 11px/1.4 Consolas, monospace; padding: 8px; white-space: pre-wrap; }
+${styles}
+</style>
+</head>
+<body>
+<div class="fake-console">
+  <div class="fake-topbar">Red Hat OpenShift</div>
+  <div class="fake-main">
+    <aside class="fake-nav"><strong>Administrator</strong><span>Home</span><span>Workloads</span><span>Observe</span><span>Storage</span><span>Networking</span></aside>
+    <main class="fake-content"><section class="fake-card"><h1>Cluster dashboard</h1><p>CAS is opened from the AI launcher position and overlays the native console without a full-screen route.</p></section></main>
+  </div>
+</div>
+<div class="cas-launcher-root" data-test="cas-launcher-root">
+<section aria-label="Cywell AI Sentinel" class="cas-panel" data-test="cas-launcher-panel" role="dialog">
+  <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>OpenShift RCA Agent · Lightspeed replacement</span></div><button aria-label="Close AI Sentinel" class="cas-close" type="button">x</button></header>
+  <div class="cas-panel-body">
+    <div class="cas-status-row"><span class="cas-badge" data-state="ready" data-test="cas-brain-status">ready · openshift-lightspeed</span><span class="cas-badge" data-test="cas-provider-badge">UserToken proxy</span><span class="cas-conversation" data-test="cas-conversation-id">conversation smoke-test</span></div>
+    <div class="cas-meta">OpenShift Lightspeed readiness 확인됨</div>
+    <section class="cas-cockpit" data-test="cas-overview-cockpit">
+      <div class="cas-health-strip" data-test="cas-health-strip"><div class="cas-signal-card"><span>Health</span><strong>82</strong></div><div class="cas-signal-card"><span>Risk</span><strong>medium</strong></div><div class="cas-signal-card"><span>Warnings</span><strong>14</strong></div><div class="cas-signal-card"><span>Pending</span><strong>2</strong></div></div>
+      <div class="cas-cockpit-grid">
+        <article class="cas-cockpit-panel" data-test="cas-rca-candidate"><div class="cas-panel-heading"><strong>RCA Candidate</strong><span class="cas-meta">72%</span></div><div>memory pressure or repeated readiness probe failure near api pod rollout</div><div class="cas-meta">confidence 72% · evidence openshift:workload:default:api-7c8d9, overview:timeline:1</div><div class="cas-meta">Risk found in current namespace evidence.</div></article>
+        <article class="cas-cockpit-panel" data-test="cas-action-queue"><div class="cas-panel-heading"><strong>Action Queue</strong><span class="cas-meta">3 actions</span></div><div class="cas-action-list"><div class="cas-action-row"><span>Run RCA for api-7c8d9 pod</span><button class="cas-link-button" type="button">Run</button></div><div class="cas-action-row"><span>Open Pod in Console</span><a class="cas-link-button" href="/k8s/ns/default/pods/api-7c8d9">Open</a></div><div class="cas-action-row"><span>Open Events view</span><a class="cas-link-button" href="/k8s/ns/default/events">Open</a></div></div></article>
+        <article class="cas-cockpit-panel" data-test="cas-risk-workloads"><div class="cas-panel-heading"><strong>Risk Workloads</strong><span class="cas-meta">Top 2</span></div><div class="cas-risk-list"><button class="cas-risk-row" type="button"><div class="cas-row-main"><strong>api-7c8d9-super-long-workload-name-that-should-wrap</strong><span class="cas-risk-pill" data-risk="high">high</span></div><div class="cas-meta">default · Pod · CrashLoopBackOff · restarts 5</div><div class="cas-meta">restart spike + warning events</div></button><button class="cas-risk-row" type="button"><div class="cas-row-main"><strong>worker-pending</strong><span class="cas-risk-pill" data-risk="medium">medium</span></div><div class="cas-meta">default · Pod · Pending · restarts 0</div><div class="cas-meta">FailedScheduling due to insufficient cpu</div></button></div></article>
+        <article class="cas-cockpit-panel" data-test="cas-event-reasons"><div class="cas-panel-heading"><strong>Event Reasons</strong><span class="cas-meta">warning</span></div><div class="cas-reason-list"><div class="cas-reason-row"><div class="cas-row-main"><strong>BackOff</strong><span class="cas-meta">8</span></div></div><div class="cas-reason-row"><div class="cas-row-main"><strong>FailedScheduling</strong><span class="cas-meta">3</span></div></div></div></article>
+        <article class="cas-cockpit-panel" data-wide="true" data-test="cas-evidence-timeline"><div class="cas-panel-heading"><strong>Evidence Timeline</strong><span class="cas-meta">4 signals</span></div><div class="cas-timeline-list"><div class="cas-timeline-row"><strong>09:12 · event</strong><div>Warning BackOff observed on api container</div><div class="cas-meta">openshift:event/default/api</div></div><div class="cas-timeline-row"><strong>09:14 · pod</strong><div>api pod entered CrashLoopBackOff after rollout</div><div class="cas-meta">openshift:pod/default/api</div></div><div class="cas-timeline-row"><strong>09:16 · missing</strong><div>Prometheus metric adapter is not configured in v0.1.1</div><div class="cas-meta">metric</div></div></div></article>
+      </div>
+      <div class="cas-missing-list" data-test="cas-overview-missing"><div class="cas-missing-item"><strong>metric</strong><div class="cas-meta">Prometheus metric adapter is not configured in v0.1.1</div></div></div>
+    </section>
+    <div class="cas-chat-thread" data-test="cas-chat-thread"><article class="cas-message" data-role="system"><strong>시스템</strong><p class="cas-answer">CAS가 OpenShift Lightspeed 기능을 내부 뇌로 사용해 읽기 전용 분석을 수행합니다.</p></article></div>
+    <form class="cas-compose"><textarea aria-label="AI Sentinel question">default namespace의 api pod 원인 분석해줘</textarea><div class="cas-fields"><input aria-label="Namespace" value="default"><input aria-label="Resource name" value="api-7c8d9"><input aria-label="Resource kind" value="Pod"></div><div class="cas-actions"><button class="cas-secondary" type="button">새 대화</button><button class="cas-submit" type="submit">질의</button></div></form>
+  </div>
+</section>
+<button aria-label="Cywell AI Sentinel" class="cas-launcher-button" data-test="cas-launcher-button" title="Cywell AI Sentinel" type="button">${icon}</button>
+</div>
+<pre id="qa-result" class="qa-result">pending</pre>
+<script>
+function runQa() {
+  const panel = document.querySelector(".cas-panel").getBoundingClientRect();
+  const body = document.querySelector(".cas-panel-body");
+  const bad = [...document.querySelectorAll(".cas-panel *")].filter((el) => {
+    const cs = getComputedStyle(el);
+    return el.scrollWidth > el.clientWidth + 2 && cs.overflowX !== "auto" && cs.overflowX !== "scroll";
+  }).map((el) => ({ cls: String(el.className || el.tagName), text: (el.textContent || "").trim().slice(0, 80), scrollWidth: el.scrollWidth, clientWidth: el.clientWidth })).slice(0, 12);
+  const result = {
+    viewport: [innerWidth, innerHeight],
+    panel: { left: Math.round(panel.left), right: Math.round(panel.right), top: Math.round(panel.top), bottom: Math.round(panel.bottom), width: Math.round(panel.width), height: Math.round(panel.height) },
+    documentOverflowX: document.documentElement.scrollWidth > innerWidth + 1,
+    panelInViewport: panel.left >= -1 && panel.right <= innerWidth + 1 && panel.top >= -1 && panel.bottom <= innerHeight + 1,
+    panelBodyScrollsVertically: body.scrollHeight > body.clientHeight,
+    horizontalOverflowItems: bad
+  };
+  result.pass = !result.documentOverflowX && result.panelInViewport && bad.length === 0;
+  document.body.setAttribute("data-qa-pass", String(result.pass));
+  document.getElementById("qa-result").textContent = JSON.stringify(result, null, 2);
+}
+addEventListener("load", () => setTimeout(runQa, 80));
+</script>
+</body>
+</html>`;
+}
+
+function runChrome(chromePath, viewport) {
+  const url = pathToFileURL(harnessPath).href;
+  const screenshotPath = resolve(outDir, `cas-cockpit-${viewport.id}.png`);
+  const args = [
+    "--headless=new",
+    "--disable-gpu",
+    "--force-device-scale-factor=1",
+    "--hide-scrollbars",
+    "--allow-file-access-from-files",
+    `--window-size=${viewport.width},${viewport.height}`,
+    "--virtual-time-budget=1500"
+  ];
+
+  execFileSync(chromePath, [...args, `--screenshot=${screenshotPath}`, url], { stdio: "ignore" });
+  const dom = execFileSync(chromePath, [...args, "--dump-dom", url], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  const match = dom.match(/<pre id="qa-result"[^>]*>([\s\S]*?)<\/pre>/);
+  if (!match) {
+    throw new Error(`QA result not found for ${viewport.id}`);
+  }
+
+  const result = JSON.parse(match[1]);
+  return { screenshotPath, result };
+}
+
+mkdirSync(outDir, { recursive: true });
+
+const chromePath = findChrome();
+record("visual:chrome", Boolean(chromePath), chromePath ?? "Chrome/Edge executable not found");
+
+if (chromePath) {
+  const styles = extractLauncherStyles();
+  writeFileSync(harnessPath, buildHarness(styles), "utf8");
+  record("visual:harness", existsSync(harnessPath), `harness=${harnessPath}`);
+
+  const viewports = [
+    { id: "desktop", width: 1440, height: 1000 },
+    { id: "mobile-500", width: 500, height: 844 }
+  ];
+
+  for (const viewport of viewports) {
+    const { screenshotPath, result } = runChrome(chromePath, viewport);
+    record(`visual:${viewport.id}:panel`, result.panelInViewport, `panel=${JSON.stringify(result.panel)}`);
+    record(`visual:${viewport.id}:overflow-x`, !result.documentOverflowX, "no document horizontal overflow");
+    record(
+      `visual:${viewport.id}:text-overflow`,
+      Array.isArray(result.horizontalOverflowItems) && result.horizontalOverflowItems.length === 0,
+      `screenshot=${screenshotPath}`,
+      JSON.stringify(result.horizontalOverflowItems)
+    );
+  }
+}
+
+const failures = checks.filter((check) => !check.ok);
+if (failures.length) {
+  console.error(`Console visual smoke verification failed with ${failures.length} failures.`);
+  process.exit(1);
+}
+
+console.log(`Console visual smoke verification passed with ${checks.length} checks.`);
