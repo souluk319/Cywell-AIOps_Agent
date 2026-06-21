@@ -1,0 +1,26 @@
+{
+  "name": "@cywell-ai-sentinel/console-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ./scripts/build-static.mjs && webpack --config webpack.plugin.config.cjs",
+    "serve": "node ./scripts/serve.mjs"
+  },
+  "consolePlugin": {
+    "name": "cywell-ai-sentinel",
+    "version": "0.1.0",
+    "displayName": "AI Sentinel",
+    "description": "Evidence-based AIOps Agent for OpenShift operations.",
+    "exposedModules": {
+      "AISentinelRoute": "./src/plugin/AISentinelRoute"
+    },
+    "dependencies": {
+      "@console/pluginAPI": ">=4.16.0 <4.22.0"
+    }
+  },
+  "dependencies": {
+    "@cywell-ai-sentinel/contracts": "0.1.0"
+  }
+}
+

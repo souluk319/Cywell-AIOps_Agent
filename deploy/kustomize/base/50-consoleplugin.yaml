@@ -1,0 +1,28 @@
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: console-plugin
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+spec:
+  displayName: AI Sentinel
+  backend:
+    type: Service
+    service:
+      name: cas-console-plugin
+      namespace: cywell-ai-sentinel
+      port: 9443
+      basePath: /
+  i18n:
+    loadType: Preload
+  proxy:
+    - alias: cas-api
+      authorization: UserToken
+      endpoint:
+        type: Service
+        service:
+          name: cas-gateway
+          namespace: cywell-ai-sentinel
+          port: 9443

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Sentinel</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Cywell AI Sentinel</p>
+        <h1>Evidence-based RCA Agent</h1>
+      </div>
+      <div class="status" id="status">mock read-only</div>
+    </header>
+
+    <section class="workspace">
+      <form class="query" id="query-form">
+        <label for="question">질문</label>
+        <textarea id="question" name="question" rows="3">default namespace의 api pod가 왜 재시작됐어?</textarea>
+        <div class="query-grid">
+          <label>
+            Namespace
+            <input id="namespace" name="namespace" value="default" />
+          </label>
+          <label>
+            Pod
+            <input id="pod" name="pod" value="api-7c8d9" />
+          </label>
+        </div>
+        <button type="submit">분석 실행</button>
+      </form>
+
+      <section class="result" aria-live="polite">
+        <div class="result-header">
+          <h2>RCA 결과</h2>
+          <span id="run-id">not run</span>
+        </div>
+        <p id="answer" class="answer">아직 분석을 실행하지 않았습니다.</p>
+        <div class="cards" id="cause-cards"></div>
+      </section>
+    </section>
+
+    <section class="evidence">
+      <h2>Evidence</h2>
+      <div id="evidence-list" class="evidence-list"></div>
+    </section>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
+

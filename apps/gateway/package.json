@@ -1,0 +1,14 @@
+{
+  "name": "@cywell-ai-sentinel/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ./src/server.mjs",
+    "start": "node ./src/server.mjs"
+  },
+  "dependencies": {
+    "@cywell-ai-sentinel/contracts": "0.1.0"
+  }
+}
+
