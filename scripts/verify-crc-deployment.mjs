@@ -123,6 +123,8 @@ expect(
 
 const consoleOperator = getJson("console:operator", ["get", "console.operator.openshift.io", "cluster"]);
 const enabledPlugins = consoleOperator?.spec?.plugins ?? [];
+const capabilities = consoleOperator?.spec?.customization?.capabilities ?? [];
+const capabilityByName = new Map(capabilities.map((capability) => [capability.name, capability]));
 expect("console:opslens-still-enabled", enabledPlugins.includes("cywell-opslens"), "cywell-opslens remains enabled");
 expect("console:cas-enabled", enabledPlugins.includes("cywell-ai-sentinel"), "cywell-ai-sentinel is enabled");
 expect(
@@ -130,6 +132,12 @@ expect(
   !enabledPlugins.includes("lightspeed-console-plugin"),
   "lightspeed-console-plugin is disabled so CAS owns the AI launcher position",
   "lightspeed-console-plugin is still enabled"
+);
+expect(
+  "console:lightspeed-button-hidden",
+  capabilityByName.get("LightspeedButton")?.visibility?.state === "Disabled",
+  "OpenShift native LightspeedButton capability is disabled so CAS is the visible AI launcher",
+  "OpenShift native LightspeedButton capability is still enabled"
 );
 
 const pods = getJson("runtime:pods", ["get", "pods", "-n", namespace]);

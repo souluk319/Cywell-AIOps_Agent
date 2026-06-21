@@ -53,7 +53,32 @@ function ensureCasReplacesLightspeed() {
   if (!plugins.includes("cywell-ai-sentinel")) {
     plugins.push("cywell-ai-sentinel");
   }
-  const payload = JSON.stringify({ spec: { plugins } });
+  const existingCapabilities = Array.isArray(parsed?.spec?.customization?.capabilities)
+    ? parsed.spec.customization.capabilities
+    : [];
+  const capabilitiesByName = new Map(existingCapabilities.map((capability) => [capability.name, capability]));
+  capabilitiesByName.set("LightspeedButton", {
+    name: "LightspeedButton",
+    visibility: {
+      state: "Disabled"
+    }
+  });
+  if (!capabilitiesByName.has("GettingStartedBanner")) {
+    capabilitiesByName.set("GettingStartedBanner", {
+      name: "GettingStartedBanner",
+      visibility: {
+        state: "Enabled"
+      }
+    });
+  }
+  const payload = JSON.stringify({
+    spec: {
+      plugins,
+      customization: {
+        capabilities: [...capabilitiesByName.values()]
+      }
+    }
+  });
   run("oc", ["patch", "console.operator.openshift.io", "cluster", "--type=merge", "-p", payload], { stdio: "inherit" });
   console.log(`Console plugins: ${plugins.join(",")}`);
 }
