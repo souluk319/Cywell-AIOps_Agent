@@ -37,7 +37,8 @@ function buildQuery(input = {}) {
     `Target resource: ${target.namespace}/${target.kind}/${target.name}.`,
     `Locale: ${input.locale ?? "ko-KR"}.`
   ].join("\n");
-  return `Context:\n${context}\n\nQuestion:\n${question}`;
+  const evidenceContext = input.cas_evidence_context ? `\n\nCAS evidence context:\n${input.cas_evidence_context}` : "";
+  return `Context:\n${context}${evidenceContext}\n\nQuestion:\n${question}`;
 }
 
 export function buildLightspeedPayload(input = {}) {
@@ -191,6 +192,31 @@ function referenceEvidence(references = []) {
   }));
 }
 
+function collectedEvidence(input = {}) {
+  return Array.isArray(input.cas_evidence?.evidence) ? input.cas_evidence.evidence : [];
+}
+
+function collectedMissing(input = {}) {
+  return Array.isArray(input.cas_evidence?.missing) ? input.cas_evidence.missing : [];
+}
+
+function mergeCollectedEvidence(run, input = {}) {
+  const evidence = collectedEvidence(input);
+  const missing = collectedMissing(input);
+  if (!run.evidence_bundle) return run;
+  run.evidence_bundle.evidence = [...evidence, ...(run.evidence_bundle.evidence ?? [])];
+  run.evidence_bundle.missing = [...missing, ...(run.evidence_bundle.missing ?? [])];
+  run.audit = {
+    ...(run.audit ?? {}),
+    evidence: {
+      provider: input.cas_evidence?.provider ?? "none",
+      collected_count: evidence.length,
+      missing_count: missing.length
+    }
+  };
+  return run;
+}
+
 export function createLightspeedRun(input = {}, lightspeedResult = {}) {
   const target = getTarget(input);
   const runId = `cas-lightspeed-${Date.now()}`;
@@ -203,7 +229,10 @@ export function createLightspeedRun(input = {}, lightspeedResult = {}) {
   });
   const guard = assertReadOnlyToolPlan(toolPlan);
 
+  const openShiftEvidence = collectedEvidence(input);
+  const openShiftMissing = collectedMissing(input);
   const evidence = [
+    ...openShiftEvidence,
     {
       id: "lightspeed:answer",
       type: "llm_answer",
@@ -218,15 +247,16 @@ export function createLightspeedRun(input = {}, lightspeedResult = {}) {
     run_id: runId,
     target,
     evidence,
-    missing: []
+    missing: openShiftMissing
   });
+  const causeEvidenceRefs = ["lightspeed:answer", ...openShiftEvidence.slice(0, 4).map((item) => item.id)];
 
   const rcaResult = createRcaResult({
     cause_candidates: [
       {
         cause: "openshift lightspeed generated operational analysis",
         confidence: 0.72,
-        evidence_refs: ["lightspeed:answer"]
+        evidence_refs: causeEvidenceRefs
       }
     ],
     answer: lightspeedResult.answer
@@ -257,6 +287,11 @@ export function createLightspeedRun(input = {}, lightspeedResult = {}) {
         tool_call_count: lightspeedResult.tools?.length ?? 0,
         truncated: lightspeedResult.truncated === true
       },
+      evidence: {
+        provider: input.cas_evidence?.provider ?? "none",
+        collected_count: openShiftEvidence.length,
+        missing_count: openShiftMissing.length
+      },
       response_schema_valid: true,
       redaction_applied: true
     }
@@ -284,7 +319,7 @@ export function createLightspeedFallbackRun(input = {}, error) {
     status: "fallback",
     error: error?.message ?? "unknown"
   };
-  return run;
+  return mergeCollectedEvidence(run, input);
 }
 
 export async function createLightspeedBackedRun(input = {}, options = {}) {

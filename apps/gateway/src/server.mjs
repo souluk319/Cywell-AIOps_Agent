@@ -4,12 +4,14 @@ import { createServer as createHttpsServer } from "node:https";
 import { PRODUCT } from "../../../packages/contracts/src/index.js";
 import { createMockOomKilledRun, streamMockRun } from "./mockRca.mjs";
 import { checkLightspeedReadiness, createLightspeedBackedRun, getBrainConfig } from "./lightspeedBrain.mjs";
+import { enrichInputWithOpenShiftEvidence, getEvidenceConfig } from "./openshiftEvidence.mjs";
 
 const port = Number(process.env.PORT ?? 8080);
 const host = process.env.HOST ?? "0.0.0.0";
 const tlsCertFile = process.env.CAS_TLS_CERT_FILE;
 const tlsKeyFile = process.env.CAS_TLS_KEY_FILE;
 const brainConfig = getBrainConfig();
+const evidenceConfig = getEvidenceConfig();
 
 function loadTlsOptions() {
   if (!tlsCertFile || !tlsKeyFile) return undefined;
@@ -63,7 +65,8 @@ const requestHandler = async (request, response) => {
         service: "cas-gateway",
         product: PRODUCT.officialName,
         mode: brainConfig.provider === "openshift-lightspeed" ? "lightspeed_read_only" : "mock_read_only",
-        brain_provider: brainConfig.provider
+        brain_provider: brainConfig.provider,
+        evidence_provider: evidenceConfig.provider
       });
       return;
     }
@@ -84,13 +87,20 @@ const requestHandler = async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/aiops/query") {
       const body = await readJson(request);
+      const enrichedBody =
+        evidenceConfig.provider === "none"
+          ? body
+          : await enrichInputWithOpenShiftEvidence(body, {
+              authorization: request.headers.authorization,
+              config: evidenceConfig
+            });
       const run =
         brainConfig.provider === "openshift-lightspeed"
-          ? await createLightspeedBackedRun(body, {
+          ? await createLightspeedBackedRun(enrichedBody, {
               authorization: request.headers.authorization,
               config: brainConfig
             })
-          : createMockOomKilledRun(body);
+          : createMockOomKilledRun(enrichedBody);
       const wantsStream =
         body.stream === true ||
         String(request.headers.accept ?? "").includes("text/event-stream") ||

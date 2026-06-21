@@ -98,6 +98,13 @@ expect(
   "cas-gateway is configured to use OpenShift Lightspeed as brain",
   "cas-gateway Lightspeed brain env is missing"
 );
+expect(
+  "runtime:gateway-evidence-env",
+  gatewayEnvByName.get("CAS_EVIDENCE_PROVIDER") === "openshift-api" &&
+    gatewayEnvByName.get("CAS_OPENSHIFT_API_URL")?.includes("kubernetes.default.svc"),
+  "cas-gateway is configured to collect OpenShift API evidence",
+  "cas-gateway OpenShift evidence env is missing"
+);
 
 const consolePlugin = getJson("console:plugin-cr", ["get", "consoleplugin", "cywell-ai-sentinel"]);
 const proxy = consolePlugin?.spec?.proxy?.find((item) => item.alias === "cas-api");
@@ -201,7 +208,7 @@ if (consolePod) {
       "const https=require('https');",
       `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
       "const payload=JSON.stringify({question:'ClusterVersion 상태를 한 문장으로 요약해줘.',scope:{cluster:'local-cluster',namespaces:['default']},resourceRef:{kind:'ClusterVersion',name:'version'},mode:'read_only',stream:false,locale:'ko-KR'});",
-      "const req=https.request('https://127.0.0.1:9443/api/aiops/query',{method:'POST',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,'content-type':'application/json','content-length':Buffer.byteLength(payload)}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,provider:j.audit?.answer_provider,brain:j.audit?.brain?.status,answerLength:j.rca_result?.answer?.length||0,conversation:!!j.conversation_id}));});});",
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/query',{method:'POST',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,'content-type':'application/json','content-length':Buffer.byteLength(payload)}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,provider:j.audit?.answer_provider,brain:j.audit?.brain?.status,evidence:j.audit?.evidence,answerLength:j.rca_result?.answer?.length||0,conversation:!!j.conversation_id,evidenceIds:(j.evidence_bundle?.evidence??[]).map(e=>e.id).slice(0,8)}));});});",
       "req.on('error',e=>{console.error(e.message);process.exit(1);});req.write(payload);req.end();"
     ].join("");
     const liveQuery = execNode(consolePod.metadata.name, liveQueryCode, 150000);
@@ -210,8 +217,9 @@ if (consolePod) {
       liveQuery.ok &&
         liveQuery.stdout.includes("lightspeed_read_only") &&
         liveQuery.stdout.includes("openshift-lightspeed") &&
-        liveQuery.stdout.includes("\"brain\":\"ok\""),
-      "console plugin forwards user token and CAS receives a real Lightspeed answer",
+        liveQuery.stdout.includes("\"brain\":\"ok\"") &&
+        liveQuery.stdout.includes("openshift:clusterversion:version"),
+      "console plugin forwards user token, CAS collects OpenShift evidence, and Lightspeed answers",
       liveQuery.stderr || liveQuery.stdout
     );
   }

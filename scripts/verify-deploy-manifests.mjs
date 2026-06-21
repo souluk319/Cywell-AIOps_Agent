@@ -56,6 +56,11 @@ for (const file of files) {
       } else {
         fail("networkpolicy:dns-egress", "egress to OpenShift DNS 53/5353 missing");
       }
+      if (text.includes("10.217.4.1/32") && text.includes("192.168.126.11/32") && text.includes("port: 443") && text.includes("port: 6443")) {
+        pass("networkpolicy:kube-api-egress", "egress to Kubernetes API service and endpoint present");
+      } else {
+        fail("networkpolicy:kube-api-egress", "egress to Kubernetes API service or endpoint missing");
+      }
     }
     if (file.includes("21-lightspeed-ingress")) {
       if (text.includes("namespace: openshift-lightspeed") && text.includes("cywell-ai-sentinel") && text.includes("port: 8443")) {
@@ -74,6 +79,16 @@ for (const file of files) {
         pass("gateway:lightspeed-url", "gateway points at in-cluster Lightspeed app server");
       } else {
         fail("gateway:lightspeed-url", "gateway Lightspeed URL missing");
+      }
+      if (text.includes("CAS_EVIDENCE_PROVIDER") && text.includes("openshift-api")) {
+        pass("gateway:evidence-provider", "gateway is configured to collect OpenShift API evidence");
+      } else {
+        fail("gateway:evidence-provider", "gateway OpenShift evidence provider missing");
+      }
+      if (text.includes("CAS_OPENSHIFT_API_URL") && text.includes("https://kubernetes.default.svc")) {
+        pass("gateway:openshift-api-url", "gateway points at in-cluster Kubernetes API");
+      } else {
+        fail("gateway:openshift-api-url", "gateway Kubernetes API URL missing");
       }
     }
     if (file.includes("50-consoleplugin")) {

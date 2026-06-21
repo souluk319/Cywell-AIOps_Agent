@@ -45,16 +45,32 @@ const payload = buildLightspeedPayload({
   question: "ClusterVersion 상태를 한 문장으로 요약해줘.",
   scope: { namespaces: ["default"] },
   resourceRef: { kind: "ClusterVersion", name: "version" },
-  locale: "ko-KR"
+  locale: "ko-KR",
+  cas_evidence_context: "Collected read-only OpenShift evidence:\n- openshift:clusterversion:version [clusterversion]: ClusterVersion desired=4.20.5"
 });
 expect("brain:payload-mode", payload.mode === "ask", "Lightspeed payload uses ask mode by default");
 expect("brain:payload-context", payload.query.includes("read-only OpenShift operations assistant"), "payload carries CAS read-only context");
+expect("brain:payload-evidence", payload.query.includes("openshift:clusterversion:version"), "payload carries CAS OpenShift evidence context");
 
 const run = await createLightspeedBackedRun(
   {
     question: "ClusterVersion 상태를 한 문장으로 요약해줘.",
     resourceRef: { kind: "ClusterVersion", name: "version" },
-    scope: { namespaces: ["default"] }
+    scope: { namespaces: ["default"] },
+    cas_evidence: {
+      provider: "openshift-api",
+      evidence: [
+        {
+          id: "openshift:clusterversion:version",
+          type: "clusterversion",
+          summary: "ClusterVersion desired=4.20.5 conditions=[Available=True, Progressing=False, Degraded=False]",
+          source: "apis/config.openshift.io/v1/clusterversions/version"
+        }
+      ],
+      missing: []
+    },
+    cas_evidence_context:
+      "Collected read-only OpenShift evidence:\n- openshift:clusterversion:version [clusterversion]: ClusterVersion desired=4.20.5"
   },
   {
     authorization: "Bearer test-token",
@@ -75,6 +91,11 @@ const run = await createLightspeedBackedRun(
 expect("brain:run-mode", run.mode === "lightspeed_read_only", "successful brain run is lightspeed_read_only");
 expect("brain:run-provider", run.audit?.answer_provider === "openshift-lightspeed", "audit marks openshift-lightspeed provider");
 expect("brain:run-evidence", run.evidence_bundle?.evidence?.some((item) => item.id === "lightspeed:answer"), "Lightspeed answer evidence exists");
+expect(
+  "brain:run-openshift-evidence",
+  run.evidence_bundle?.evidence?.some((item) => item.id === "openshift:clusterversion:version"),
+  "OpenShift evidence is preserved in the CAS result"
+);
 
 const fallback = await createLightspeedBackedRun(
   {

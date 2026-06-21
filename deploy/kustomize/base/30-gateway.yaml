@@ -43,6 +43,14 @@ spec:
               value: "90000"
             - name: CAS_LIGHTSPEED_TLS_INSECURE
               value: "true"
+            - name: CAS_EVIDENCE_PROVIDER
+              value: openshift-api
+            - name: CAS_OPENSHIFT_API_URL
+              value: https://kubernetes.default.svc
+            - name: CAS_OPENSHIFT_API_TLS_INSECURE
+              value: "true"
+            - name: CAS_EVIDENCE_TIMEOUT_MS
+              value: "8000"
           ports:
             - name: https
               containerPort: 9443
