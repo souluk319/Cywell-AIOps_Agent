@@ -2,6 +2,7 @@ import * as React from "react";
 
 const API_BASE = "/api/proxy/plugin/cywell-ai-sentinel/cas-api";
 const CSRF_COOKIE_NAME = "csrf-token";
+const TUTORIAL_STORAGE_KEY = "cas:onboarding:v0.1.1";
 
 type CauseCandidate = {
   cause: string;
@@ -191,6 +192,15 @@ type StreamEvent = {
   data: unknown;
 };
 
+type TutorialStep = {
+  id: string;
+  title: string;
+  body: string;
+  hint: string;
+  view?: ActiveView;
+  targetOpen?: boolean;
+};
+
 type MarkdownBlock =
   | { type: "heading"; level: number; text: string }
   | { type: "paragraph"; text: string }
@@ -349,6 +359,14 @@ const languageCopy: Record<
     modeDescriptions: Record<ChatMode, string>;
     modeTitles: Record<ChatMode, string>;
     languageTitle: string;
+    tutorialLabel: string;
+    tutorialTitle: string;
+    tutorialSkip: string;
+    tutorialBack: string;
+    tutorialNext: string;
+    tutorialDone: string;
+    tutorialProgress: (current: number, total: number) => string;
+    tutorialSteps: TutorialStep[];
     viewLabels: Record<ActiveView, string>;
     viewsNavLabel: string;
     closeLabel: string;
@@ -455,6 +473,65 @@ const languageCopy: Record<
       troubleshooting: "Troubleshooting: 현재 클러스터 증적 기반 장애 분석"
     },
     languageTitle: "언어: 한국어. 영어로 전환",
+    tutorialLabel: "튜토리얼 보기",
+    tutorialTitle: "CAS 빠른 안내",
+    tutorialSkip: "건너뛰기",
+    tutorialBack: "이전",
+    tutorialNext: "다음",
+    tutorialDone: "시작하기",
+    tutorialProgress: (current, total) => `${current} / ${total}`,
+    tutorialSteps: [
+      {
+        id: "chat",
+        title: "1. 먼저 채팅에서 시작합니다",
+        body: "CAS는 Lightspeed 위치를 대체하는 AI 관제 챗봇입니다. 질문하면 Gateway가 OpenShift 증적, Metric, Runbook을 모아 답변합니다.",
+        hint: "왼쪽 첫 아이콘은 채팅, 바로 옆 아이콘은 새 대화입니다.",
+        view: "chat"
+      },
+      {
+        id: "target",
+        title: "2. 분석 대상을 정합니다",
+        body: "Namespace, Kind, Name을 바꾸면 다음 질문부터 그 리소스를 기준으로 분석합니다. 이전 답변은 바뀌지 않습니다.",
+        hint: "헤더의 조준점 아이콘이 대상 설정입니다.",
+        view: "chat",
+        targetOpen: true
+      },
+      {
+        id: "situation",
+        title: "3. 상황은 신호등처럼 봅니다",
+        body: "상태 점수, 경고 이벤트, 재시작, 위험 워크로드를 먼저 봅니다. 여기서 문제 후보를 고르고 채팅 분석으로 넘길 수 있습니다.",
+        hint: "상황 탭은 RCA를 시작하기 위한 조종석입니다.",
+        view: "cockpit"
+      },
+      {
+        id: "grounds",
+        title: "4. 근거는 답변의 재료입니다",
+        body: "OpenShift 이벤트, Pod 상태, 로그, Metric, Runbook hit, 부족한 증적을 분리해서 보여줍니다.",
+        hint: "답변이 믿을 만한지 보려면 근거 탭과 답변 아래 근거 패널을 확인합니다.",
+        view: "evidence"
+      },
+      {
+        id: "actions",
+        title: "5. 다음 행동은 안전한 확인부터 갑니다",
+        body: "CAS v0.1.1은 읽기 전용입니다. 링크가 안전하지 않거나 문서 경로가 없으면 바로 열지 않고 CAS 질문으로 바꿉니다.",
+        hint: "실제 변경, 재시작, scale, patch는 승인 이후의 별도 절차입니다.",
+        view: "actions"
+      },
+      {
+        id: "simulation",
+        title: "6. 시뮬레이션은 학습 레일입니다",
+        body: "시나리오에서 1. 문제 분석을 누르고, 답변 아래 2. 해결 시뮬레이션을 눌러 회복 여부까지 확인합니다.",
+        hint: "OOMKilled, Pending, Probe 실패, ImagePullBackOff, PVC, NetworkPolicy 같은 케이스를 반복해서 익힙니다.",
+        view: "simulation"
+      },
+      {
+        id: "composer",
+        title: "7. 입력창은 작게, 기능은 안쪽에 있습니다",
+        body: "+ 버튼은 자주 확인하는 질문, Ask/Troubleshooting은 질문 모드, 오른쪽 버튼은 전송 또는 중지입니다.",
+        hint: "답변을 읽는 중 스크롤을 올리면 자동 스크롤이 풀리고 아래로 버튼이 나타납니다.",
+        view: "chat"
+      }
+    ],
     viewLabels: {
       chat: "채팅",
       cockpit: "상황",
@@ -566,6 +643,65 @@ const languageCopy: Record<
       troubleshooting: "Troubleshooting: live evidence-based incident analysis"
     },
     languageTitle: "Language: English. Switch to Korean",
+    tutorialLabel: "Show tutorial",
+    tutorialTitle: "CAS quick tour",
+    tutorialSkip: "Skip",
+    tutorialBack: "Back",
+    tutorialNext: "Next",
+    tutorialDone: "Start",
+    tutorialProgress: (current, total) => `${current} / ${total}`,
+    tutorialSteps: [
+      {
+        id: "chat",
+        title: "1. Start in Chat",
+        body: "CAS replaces the Lightspeed position as an AI operations chatbot. It gathers OpenShift evidence, metrics, and runbooks through the Gateway.",
+        hint: "The first icon is Chat. The icon next to it starts a new conversation.",
+        view: "chat"
+      },
+      {
+        id: "target",
+        title: "2. Set the analysis target",
+        body: "Namespace, Kind, and Name affect the next question only. Previous answers are not rewritten.",
+        hint: "Use the target icon in the header.",
+        view: "chat",
+        targetOpen: true
+      },
+      {
+        id: "situation",
+        title: "3. Read Situation like signals",
+        body: "Health, warnings, restarts, and risky workloads show where RCA should start.",
+        hint: "Situation is the cockpit for starting RCA.",
+        view: "cockpit"
+      },
+      {
+        id: "grounds",
+        title: "4. Grounds are answer ingredients",
+        body: "OpenShift events, pod status, logs, metrics, runbook hits, and missing evidence are separated.",
+        hint: "Use Grounds and the folded answer evidence panel to judge trust.",
+        view: "evidence"
+      },
+      {
+        id: "actions",
+        title: "5. Next Actions stay safe",
+        body: "CAS v0.1.1 is read-only. Unsafe or unknown links become CAS guidance questions instead of broken links.",
+        hint: "Mutating actions require a separate approved change workflow.",
+        view: "actions"
+      },
+      {
+        id: "simulation",
+        title: "6. Simulation is the learning rail",
+        body: "Run 1. Analyze Issue, then use 2. recovery simulation under the answer to confirm recovery.",
+        hint: "Practice OOMKilled, Pending, probes, ImagePullBackOff, PVC, and NetworkPolicy cases.",
+        view: "simulation"
+      },
+      {
+        id: "composer",
+        title: "7. The composer keeps tools inside",
+        body: "+ opens frequent checks, Ask/Troubleshooting selects mode, and the right button sends or stops.",
+        hint: "When you scroll up during streaming, auto-scroll unlocks and the bottom button appears.",
+        view: "chat"
+      }
+    ],
     viewLabels: {
       chat: "Chat",
       cockpit: "Situation",
@@ -841,6 +977,87 @@ const styles = `
   justify-content: center;
   padding: 0;
   width: 32px;
+}
+
+.cas-tutorial-overlay {
+  align-items: end;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.18), rgba(15, 23, 42, 0.34));
+  border-radius: 8px;
+  display: grid;
+  inset: 0;
+  padding: 14px;
+  pointer-events: auto;
+  position: absolute;
+  z-index: 6;
+}
+
+.cas-tutorial-card {
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(8, 127, 140, 0.28);
+  border-radius: 8px;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.22);
+  color: var(--cas-text);
+  display: grid;
+  gap: 10px;
+  justify-self: stretch;
+  max-width: 100%;
+  padding: 14px;
+}
+
+.cas-tutorial-kicker {
+  align-items: center;
+  color: var(--cas-accent-strong);
+  display: flex;
+  font-size: 11px;
+  font-weight: 700;
+  justify-content: space-between;
+  line-height: 1.2;
+}
+
+.cas-tutorial-card h3 {
+  font-size: 16px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.cas-tutorial-card p {
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.cas-tutorial-hint {
+  background: var(--cas-soft);
+  border: 1px solid var(--cas-line);
+  border-radius: 6px;
+  color: var(--cas-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+}
+
+.cas-tutorial-actions {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr auto auto;
+}
+
+.cas-tutorial-dots {
+  display: flex;
+  gap: 5px;
+  justify-content: center;
+}
+
+.cas-tutorial-dot {
+  background: var(--cas-line);
+  border-radius: 999px;
+  height: 6px;
+  width: 6px;
+}
+
+.cas-tutorial-dot[data-active="true"] {
+  background: var(--cas-accent);
 }
 
 .cas-panel-body {
@@ -1993,6 +2210,28 @@ const styles = `
     width: 28px;
   }
 
+  .cas-tutorial-overlay {
+    padding: 10px;
+  }
+
+  .cas-tutorial-card {
+    padding: 12px;
+  }
+
+  .cas-tutorial-actions {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .cas-tutorial-dots {
+    flex: 1 0 100%;
+    order: -1;
+  }
+
+  .cas-tutorial-actions button {
+    flex: 1 1 0;
+  }
+
   .cas-suggestion-shell {
     max-height: 172px;
   }
@@ -2143,6 +2382,16 @@ function TargetIcon() {
   );
 }
 
+function HelpIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M9.7 9.4a2.4 2.4 0 0 1 4.6.9c0 1.7-2.3 2-2.3 3.7" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+      <path d="M12 17h.01" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2.6" />
+    </svg>
+  );
+}
+
 function PlusIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
@@ -2197,6 +2446,22 @@ function createMessageId(prefix: string) {
 
 function normalizeQuestion(value: string, fallback = initialQuestionByLanguage.ko) {
   return value.trim() || fallback;
+}
+
+function hasSeenTutorial() {
+  try {
+    return typeof window !== "undefined" && window.localStorage.getItem(TUTORIAL_STORAGE_KEY) === "seen";
+  } catch {
+    return true;
+  }
+}
+
+function markTutorialSeen() {
+  try {
+    if (typeof window !== "undefined") window.localStorage.setItem(TUTORIAL_STORAGE_KEY, "seen");
+  } catch {
+    // Ignore storage failures; the tutorial can simply show again.
+  }
 }
 
 function isOpenShiftConsoleHref(value?: string) {
@@ -2976,6 +3241,55 @@ function SimulationLab({
   );
 }
 
+function TutorialOverlay({
+  copy,
+  stepIndex,
+  onBack,
+  onClose,
+  onNext
+}: {
+  copy: (typeof languageCopy)[Language];
+  stepIndex: number;
+  onBack: () => void;
+  onClose: () => void;
+  onNext: () => void;
+}) {
+  const steps = copy.tutorialSteps;
+  const step = steps[Math.min(stepIndex, steps.length - 1)] ?? steps[0];
+  const isFirst = stepIndex <= 0;
+  const isLast = stepIndex >= steps.length - 1;
+
+  return (
+    <div className="cas-tutorial-overlay" data-test="cas-tutorial-overlay" role="dialog" aria-label={copy.tutorialTitle}>
+      <article className="cas-tutorial-card" data-test="cas-tutorial-card">
+        <div className="cas-tutorial-kicker">
+          <span>{copy.tutorialTitle}</span>
+          <span>{copy.tutorialProgress(stepIndex + 1, steps.length)}</span>
+        </div>
+        <h3>{step.title}</h3>
+        <p>{step.body}</p>
+        <div className="cas-tutorial-hint">{step.hint}</div>
+        <div className="cas-tutorial-actions">
+          <button className="cas-link-button" onClick={onClose} type="button">
+            {copy.tutorialSkip}
+          </button>
+          <div className="cas-tutorial-dots" aria-hidden="true">
+            {steps.map((item, index) => (
+              <span className="cas-tutorial-dot" data-active={index === stepIndex ? "true" : "false"} key={item.id} />
+            ))}
+          </div>
+          <button className="cas-small-button" data-variant="secondary" disabled={isFirst} onClick={onBack} type="button">
+            {copy.tutorialBack}
+          </button>
+          <button className="cas-small-button" data-variant="primary" onClick={onNext} type="button">
+            {isLast ? copy.tutorialDone : copy.tutorialNext}
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function SimulationNextActions({
   copy,
   isRunning,
@@ -3143,6 +3457,8 @@ export function CASLauncher() {
   const [showSuggestions, setShowSuggestions] = React.useState(false);
   const [showModeMenu, setShowModeMenu] = React.useState(false);
   const [showTargetControls, setShowTargetControls] = React.useState(false);
+  const [showTutorial, setShowTutorial] = React.useState(false);
+  const [tutorialStepIndex, setTutorialStepIndex] = React.useState(0);
   const [namespace, setNamespace] = React.useState("default");
   const [resourceName, setResourceName] = React.useState("version");
   const [resourceKind, setResourceKind] = React.useState("ClusterVersion");
@@ -3173,6 +3489,19 @@ export function CASLauncher() {
       : brainStatus.state === "checking"
       ? copy.statusChecking
       : copy.statusDegraded;
+
+  const applyTutorialStep = React.useCallback(
+    (stepIndex: number) => {
+      const nextIndex = Math.max(0, Math.min(stepIndex, copy.tutorialSteps.length - 1));
+      const step = copy.tutorialSteps[nextIndex];
+      setTutorialStepIndex(nextIndex);
+      if (step?.view) setActiveView(step.view);
+      setShowTargetControls(Boolean(step?.targetOpen));
+      setShowSuggestions(false);
+      setShowModeMenu(false);
+    },
+    [copy]
+  );
 
   const rotateQuestionSuggestions = React.useCallback((nextLanguage = language) => {
     setQuestionSuggestions(pickQuestionSuggestions(nextLanguage));
@@ -3225,6 +3554,34 @@ export function CASLauncher() {
   React.useEffect(() => {
     if (isOpen) void refreshBrainStatus();
   }, [isOpen, refreshBrainStatus]);
+
+  React.useEffect(() => {
+    if (!isOpen || hasSeenTutorial()) return;
+    setShowTutorial(true);
+    applyTutorialStep(0);
+  }, [applyTutorialStep, isOpen]);
+
+  const openTutorial = React.useCallback(() => {
+    setShowTutorial(true);
+    applyTutorialStep(0);
+  }, [applyTutorialStep]);
+
+  const closeTutorial = React.useCallback(() => {
+    markTutorialSeen();
+    setShowTutorial(false);
+  }, []);
+
+  const nextTutorialStep = React.useCallback(() => {
+    if (tutorialStepIndex >= copy.tutorialSteps.length - 1) {
+      closeTutorial();
+      return;
+    }
+    applyTutorialStep(tutorialStepIndex + 1);
+  }, [applyTutorialStep, closeTutorial, copy.tutorialSteps.length, tutorialStepIndex]);
+
+  const previousTutorialStep = React.useCallback(() => {
+    applyTutorialStep(tutorialStepIndex - 1);
+  }, [applyTutorialStep, tutorialStepIndex]);
 
   const refreshOverview = React.useCallback(async () => {
     setOverviewStatus("loading");
@@ -3712,6 +4069,17 @@ export function CASLauncher() {
                 <TargetIcon />
               </button>
               <button
+                aria-label={copy.tutorialLabel}
+                className="cas-view-button"
+                data-active={showTutorial}
+                data-test="cas-tutorial-toggle"
+                onClick={openTutorial}
+                title={copy.tutorialLabel}
+                type="button"
+              >
+                <HelpIcon />
+              </button>
+              <button
                 aria-label={copy.languageTitle}
                 className="cas-view-button cas-language-toggle"
                 data-language={language}
@@ -4025,6 +4393,15 @@ export function CASLauncher() {
               />
             )}
           </div>
+          {showTutorial && (
+            <TutorialOverlay
+              copy={copy}
+              stepIndex={tutorialStepIndex}
+              onBack={previousTutorialStep}
+              onClose={closeTutorial}
+              onNext={nextTutorialStep}
+            />
+          )}
         </section>
       )}
       <button

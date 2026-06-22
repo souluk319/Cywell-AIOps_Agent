@@ -102,7 +102,7 @@ ${styles}
 <section aria-label="Cywell AI Sentinel" class="cas-panel" role="dialog">
   <header class="cas-panel-header">
     <div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>KOMSCO AI AGENT</span></div>
-    <div class="cas-header-tools"><nav class="cas-view-switcher"><button class="cas-view-button">C</button><button class="cas-view-button">+</button><button class="cas-view-button">S</button><button class="cas-view-button">G</button><button class="cas-view-button">N</button></nav><button class="cas-close">x</button></div>
+    <div class="cas-header-tools"><nav class="cas-view-switcher"><button class="cas-view-button">C</button><button class="cas-view-button">+</button><button class="cas-view-button">S</button><button class="cas-view-button">G</button><button class="cas-view-button">N</button></nav><button class="cas-view-button">?</button><button class="cas-close">x</button></div>
   </header>
   <div class="cas-panel-body">
     <div class="cas-status-row"><span class="cas-status-light" data-state="ready"></span><span class="cas-status-label">연결됨</span></div>

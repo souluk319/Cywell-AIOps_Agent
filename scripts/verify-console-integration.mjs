@@ -252,12 +252,48 @@ expectText(
   "data-test=\"cas-language-toggle\"",
   "launcher exposes a header globe language toggle"
 );
+expectText(
+  "console-tutorial:toggle",
+  launcherSource,
+  "data-test=\"cas-tutorial-toggle\"",
+  "launcher exposes a header tutorial/help toggle"
+);
+expectText(
+  "console-tutorial:overlay",
+  launcherSource,
+  "data-test=\"cas-tutorial-overlay\"",
+  "launcher renders a first-run tutorial overlay"
+);
+expectText(
+  "console-tutorial:first-run-storage",
+  launcherSource,
+  "TUTORIAL_STORAGE_KEY",
+  "launcher stores tutorial completion in localStorage"
+);
+expectText(
+  "console-tutorial:step-navigation",
+  launcherSource,
+  "applyTutorialStep",
+  "tutorial steps can change the active CAS view"
+);
+expectText(
+  "console-tutorial:simulation-step",
+  launcherSource,
+  "id: \"simulation\"",
+  "tutorial includes a Simulation Lab learning step"
+);
 expectOrder(
   "console-chat:language-toggle-before-close",
   launcherSource,
   ["data-test=\"cas-view-switcher\"", "data-test=\"cas-language-toggle\"", "className=\"cas-close\""],
   "launcher places the language toggle immediately before the far-right close action",
   "language toggle should render after the view switcher and before close"
+);
+expectOrder(
+  "console-tutorial:help-before-language",
+  launcherSource,
+  ["data-test=\"cas-target-toggle\"", "data-test=\"cas-tutorial-toggle\"", "data-test=\"cas-language-toggle\""],
+  "tutorial/help sits after target settings and before language"
 );
 expectText(
   "console-chat:language-icon",
@@ -760,6 +796,18 @@ expectText(
   launcherBundle,
   "cas-language-toggle",
   "built launcher bundle contains the header language toggle"
+);
+expectText(
+  "console-tutorial:bundle-overlay",
+  launcherBundle,
+  "cas-tutorial-overlay",
+  "built launcher bundle contains the tutorial overlay"
+);
+expectText(
+  "console-tutorial:bundle-toggle",
+  launcherBundle,
+  "cas-tutorial-toggle",
+  "built launcher bundle contains the tutorial toggle"
 );
 expectText(
   "console-chat:bundle-english-locale",
