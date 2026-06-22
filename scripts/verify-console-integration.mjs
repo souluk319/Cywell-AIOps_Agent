@@ -491,11 +491,23 @@ expectText(
   "isOpenShiftConsoleHref(action.href)",
   "Next Actions only open known OpenShift console hrefs"
 );
+rejectText(
+  "console-actions:no-events-href",
+  launcherSource,
+  "value.startsWith(\"/events/\")",
+  "Next Actions do not treat CRC-fragile Events routes as direct links"
+);
 expectText(
   "console-actions:fallback-question",
   launcherSource,
   "fallbackQuestion",
   "unknown action hrefs become CAS guidance questions instead of broken links"
+);
+expectText(
+  "console-actions:localized-labels",
+  launcherSource,
+  "displayActionLabel(action, language)",
+  "Next Actions display labels are localized without changing the Gateway action contract"
 );
 expectText(
   "console-chat:target-fields-header",
@@ -628,6 +640,12 @@ expectText(
   launcherSource,
   "data-test=\"cas-metric-provider\"",
   "launcher shows Metric provider state in the Situation tab"
+);
+expectText(
+  "console-cockpit:metric-provider-compact-status",
+  launcherSource,
+  "data-kind=\"status\"",
+  "Metric provider status uses compact status typography instead of numeric score typography"
 );
 expectText(
   "console-chat:tool-plan-panel",

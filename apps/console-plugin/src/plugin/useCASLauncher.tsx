@@ -852,9 +852,9 @@ const styles = `
 }
 
 .cas-panel-header > svg {
-  flex: 0 0 34px;
-  height: 34px;
-  width: 34px;
+  flex: 0 0 26px;
+  height: 26px;
+  width: 26px;
 }
 
 .cas-panel {
@@ -879,22 +879,22 @@ const styles = `
   border-bottom: 1px solid var(--cas-line);
   display: flex;
   flex: 0 0 auto;
-  gap: 12px;
+  gap: 6px;
   min-height: 63px;
-  padding: 14px 16px;
+  padding: 12px;
 }
 
 .cas-header-tools {
   align-items: center;
   display: flex;
   flex: 0 0 auto;
-  gap: 6px;
+  gap: 2px;
 }
 
 .cas-view-switcher {
   align-items: center;
   display: inline-flex;
-  gap: 4px;
+  gap: 1px;
 }
 
 .cas-view-button {
@@ -905,10 +905,10 @@ const styles = `
   color: var(--cas-muted);
   cursor: pointer;
   display: inline-flex;
-  height: 32px;
+  height: 28px;
   justify-content: center;
   padding: 0;
-  width: 32px;
+  width: 24px;
 }
 
 .cas-view-button:hover,
@@ -921,13 +921,13 @@ const styles = `
 }
 
 .cas-view-button svg {
-  height: 18px;
-  width: 18px;
+  height: 17px;
+  width: 16px;
 }
 
 .cas-language-toggle {
-  gap: 5px;
-  width: 48px;
+  gap: 4px;
+  width: 34px;
 }
 
 .cas-language-toggle span {
@@ -942,8 +942,9 @@ const styles = `
 }
 
 .cas-panel-title {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 
 .cas-panel-title strong,
@@ -962,7 +963,20 @@ const styles = `
 
 .cas-panel-title strong,
 .cas-panel-title span {
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cas-panel-title strong {
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+
+.cas-panel-title span {
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .cas-close {
@@ -973,10 +987,10 @@ const styles = `
   cursor: pointer;
   display: inline-flex;
   font: inherit;
-  height: 32px;
+  height: 28px;
   justify-content: center;
   padding: 0;
-  width: 32px;
+  width: 22px;
 }
 
 .cas-tutorial-overlay {
@@ -1142,6 +1156,15 @@ const styles = `
   font-size: 20px;
   line-height: 1.2;
   margin-top: 3px;
+}
+
+.cas-signal-card strong[data-kind="status"] {
+  color: var(--cas-accent-strong);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cas-cockpit-grid {
@@ -2197,17 +2220,17 @@ const styles = `
   }
 
   .cas-view-button {
-    height: 30px;
-    width: 30px;
+    height: 28px;
+    width: 24px;
   }
 
   .cas-language-toggle {
-    width: 42px;
+    width: 34px;
   }
 
   .cas-close {
-    height: 30px;
-    width: 28px;
+    height: 28px;
+    width: 22px;
   }
 
   .cas-tutorial-overlay {
@@ -2466,7 +2489,7 @@ function markTutorialSeen() {
 
 function isOpenShiftConsoleHref(value?: string) {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return false;
-  return value.startsWith("/k8s/") || value.startsWith("/events/") || value.startsWith("/search") || value.startsWith("/monitoring");
+  return value.startsWith("/k8s/") || value.startsWith("/search") || value.startsWith("/monitoring");
 }
 
 function pickQuestionSuggestions(language: Language, count = RECOMMENDED_QUESTION_COUNT) {
@@ -2557,6 +2580,17 @@ function confidenceLabel(value?: number) {
 
 function scoreLabel(value?: number) {
   return Number.isFinite(Number(value)) ? String(Math.round(Number(value))) : "-";
+}
+
+function displayActionLabel(action: OverviewAction, language: Language) {
+  const label = action.label ?? "";
+  if (language !== "ko") return label;
+  if (label === "Review namespace events") return "Namespace 이벤트 확인";
+  if (label.startsWith("Review runbook:")) return label.replace("Review runbook:", "Runbook 확인:");
+  if (label.startsWith("Run RCA for ")) return label.replace("Run RCA for ", "RCA 실행: ");
+  const openMatch = label.match(/^Open (.+) in Console$/);
+  if (openMatch) return `콘솔에서 ${openMatch[1]} 열기`;
+  return label;
 }
 
 function formatTimelineTime(value?: string) {
@@ -2911,7 +2945,7 @@ function OverviewCockpit({
             </div>
             <div className="cas-signal-card" data-test="cas-metric-provider">
               <span>{copy.metricProvider}</span>
-              <strong>{metricStatus?.status ?? "missing"}</strong>
+              <strong data-kind="status">{metricStatus?.status ?? "missing"}</strong>
               <div className="cas-meta">
                 {metricStatus?.count ?? 0} {copy.signals}
               </div>
@@ -3095,11 +3129,12 @@ function OverviewCockpit({
             <div className="cas-action-list">
               {actions.slice(0, 6).map((action) => {
                 const canOpenConsole = action.type === "console_link" && isOpenShiftConsoleHref(action.href);
+                const actionLabel = displayActionLabel(action, language);
                 const fallbackQuestion =
                   action.question ?? `다음 행동 "${action.label}"을 수행하기 위한 안전한 확인 절차와 콘솔 위치를 알려줘.`;
                 return (
                   <div className="cas-action-row" key={`${action.type}-${action.label}`}>
-                    <span title={action.label}>{action.label}</span>
+                    <span title={actionLabel}>{actionLabel}</span>
                     {canOpenConsole ? (
                       <a className="cas-link-button" href={action.href} rel="noreferrer">
                         {copy.open}

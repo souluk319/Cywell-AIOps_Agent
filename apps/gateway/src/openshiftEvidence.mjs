@@ -303,9 +303,9 @@ function overviewActionQueue(namespace, topWorkload) {
     });
   }
   actions.push({
-    label: "Open namespace events",
-    type: "console_link",
-    href: `/events/ns/${namespace}`
+    label: "Review namespace events",
+    type: "cas_query",
+    question: `${namespace} namespace의 최근 Warning 이벤트를 기준으로 장애 가능성과 안전한 확인 절차를 알려줘.`
   });
   return actions;
 }

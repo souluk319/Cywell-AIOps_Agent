@@ -359,7 +359,16 @@ expect("overview:signals", overview.signals?.warning_events === 2 && overview.si
 expect("overview:risk-workloads", overview.risk_workloads?.length >= 2, "overview includes risky workloads");
 expect("overview:timeline", overview.evidence_timeline?.some((item) => item.summary.includes("FailedScheduling")), "overview includes evidence timeline");
 expect("overview:actions", overview.actions?.some((item) => item.type === "cas_query"), "overview includes a Run RCA action");
-expect("overview:events-link", overview.actions?.some((item) => item.type === "console_link" && item.href === "/events/ns/default"), "overview namespace events action uses the OpenShift Events route");
+expect(
+  "overview:events-query-action",
+  overview.actions?.some((item) => item.type === "cas_query" && item.label === "Review namespace events"),
+  "overview namespace events action becomes CAS guidance instead of a fragile console route"
+);
+expect(
+  "overview:no-events-404-link",
+  !overview.actions?.some((item) => item.type === "console_link" && String(item.href ?? "").startsWith("/events/")),
+  "overview does not emit OpenShift Events routes that 404 in CRC 4.20"
+);
 expect("overview:no-runbook-404-link", !overview.actions?.some((item) => String(item.href ?? "").startsWith("/docs/")), "overview does not emit runbook links to missing in-console docs routes");
 expect("overview:runbook-query-action", overview.actions?.some((item) => item.type === "cas_query" && String(item.label ?? "").startsWith("Review runbook:")), "overview runbook actions are CAS guidance queries instead of broken links");
 expect("overview:metric-group", overview.evidence_groups?.metric?.length >= 1, "overview includes metric evidence group");
