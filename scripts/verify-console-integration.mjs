@@ -107,11 +107,11 @@ expectText(
   "launcher exposes a header globe language toggle"
 );
 expectOrder(
-  "console-chat:language-toggle-right",
+  "console-chat:language-toggle-before-close",
   launcherSource,
-  ["data-test=\"cas-view-switcher\"", "className=\"cas-close\"", "data-test=\"cas-language-toggle\""],
-  "launcher places the language toggle at the far right of the header tools",
-  "language toggle should render after the view switcher and close action"
+  ["data-test=\"cas-view-switcher\"", "data-test=\"cas-language-toggle\"", "className=\"cas-close\""],
+  "launcher places the language toggle immediately before the far-right close action",
+  "language toggle should render after the view switcher and before close"
 );
 expectText(
   "console-chat:language-icon",
@@ -198,10 +198,10 @@ expectText(
   "launcher visibly marks fallback responses"
 );
 expectText(
-  "console-chat:replacement-language",
+  "console-chat:komsco-agent-subtitle",
   launcherSource,
-  "Lightspeed replacement",
-  "launcher copy states CAS is the Lightspeed replacement"
+  "KOMSCO AI AGENT",
+  "launcher header copy brands the customer edition as KOMSCO AI AGENT"
 );
 expectText(
   "console-chat:usertoken-copy",

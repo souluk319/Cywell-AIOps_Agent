@@ -265,7 +265,7 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | 챗봇 기본 편의 | Enter 전송, Stop, Copy, Retry, 새 대화 | source/bundle verifier | `cas-stop-analysis`, copy/retry helpers | 완료 |
 | 추천 질의 UX | OCP AIOps 질문 50개 풀에서 5개 랜덤 노출 | source/bundle verifier | `OCP_AIOPS_QUESTION_BANK >= 50`, `cas-suggestion-list`, `cas-send-question` | 완료 |
 | 한/영 토글 | 헤더 지구본 버튼으로 KO/EN 전환, 질문 풀과 Gateway locale 연동 | source/bundle/visual verifier | `cas-language-toggle`, `ko-KR`, `en-US`, KO/EN question bank | 완료 |
-| 헤더 기능 현지화 | 채팅/관제/증적/조치 아이콘 title/aria와 보조 화면 라벨이 KO/EN 토글을 따름 | source/visual verifier | `viewLabels`, `viewsNavLabel`, `copy.subtitle`, `copy.top/restarts` | 완료 |
+| 헤더 기능 현지화 | 채팅/관제/증적/조치 아이콘 title/aria와 보조 화면 라벨이 KO/EN 토글을 따름 | source/visual verifier | `viewLabels`, `viewsNavLabel`, `KOMSCO AI AGENT`, language toggle before close | 완료 |
 | 답변 우선 표시 | Lightspeed 답변 본문이 카드/증적보다 먼저 보임 | source/visual verifier | `cas-answer[data-primary=true]`, collapsed `cas-evidence-panel` | 완료 |
 | Markdown 답변 표시 | Lightspeed Markdown을 raw text가 아닌 서식으로 표시 | source/bundle/visual verifier | `cas-markdown-answer`, `cas-md-inline-code`, no `dangerouslySetInnerHTML` | 완료 |
 | Overview API | `/api/aiops/overview`가 read-only overview 반환 | Gateway pod 내부 HTTPS 호출 | `mode=overview_read_only` | 완료 |

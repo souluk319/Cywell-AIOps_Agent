@@ -314,7 +314,7 @@ const languageCopy: Record<
     emptyAnswer: "Gateway 응답은 도착했지만 answer 필드가 비어 있습니다.",
     systemReady: "CAS가 OpenShift Lightspeed 기능을 내부 뇌로 사용해 읽기 전용 분석을 수행합니다.",
     systemReset: "새 대화를 시작했습니다. CAS는 읽기 전용 분석만 수행합니다.",
-    subtitle: "OpenShift RCA 에이전트 · Lightspeed 대체 도구",
+    subtitle: "KOMSCO AI AGENT",
     targetPrefix: "대상",
     languageTitle: "언어: 한국어. 영어로 전환",
     viewLabels: {
@@ -376,7 +376,7 @@ const languageCopy: Record<
     emptyAnswer: "The Gateway responded, but the answer field is empty.",
     systemReady: "CAS uses OpenShift Lightspeed as its internal brain for read-only analysis.",
     systemReset: "Started a new chat. CAS only performs read-only analysis.",
-    subtitle: "OpenShift RCA Agent · Lightspeed replacement",
+    subtitle: "KOMSCO AI AGENT",
     targetPrefix: "Target",
     languageTitle: "Language: English. Switch to Korean",
     viewLabels: {
@@ -2105,9 +2105,6 @@ export function CASLauncher() {
                   </button>
                 ))}
               </nav>
-              <button aria-label={copy.closeLabel} className="cas-close" onClick={() => setIsOpen(false)} type="button">
-                x
-              </button>
               <button
                 aria-label={copy.languageTitle}
                 className="cas-view-button cas-language-toggle"
@@ -2119,6 +2116,9 @@ export function CASLauncher() {
               >
                 <GlobeIcon />
                 <span>{language === "ko" ? "한" : "EN"}</span>
+              </button>
+              <button aria-label={copy.closeLabel} className="cas-close" onClick={() => setIsOpen(false)} type="button">
+                x
               </button>
             </div>
           </header>
