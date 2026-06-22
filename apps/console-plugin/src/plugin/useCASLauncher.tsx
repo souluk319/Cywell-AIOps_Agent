@@ -49,6 +49,7 @@ type BrainStatus = {
 };
 
 type ActiveView = "chat" | "cockpit" | "evidence" | "actions";
+type Language = "ko" | "en";
 
 type ChatMessage = {
   id: string;
@@ -122,9 +123,16 @@ type MarkdownBlock =
   | { type: "ol"; items: string[] }
   | { type: "code"; text: string };
 
-const initialQuestion = "ClusterVersion 상태를 한 문장으로 요약해줘.";
+const initialQuestionByLanguage: Record<Language, string> = {
+  ko: "ClusterVersion 상태를 한 문장으로 요약해줘.",
+  en: "Summarize the ClusterVersion status in one sentence."
+};
+const localeByLanguage: Record<Language, string> = {
+  ko: "ko-KR",
+  en: "en-US"
+};
 const RECOMMENDED_QUESTION_COUNT = 5;
-const OCP_AIOPS_QUESTION_BANK = [
+const OCP_AIOPS_QUESTION_BANK_KO = [
   "ClusterVersion 상태를 한 문장으로 요약해줘.",
   "현재 degraded 상태의 ClusterOperator가 있는지 확인해줘.",
   "default namespace에서 위험도가 높은 workload를 찾아 원인 후보를 정리해줘.",
@@ -176,6 +184,117 @@ const OCP_AIOPS_QUESTION_BANK = [
   "현재 클러스터에서 안전한 조치와 위험한 조치를 구분해줘.",
   "CAS가 수집한 증적 기준으로 다음 분석 질문을 추천해줘."
 ];
+const OCP_AIOPS_QUESTION_BANK_EN = [
+  "Summarize the ClusterVersion status in one sentence.",
+  "Check whether any ClusterOperator is currently degraded.",
+  "Find high-risk workloads in the default namespace and summarize likely causes.",
+  "Show the resources most likely to be impacted based on recent Warning events.",
+  "Analyze the scheduling failure cause if any Pods are Pending.",
+  "Identify CrashLoopBackOff Pods and summarize restart cause candidates.",
+  "Find Pods that were OOMKilled and explain them from the memory limit perspective.",
+  "Check whether ImagePullBackOff or ErrImagePull events exist.",
+  "Summarize workloads with recent restart spikes and their possible impact.",
+  "Check whether any Node is NotReady or has pressure conditions.",
+  "Find Pod or Node signals that suggest CPU pressure.",
+  "Find Pod or Node signals that suggest memory pressure.",
+  "Look for PVC Pending or volume mount failure events.",
+  "Check whether any Service has empty endpoints.",
+  "Assess Route or Ingress connectivity failure signals.",
+  "Find deployments with stalled rollouts and likely causes.",
+  "Find workloads where ReplicaSet and Pod counts do not match the expected state.",
+  "Recommend safe next checks based on recent FailedScheduling events.",
+  "Find resources with repeated readiness probe failures.",
+  "Find resources with repeated liveness probe failures.",
+  "Summarize top Warning event reasons by namespace.",
+  "Summarize control plane operator status from an operator perspective.",
+  "Check whether there are risk signals for the current cluster update.",
+  "Tell me the current OpenShift version and update progress.",
+  "Pick the top three incident candidates from recent events.",
+  "Separate collected evidence from missing evidence for incident response.",
+  "Suggest safe read-only commands for the next investigation step.",
+  "Build RCA candidates from events and status only, without Prometheus metrics.",
+  "Check for API server or authentication operator warning signals.",
+  "Look for network operator or DNS-related warning signals.",
+  "Check image registry operator status and related events.",
+  "Summarize any Monitoring stack health issues.",
+  "Check OpenShift Console Pods or operator health.",
+  "Check whether any MachineConfigPool update is stuck.",
+  "Summarize Node readiness and possible taint impact.",
+  "Choose the riskiest Pod in a namespace and start RCA.",
+  "List possible causes from Pod status and events without logs.",
+  "Find workloads that may have broken after a recent deployment.",
+  "Check whether HPA or resource shortage is causing replica instability.",
+  "Identify resources with the highest possible user impact.",
+  "Find Pod events that suggest security or permission failures.",
+  "Check for ConfigMap or Secret mount failure signals.",
+  "Check whether CNI or NetworkPolicy may be causing connectivity failures.",
+  "Check for storage attach or detach failure events.",
+  "Summarize the top five signals an operator should inspect now.",
+  "Draft a short incident report from the current cluster state.",
+  "Summarize the current state for shift handoff.",
+  "Create an evidence checklist before starting RCA.",
+  "Separate safe checks from risky actions for the current cluster.",
+  "Recommend the next analysis questions based on evidence collected by CAS."
+];
+const OCP_AIOPS_QUESTION_BANK: Record<Language, string[]> = {
+  ko: OCP_AIOPS_QUESTION_BANK_KO,
+  en: OCP_AIOPS_QUESTION_BANK_EN
+};
+const languageCopy: Record<
+  Language,
+  {
+    suggestionLabel: string;
+    inputPlaceholder: string;
+    sendLabel: string;
+    stopLabel: string;
+    newChat: string;
+    recommendationMeta: string;
+    openCockpit: string;
+    pending: string;
+    abort: string;
+    failure: string;
+    emptyAnswer: string;
+    systemReady: string;
+    systemReset: string;
+    targetPrefix: string;
+    languageTitle: string;
+  }
+> = {
+  ko: {
+    suggestionLabel: "추천 질문",
+    inputPlaceholder: "OpenShift 운영 질문을 입력하세요. Enter 전송, Shift+Enter 줄바꿈",
+    sendLabel: "질의 전송",
+    stopLabel: "분석 중지",
+    newChat: "새 대화",
+    recommendationMeta: "추천 질문 5개 · Enter 전송",
+    openCockpit: "Open Cockpit",
+    pending: "분석 중입니다. Gateway를 통해 Lightspeed brain에 질의하고 있습니다.",
+    abort: "요청을 중지했습니다.",
+    failure: "분석 요청에 실패했습니다.",
+    emptyAnswer: "Gateway 응답은 도착했지만 answer 필드가 비어 있습니다.",
+    systemReady: "CAS가 OpenShift Lightspeed 기능을 내부 뇌로 사용해 읽기 전용 분석을 수행합니다.",
+    systemReset: "새 대화를 시작했습니다. CAS는 읽기 전용 분석만 수행합니다.",
+    targetPrefix: "Target",
+    languageTitle: "언어: 한국어. 영어로 전환"
+  },
+  en: {
+    suggestionLabel: "Recommended questions",
+    inputPlaceholder: "Ask an OpenShift operations question. Enter to send, Shift+Enter for newline",
+    sendLabel: "Send question",
+    stopLabel: "Stop analysis",
+    newChat: "New chat",
+    recommendationMeta: "5 recommended questions · Enter to send",
+    openCockpit: "Open Cockpit",
+    pending: "Analyzing through the Gateway and the Lightspeed brain.",
+    abort: "Request stopped.",
+    failure: "Analysis request failed.",
+    emptyAnswer: "The Gateway responded, but the answer field is empty.",
+    systemReady: "CAS uses OpenShift Lightspeed as its internal brain for read-only analysis.",
+    systemReset: "Started a new chat. CAS only performs read-only analysis.",
+    targetPrefix: "Target",
+    languageTitle: "Language: English. Switch to Korean"
+  }
+};
 
 function getCookieValue(name: string) {
   if (typeof document === "undefined") return undefined;
@@ -321,6 +440,22 @@ const styles = `
 .cas-view-button svg {
   height: 18px;
   width: 18px;
+}
+
+.cas-language-toggle {
+  gap: 5px;
+  width: 48px;
+}
+
+.cas-language-toggle span {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.cas-language-toggle svg {
+  height: 16px;
+  width: 16px;
 }
 
 .cas-panel-title {
@@ -1000,6 +1135,15 @@ function SendIcon({ mode }: { mode: "send" | "stop" }) {
   );
 }
 
+function GlobeIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M4 12h16M12 4c2.2 2.3 3.3 5 3.3 8S14.2 17.7 12 20M12 4c-2.2 2.3-3.3 5-3.3 8s1.1 5.7 3.3 8" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
 function viewLabel(view: ActiveView) {
   if (view === "chat") return "Chat";
   if (view === "cockpit") return "Cockpit";
@@ -1022,12 +1166,12 @@ function resultProvider(result?: RCAResult) {
   return result?.audit?.answer_provider ?? result?.audit?.brain?.provider ?? "cas-gateway";
 }
 
-function normalizeQuestion(value: string, fallback = initialQuestion) {
+function normalizeQuestion(value: string, fallback = initialQuestionByLanguage.ko) {
   return value.trim() || fallback;
 }
 
-function pickQuestionSuggestions(count = RECOMMENDED_QUESTION_COUNT) {
-  const pool = [...OCP_AIOPS_QUESTION_BANK];
+function pickQuestionSuggestions(language: Language, count = RECOMMENDED_QUESTION_COUNT) {
+  const pool = [...OCP_AIOPS_QUESTION_BANK[language]];
   for (let index = pool.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(Math.random() * (index + 1));
     [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
@@ -1482,8 +1626,9 @@ function EvidenceSummary({ result }: { result: RCAResult }) {
 export function CASLauncher() {
   const [isOpen, setIsOpen] = React.useState(false);
   const [activeView, setActiveView] = React.useState<ActiveView>("chat");
+  const [language, setLanguage] = React.useState<Language>("ko");
   const [question, setQuestion] = React.useState("");
-  const [questionSuggestions, setQuestionSuggestions] = React.useState(() => pickQuestionSuggestions());
+  const [questionSuggestions, setQuestionSuggestions] = React.useState(() => pickQuestionSuggestions("ko"));
   const [activeSuggestionIndex, setActiveSuggestionIndex] = React.useState(0);
   const [showSuggestions, setShowSuggestions] = React.useState(true);
   const [showTargetControls, setShowTargetControls] = React.useState(false);
@@ -1504,19 +1649,34 @@ export function CASLauncher() {
     {
       id: "system-ready",
       role: "system",
-      content: "CAS가 OpenShift Lightspeed 기능을 내부 뇌로 사용해 읽기 전용 분석을 수행합니다."
+      content: languageCopy.ko.systemReady
     }
   ]);
   const chatThreadRef = React.useRef<HTMLDivElement | null>(null);
   const abortControllerRef = React.useRef<AbortController | null>(null);
-  const activeSuggestion = questionSuggestions[activeSuggestionIndex] ?? initialQuestion;
+  const copy = languageCopy[language];
+  const activeSuggestion = questionSuggestions[activeSuggestionIndex] ?? initialQuestionByLanguage[language];
   const targetSummary = `${namespace || "default"} · ${resourceKind || "Resource"}/${resourceName || "name"}`;
 
-  const rotateQuestionSuggestions = React.useCallback(() => {
-    setQuestionSuggestions(pickQuestionSuggestions());
+  const rotateQuestionSuggestions = React.useCallback((nextLanguage = language) => {
+    setQuestionSuggestions(pickQuestionSuggestions(nextLanguage));
     setActiveSuggestionIndex(0);
     setShowSuggestions(true);
-  }, []);
+  }, [language]);
+
+  const toggleLanguage = React.useCallback(() => {
+    const nextLanguage: Language = language === "ko" ? "en" : "ko";
+    setLanguage(nextLanguage);
+    setQuestion("");
+    setShowSuggestions(true);
+    setQuestionSuggestions(pickQuestionSuggestions(nextLanguage));
+    setActiveSuggestionIndex(0);
+    setMessages((current) =>
+      current.length === 1 && current[0]?.id === "system-ready"
+        ? [{ ...current[0], content: languageCopy[nextLanguage].systemReady }]
+        : current
+    );
+  }, [language]);
 
   const refreshBrainStatus = React.useCallback(async () => {
     setBrainStatus((current) => ({ ...current, state: "checking", detail: "연결 확인 중" }));
@@ -1605,7 +1765,7 @@ export function CASLauncher() {
   const submitQuestion = React.useCallback(
     async (questionText: string, nextResourceName?: string, nextNamespace?: string, nextResourceKind?: string) => {
       if (isRunning) return;
-      const submittedQuestion = normalizeQuestion(questionText);
+      const submittedQuestion = normalizeQuestion(questionText, initialQuestionByLanguage[language]);
       const targetResourceName = nextResourceName ?? resourceName;
       const targetNamespace = nextNamespace ?? namespace;
       const targetResourceKind = nextResourceKind ?? resourceKind;
@@ -1623,7 +1783,7 @@ export function CASLauncher() {
         {
           id: pendingMessageId,
           role: "assistant",
-          content: "분석 중입니다. Gateway를 통해 Lightspeed brain에 질의하고 있습니다.",
+          content: copy.pending,
           question: submittedQuestion,
           isPending: true
         }
@@ -1654,7 +1814,7 @@ export function CASLauncher() {
             },
             mode: "read_only",
             stream: false,
-            locale: "ko-KR",
+            locale: localeByLanguage[language],
             conversation_id: conversationId
           })
         });
@@ -1670,7 +1830,7 @@ export function CASLauncher() {
             message.id === pendingMessageId
               ? {
                   ...message,
-                  content: body.rca_result?.answer ?? "Gateway 응답은 도착했지만 answer 필드가 비어 있습니다.",
+                  content: body.rca_result?.answer ?? copy.emptyAnswer,
                   isPending: false,
                   result: body
                 }
@@ -1684,7 +1844,7 @@ export function CASLauncher() {
             message.id === pendingMessageId
               ? {
                   ...message,
-                  content: isAbort ? "요청을 중지했습니다." : queryError instanceof Error ? queryError.message : "분석 요청에 실패했습니다.",
+                  content: isAbort ? copy.abort : queryError instanceof Error ? queryError.message : copy.failure,
                   isPending: false
                 }
               : message
@@ -1698,7 +1858,7 @@ export function CASLauncher() {
         rotateQuestionSuggestions();
       }
     },
-    [conversationId, isRunning, namespace, resourceKind, resourceName, rotateQuestionSuggestions]
+    [conversationId, copy, isRunning, language, namespace, resourceKind, resourceName, rotateQuestionSuggestions]
   );
 
   const runQuery = React.useCallback(
@@ -1757,10 +1917,13 @@ export function CASLauncher() {
 
   const selectWorkload = React.useCallback(
     (workload: RiskWorkload) => {
-      const nextQuestion = `${workload.namespace} namespace ${workload.name} ${workload.kind} 원인 분석해줘`;
+      const nextQuestion =
+        language === "en"
+          ? `Analyze the root cause for ${workload.kind} ${workload.name} in namespace ${workload.namespace}.`
+          : `${workload.namespace} namespace ${workload.name} ${workload.kind} 원인 분석해줘`;
       runOverviewQuestion(nextQuestion, workload.name, workload.namespace, workload.kind);
     },
-    [runOverviewQuestion]
+    [language, runOverviewQuestion]
   );
 
   const resetConversation = React.useCallback(() => {
@@ -1771,15 +1934,15 @@ export function CASLauncher() {
     setActiveView("chat");
     setQuestion("");
     setShowTargetControls(false);
-    rotateQuestionSuggestions();
+    rotateQuestionSuggestions(language);
     setMessages([
       {
         id: "system-ready",
         role: "system",
-        content: "새 대화를 시작했습니다. CAS는 읽기 전용 분석만 수행합니다."
+        content: copy.systemReset
       }
     ]);
-  }, [rotateQuestionSuggestions]);
+  }, [copy.systemReset, language, rotateQuestionSuggestions]);
 
   return (
     <div className="cas-launcher-root" data-test="cas-launcher-root">
@@ -1793,6 +1956,18 @@ export function CASLauncher() {
               <span>OpenShift RCA Agent · Lightspeed replacement</span>
             </div>
             <div className="cas-header-tools">
+              <button
+                aria-label={copy.languageTitle}
+                className="cas-view-button cas-language-toggle"
+                data-language={language}
+                data-test="cas-language-toggle"
+                onClick={toggleLanguage}
+                title={copy.languageTitle}
+                type="button"
+              >
+                <GlobeIcon />
+                <span>{language === "ko" ? "한" : "EN"}</span>
+              </button>
               <nav aria-label="AI Sentinel views" className="cas-view-switcher" data-test="cas-view-switcher">
                 {(["chat", "cockpit", "evidence", "actions"] as ActiveView[]).map((view) => (
                   <button
@@ -1839,7 +2014,7 @@ export function CASLauncher() {
                     Health {scoreLabel(overview?.health?.score)} · {overview?.health?.risk ?? overviewStatus}
                   </span>
                   <button className="cas-link-button" onClick={() => openView("cockpit")} type="button">
-                    Open Cockpit
+                    {copy.openCockpit}
                   </button>
                 </div>
 
@@ -1898,7 +2073,7 @@ export function CASLauncher() {
 
                 <form className="cas-compose" onSubmit={runQuery}>
                   {showSuggestions && question.trim().length === 0 && (
-                    <div aria-label="추천 질문" className="cas-suggestion-list" data-test="cas-suggestion-list">
+                    <div aria-label={copy.suggestionLabel} className="cas-suggestion-list" data-test="cas-suggestion-list">
                       {questionSuggestions.map((suggestion, index) => (
                         <button
                           className="cas-suggestion"
@@ -1927,26 +2102,26 @@ export function CASLauncher() {
                       }}
                       onFocus={() => setShowSuggestions(false)}
                       onKeyDown={handleQuestionKeyDown}
-                      placeholder={showSuggestions ? activeSuggestion : "OpenShift 운영 질문을 입력하세요. Enter 전송, Shift+Enter 줄바꿈"}
+                      placeholder={showSuggestions ? activeSuggestion : copy.inputPlaceholder}
                       value={question}
                     />
                     {isRunning ? (
                       <button
-                        aria-label="분석 중지"
+                        aria-label={copy.stopLabel}
                         className="cas-send-button"
                         data-test="cas-stop-analysis"
                         onClick={stopQuery}
-                        title="중지"
+                        title={copy.stopLabel}
                         type="button"
                       >
                         <SendIcon mode="stop" />
                       </button>
                     ) : (
                       <button
-                        aria-label="질의 전송"
+                        aria-label={copy.sendLabel}
                         className="cas-send-button"
                         data-test="cas-send-question"
-                        title="질의"
+                        title={copy.sendLabel}
                         type="submit"
                       >
                         <SendIcon mode="send" />
@@ -1960,9 +2135,9 @@ export function CASLauncher() {
                       onClick={() => setShowTargetControls((current) => !current)}
                       type="button"
                     >
-                      Target {targetSummary}
+                      {copy.targetPrefix} {targetSummary}
                     </button>
-                    <span className="cas-meta">추천 질문 {questionSuggestions.length}개 · Enter 전송</span>
+                    <span className="cas-meta">{copy.recommendationMeta}</span>
                   </div>
                   {showTargetControls && (
                     <div className="cas-fields" data-test="cas-target-fields">
@@ -1988,7 +2163,7 @@ export function CASLauncher() {
                   )}
                   <div className="cas-actions">
                     <button className="cas-secondary" disabled={isRunning} onClick={resetConversation} type="button">
-                      새 대화
+                      {copy.newChat}
                     </button>
                   </div>
                 </form>

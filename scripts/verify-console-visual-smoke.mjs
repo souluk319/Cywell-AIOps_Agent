@@ -55,6 +55,7 @@ function extractLauncherStyles() {
 
 function buildHarness(styles) {
   const icon = `<svg aria-hidden="true" viewBox="0 0 48 48" role="img"><path d="M24 5.5 38 10v11.4c0 9.1-5.4 16.8-14 21.1-8.6-4.3-14-12-14-21.1V10l14-4.5Z" fill="currentColor" opacity="0.16"></path><path d="M24 9.7 34 13v8.4c0 6.7-3.8 12.7-10 16.4-6.2-3.7-10-9.7-10-16.4V13l10-3.3Z" fill="none" stroke="currentColor" stroke-width="2.6"></path><path d="M20 24.2h8M24 18.4v11.7" stroke="currentColor" stroke-linecap="round" stroke-width="2.6"></path></svg>`;
+  const globe = `<svg aria-hidden="true" viewBox="0 0 24 24" role="img"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"></circle><path d="M4 12h16M12 4c2.2 2.3 3.3 5 3.3 8S14.2 17.7 12 20M12 4c-2.2 2.3-3.3 5-3.3 8s1.1 5.7 3.3 8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></svg>`;
 
   return `<!doctype html>
 <html lang="ko">
@@ -84,7 +85,7 @@ ${styles}
 </div>
 <div class="cas-launcher-root" data-test="cas-launcher-root">
 <section aria-label="Cywell AI Sentinel" class="cas-panel" data-test="cas-launcher-panel" role="dialog">
-  <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>OpenShift RCA Agent · Lightspeed replacement</span></div><button aria-label="Close AI Sentinel" class="cas-close" type="button">x</button></header>
+  <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>OpenShift RCA Agent · Lightspeed replacement</span></div><div class="cas-header-tools"><button aria-label="언어: 한국어. 영어로 전환" class="cas-view-button cas-language-toggle" data-language="ko" data-test="cas-language-toggle" type="button">${globe}<span>한</span></button><button aria-label="Close AI Sentinel" class="cas-close" type="button">x</button></div></header>
   <div class="cas-panel-body">
     <div class="cas-status-row"><span class="cas-badge" data-state="ready" data-test="cas-brain-status">ready · openshift-lightspeed</span><span class="cas-badge" data-test="cas-provider-badge">UserToken proxy</span><span class="cas-conversation" data-test="cas-conversation-id">conversation smoke-test</span></div>
     <div class="cas-meta">OpenShift Lightspeed readiness 확인됨</div>

@@ -26,10 +26,12 @@ function rejectText(id, text, needle, passDetail, failDetail = passDetail) {
   else fail(id, failDetail);
 }
 
-function questionBankSize(text) {
-  const match = text.match(/const OCP_AIOPS_QUESTION_BANK = \[([\s\S]*?)\];/);
-  if (!match) return 0;
-  return (match[1].match(/"[^"]+"/g) ?? []).length;
+function questionBankSize(text, name) {
+  const start = text.indexOf(`const ${name} = [`);
+  if (start < 0) return 0;
+  const end = text.indexOf("];", start);
+  if (end < 0) return 0;
+  return (text.slice(start, end).match(/"[^"]+"/g) ?? []).length;
 }
 
 const launcherSource = await readFile("apps/console-plugin/src/plugin/useCASLauncher.tsx", "utf8");
@@ -80,6 +82,30 @@ expectText(
   launcherSource,
   "data-test=\"cas-view-switcher\"",
   "launcher exposes header icon view switching"
+);
+expectText(
+  "console-chat:language-toggle",
+  launcherSource,
+  "data-test=\"cas-language-toggle\"",
+  "launcher exposes a header globe language toggle"
+);
+expectText(
+  "console-chat:language-icon",
+  launcherSource,
+  "function GlobeIcon",
+  "launcher renders a globe icon for Korean/English language switching"
+);
+expectText(
+  "console-chat:locale-map",
+  launcherSource,
+  "localeByLanguage",
+  "launcher maps language state to Gateway locale"
+);
+expectText(
+  "console-chat:english-locale",
+  launcherSource,
+  "en-US",
+  "launcher supports English locale for Gateway requests"
 );
 expectText(
   "console-chat:enter-send",
@@ -165,10 +191,15 @@ expectText(
   "pickQuestionSuggestions",
   "launcher rotates recommended questions from the question bank"
 );
-if (questionBankSize(launcherSource) >= 50) {
-  pass("console-chat:question-bank", "launcher carries at least 50 OpenShift AIOps recommended questions");
+if (questionBankSize(launcherSource, "OCP_AIOPS_QUESTION_BANK_KO") >= 50) {
+  pass("console-chat:question-bank-ko", "launcher carries at least 50 Korean OpenShift AIOps recommended questions");
 } else {
-  fail("console-chat:question-bank", `expected at least 50 questions, got ${questionBankSize(launcherSource)}`);
+  fail("console-chat:question-bank-ko", `expected at least 50 Korean questions, got ${questionBankSize(launcherSource, "OCP_AIOPS_QUESTION_BANK_KO")}`);
+}
+if (questionBankSize(launcherSource, "OCP_AIOPS_QUESTION_BANK_EN") >= 50) {
+  pass("console-chat:question-bank-en", "launcher carries at least 50 English OpenShift AIOps recommended questions");
+} else {
+  fail("console-chat:question-bank-en", `expected at least 50 English questions, got ${questionBankSize(launcherSource, "OCP_AIOPS_QUESTION_BANK_EN")}`);
 }
 expectText(
   "console-chat:empty-submit-uses-suggestion",
@@ -325,6 +356,18 @@ expectText(
   launcherBundle,
   "cas-view-switcher",
   "built launcher bundle contains header view switching"
+);
+expectText(
+  "console-chat:bundle-language-toggle",
+  launcherBundle,
+  "cas-language-toggle",
+  "built launcher bundle contains the header language toggle"
+);
+expectText(
+  "console-chat:bundle-english-locale",
+  launcherBundle,
+  "en-US",
+  "built launcher bundle contains English locale support"
 );
 expectText(
   "console-chat:bundle-stop-action",
