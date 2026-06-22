@@ -90,8 +90,15 @@ ${styles}
     <div class="cas-status-row"><span class="cas-badge" data-state="ready" data-test="cas-brain-status">ready · openshift-lightspeed</span><span class="cas-badge" data-test="cas-provider-badge">UserToken proxy</span><span class="cas-conversation" data-test="cas-conversation-id">conversation smoke-test</span></div>
     <div class="cas-meta">OpenShift Lightspeed readiness 확인됨</div>
     <div class="cas-chat-surface" data-test="cas-chat-default-view">
-    <div class="cas-chat-topline"><span class="cas-badge" data-state="ready">상태 점수 82 · medium</span><button class="cas-link-button" type="button">상황 열기</button></div>
     <div class="cas-chat-thread" data-test="cas-chat-thread">
+      <article class="cas-message" data-role="user">
+        <strong class="cas-message-role">운영자</strong>
+        <div class="cas-answer cas-markdown" data-primary="false" data-test="cas-markdown-answer"><p class="cas-md-paragraph">ClusterVersion 상태를 한 문장으로 요약해줘.</p></div>
+      </article>
+      <article class="cas-message" data-pending="true" data-role="assistant">
+        <strong class="cas-message-role">AI Sentinel</strong>
+        <div class="cas-pending-answer" data-test="cas-pending-answer"><span>증적 수집과 답변 생성을 진행 중입니다.</span><span aria-hidden="true" class="cas-pending-dots"><span></span><span></span><span></span></span></div>
+      </article>
       <article class="cas-message" data-role="assistant">
         <strong class="cas-message-role">AI Sentinel</strong>
         <div class="cas-answer cas-markdown" data-primary="true" data-test="cas-markdown-answer">
@@ -102,11 +109,12 @@ ${styles}
           <ol class="cas-md-list"><li><code class="cas-md-inline-code">oc get clusterversion version -o yaml</code></li><li>Degraded 조건과 availableUpdates 확인</li></ol>
         </div>
         <div class="cas-result-meta"><span class="cas-meta">Lightspeed real answer · openshift-lightspeed</span></div>
+        <div class="cas-rca-trace" data-test="cas-rca-trace"><span class="cas-rca-trace-label">수집 흐름</span><span class="cas-trace-chip" data-status="collected"><strong>OpenShift</strong><span>collected</span><span>1</span></span><span class="cas-trace-chip" data-status="collected"><strong>Metric</strong><span>collected</span><span>1</span></span><span class="cas-trace-chip" data-status="collected"><strong>Runbook</strong><span>collected</span><span>3</span></span><span class="cas-trace-chip" data-status="collected"><strong>Tool Plan</strong><span>collected</span><span>5</span></span><span class="cas-trace-chip" data-status="ok"><strong>Brain</strong><span>ok</span></span></div>
         <details class="cas-result-details" data-test="cas-evidence-panel"><summary>근거 5개 · RCA 후보 1개 · 부족한 증적 0개</summary><div class="cas-result-details-body"><div class="cas-evidence-list"><div class="cas-evidence-group"><div class="cas-panel-heading"><strong>OpenShift 상태/이벤트</strong><span class="cas-meta">1</span></div><div class="cas-meta">왜 보는가: OpenShift 상태, 이벤트, 로그는 RCA의 1차 사실 근거입니다.</div><div class="cas-evidence-item"><strong>openshift:clusterversion:version</strong><div>ClusterVersion desired=4.20.5 conditions=[Available=True, Progressing=False]</div><span>apis/config.openshift.io/v1/clusterversions/version</span></div></div><div class="cas-evidence-group"><div class="cas-panel-heading"><strong>Metric 관측값</strong><span class="cas-meta">1</span></div><div class="cas-evidence-item"><strong>metric:namespace_restart_increase_by_pod:default:Namespace:default</strong><div>namespace_restart_increase_by_pod returned no-series</div><span>thanos.api.v1.query</span></div></div></div></div></details>
       </article>
     </div>
     <form class="cas-compose">
-      <div aria-label="추천 질문" class="cas-suggestion-list" data-test="cas-suggestion-list"><button class="cas-suggestion" data-active="true" type="button">ClusterVersion 상태를 한 문장으로 요약해줘.</button><button class="cas-suggestion" type="button">최근 Warning 이벤트 기준으로 장애 가능성이 높은 리소스를 알려줘.</button><button class="cas-suggestion" type="button">Pending 상태 Pod가 있다면 스케줄링 실패 원인을 분석해줘.</button><button class="cas-suggestion" type="button">Node NotReady 또는 pressure condition이 있는지 점검해줘.</button><button class="cas-suggestion" type="button">운영자가 지금 바로 봐야 할 Top 5 신호를 요약해줘.</button></div>
+      <div class="cas-suggestion-shell" data-visible="true"><div aria-label="추천 질문" class="cas-suggestion-list" data-test="cas-suggestion-list"><button class="cas-suggestion" data-active="true" type="button">ClusterVersion 상태를 한 문장으로 요약해줘.</button><button class="cas-suggestion" type="button">최근 Warning 이벤트 기준으로 장애 가능성이 높은 리소스를 알려줘.</button><button class="cas-suggestion" type="button">Pending 상태 Pod가 있다면 스케줄링 실패 원인을 분석해줘.</button><button class="cas-suggestion" type="button">Node NotReady 또는 pressure condition이 있는지 점검해줘.</button><button class="cas-suggestion" type="button">운영자가 지금 바로 봐야 할 Top 5 신호를 요약해줘.</button></div></div>
       <div class="cas-input-wrap"><textarea aria-label="AI Sentinel question" placeholder="OpenShift 운영 질문을 입력하세요. Enter 전송, Shift+Enter 줄바꿈"></textarea><button aria-label="질의 전송" class="cas-send-button" data-test="cas-send-question" type="submit"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4.5 19.5 20 12 4.5 4.5 7 11.2 14 12l-7 .8-2.5 6.7Z" fill="currentColor"/></svg></button></div>
       <div class="cas-compose-toolbar"><button class="cas-link-button cas-target-toggle" type="button">대상 default · ClusterVersion/version</button><span class="cas-meta">추천 질문 5개 · Enter 전송</span></div>
       <div class="cas-actions"><button class="cas-secondary" type="button">새 대화</button></div>
@@ -121,6 +129,15 @@ ${styles}
 function runQa() {
   const panel = document.querySelector(".cas-panel").getBoundingClientRect();
   const body = document.querySelector(".cas-panel-body");
+  const chatThread = document.querySelector(".cas-chat-thread");
+  const chatThreadStyle = getComputedStyle(chatThread);
+  const suggestionShell = document.querySelector(".cas-suggestion-shell");
+  const textarea = document.querySelector(".cas-compose textarea");
+  const expectedPanelHeight = Math.min(760, innerHeight - 112);
+  const isMobile = innerWidth <= 620;
+  const minSuggestionSlot = isMobile ? 96 : 110;
+  const minTextareaHeight = isMobile ? 58 : 70;
+  const maxTextareaHeight = isMobile ? 78 : 90;
   const bad = [...document.querySelectorAll(".cas-panel *")].filter((el) => {
     const cs = getComputedStyle(el);
     return el.scrollWidth > el.clientWidth + 2 && cs.overflowX !== "auto" && cs.overflowX !== "scroll";
@@ -128,12 +145,23 @@ function runQa() {
   const result = {
     viewport: [innerWidth, innerHeight],
     panel: { left: Math.round(panel.left), right: Math.round(panel.right), top: Math.round(panel.top), bottom: Math.round(panel.bottom), width: Math.round(panel.width), height: Math.round(panel.height) },
+    expectedPanelHeight: Math.round(expectedPanelHeight),
     documentOverflowX: document.documentElement.scrollWidth > innerWidth + 1,
     panelInViewport: panel.left >= -1 && panel.right <= innerWidth + 1 && panel.top >= -1 && panel.bottom <= innerHeight + 1,
     panelBodyScrollsVertically: body.scrollHeight > body.clientHeight,
+    panelHeightStable: Math.abs(panel.height - expectedPanelHeight) <= 2,
+    chatThreadOwnsScroll: chatThreadStyle.overflowY === "auto" || chatThreadStyle.overflowY === "scroll",
+    chatThreadHasSpace: chatThread.clientHeight >= 160,
+    suggestionSlotHeight: suggestionShell.clientHeight,
+    minSuggestionSlot,
+    textareaHeight: textarea.clientHeight,
+    minTextareaHeight,
+    maxTextareaHeight,
+    suggestionSlotReserved: suggestionShell.clientHeight >= minSuggestionSlot,
+    textareaFixedHeight: textarea.clientHeight >= minTextareaHeight && textarea.clientHeight <= maxTextareaHeight,
     horizontalOverflowItems: bad
   };
-  result.pass = !result.documentOverflowX && result.panelInViewport && bad.length === 0;
+  result.pass = !result.documentOverflowX && result.panelInViewport && result.panelHeightStable && result.chatThreadOwnsScroll && result.chatThreadHasSpace && result.suggestionSlotReserved && result.textareaFixedHeight && bad.length === 0;
   document.body.setAttribute("data-qa-pass", String(result.pass));
   document.getElementById("qa-result").textContent = JSON.stringify(result, null, 2);
 }
@@ -185,6 +213,15 @@ if (chromePath) {
   for (const viewport of viewports) {
     const { screenshotPath, result } = runChrome(chromePath, viewport);
     record(`visual:${viewport.id}:panel`, result.panelInViewport, `panel=${JSON.stringify(result.panel)}`);
+    record(
+      `visual:${viewport.id}:stable-panel-height`,
+      result.panelHeightStable,
+      `panelHeight=${result.panel.height} expected=${result.expectedPanelHeight}`
+    );
+    record(`visual:${viewport.id}:thread-scroll-contract`, result.chatThreadOwnsScroll, "chat thread owns vertical scrolling");
+    record(`visual:${viewport.id}:thread-space`, result.chatThreadHasSpace, "chat thread keeps readable space");
+    record(`visual:${viewport.id}:suggestion-slot`, result.suggestionSlotReserved, "recommended question slot is reserved");
+    record(`visual:${viewport.id}:textarea-height`, result.textareaFixedHeight, "composer textarea height is fixed");
     record(`visual:${viewport.id}:overflow-x`, !result.documentOverflowX, "no document horizontal overflow");
     record(
       `visual:${viewport.id}:text-overflow`,

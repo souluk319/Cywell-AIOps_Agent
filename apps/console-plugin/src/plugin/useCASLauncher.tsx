@@ -313,6 +313,8 @@ const languageCopy: Record<
     metricEvidence: string;
     runbookEvidence: string;
     toolPlan: string;
+    rcaTrace: string;
+    brain: string;
     whyThisMatters: string;
     whyOpenShift: string;
     whyMetric: string;
@@ -341,12 +343,12 @@ const languageCopy: Record<
     newChat: "새 대화",
     recommendationMeta: "추천 질문 5개 · Enter 전송",
     openCockpit: "상황 열기",
-    pending: "분석 중입니다. Gateway를 통해 Lightspeed brain에 질의하고 있습니다.",
+    pending: "증적 수집과 답변 생성을 진행 중입니다.",
     abort: "요청을 중지했습니다.",
     failure: "분석 요청에 실패했습니다.",
     emptyAnswer: "Gateway 응답은 도착했지만 answer 필드가 비어 있습니다.",
-    systemReady: "CAS가 OpenShift Lightspeed 기능을 내부 뇌로 사용해 읽기 전용 분석을 수행합니다.",
-    systemReset: "새 대화를 시작했습니다. CAS는 읽기 전용 분석만 수행합니다.",
+    systemReady: "CAS가 OpenShift 증적을 읽기 전용으로 수집하고 원인 분석 답변을 생성합니다.",
+    systemReset: "새 대화를 시작했습니다. CAS는 읽기 전용 원인 분석만 수행합니다.",
     subtitle: "KOMSCO AI AGENT",
     targetPrefix: "대상",
     languageTitle: "언어: 한국어. 영어로 전환",
@@ -369,7 +371,7 @@ const languageCopy: Record<
     topTargets: "상위 대상",
     top: "상위",
     restarts: "재시작",
-    rcaCandidate: "RCA 후보",
+    rcaCandidate: "원인 후보",
     overviewLoading: "Overview를 불러오는 중입니다.",
     confidence: "신뢰도",
     evidence: "근거",
@@ -386,6 +388,8 @@ const languageCopy: Record<
     metricEvidence: "Metric 관측값",
     runbookEvidence: "Runbook 참고",
     toolPlan: "읽기 전용 Tool Plan",
+    rcaTrace: "수집 흐름",
+    brain: "Brain",
     whyThisMatters: "왜 보는가",
     whyOpenShift: "OpenShift 상태, 이벤트, 로그는 RCA의 1차 사실 근거입니다.",
     whyMetric: "재시작, 메모리, 포화 신호는 문제가 현재 진행 중인지 과거 상태인지 구분합니다.",
@@ -399,9 +403,9 @@ const languageCopy: Record<
     run: "실행",
     open: "열기",
     noActions: "아직 추천 행동이 없습니다.",
-    runRcaTargets: "RCA 실행 대상",
-    noRcaTargets: "현재 실행 가능한 RCA 대상이 없습니다.",
-    evidenceSummary: (evidence, causes, missing) => `근거 ${evidence}개 · RCA 후보 ${causes}개 · 부족한 증적 ${missing}개`,
+    runRcaTargets: "원인 분석 대상",
+    noRcaTargets: "현재 실행 가능한 원인 분석 대상이 없습니다.",
+    evidenceSummary: (evidence, causes, missing) => `근거 ${evidence}개 · 원인 후보 ${causes}개 · 부족한 증적 ${missing}개`,
     evidenceSection: "근거",
     missingSection: "부족한 증적"
   },
@@ -413,12 +417,12 @@ const languageCopy: Record<
     newChat: "New chat",
     recommendationMeta: "5 recommended questions · Enter to send",
     openCockpit: "Open Situation",
-    pending: "Analyzing through the Gateway and the Lightspeed brain.",
+    pending: "Collecting evidence and preparing the answer.",
     abort: "Request stopped.",
     failure: "Analysis request failed.",
     emptyAnswer: "The Gateway responded, but the answer field is empty.",
-    systemReady: "CAS uses OpenShift Lightspeed as its internal brain for read-only analysis.",
-    systemReset: "Started a new chat. CAS only performs read-only analysis.",
+    systemReady: "CAS collects OpenShift evidence in read-only mode and prepares cause analysis.",
+    systemReset: "Started a new chat. CAS only performs read-only cause analysis.",
     subtitle: "KOMSCO AI AGENT",
     targetPrefix: "Target",
     languageTitle: "Language: English. Switch to Korean",
@@ -441,7 +445,7 @@ const languageCopy: Record<
     topTargets: "Top targets",
     top: "Top",
     restarts: "restarts",
-    rcaCandidate: "RCA Candidate",
+    rcaCandidate: "Cause Candidate",
     overviewLoading: "Loading overview.",
     confidence: "confidence",
     evidence: "evidence",
@@ -458,6 +462,8 @@ const languageCopy: Record<
     metricEvidence: "Metric observations",
     runbookEvidence: "Runbook references",
     toolPlan: "Read-only Tool Plan",
+    rcaTrace: "RCA Trace",
+    brain: "Brain",
     whyThisMatters: "Why this matters",
     whyOpenShift: "OpenShift status, events, and logs are the primary RCA facts.",
     whyMetric: "Restart, memory, and saturation signals show whether the issue is current or historical.",
@@ -471,9 +477,9 @@ const languageCopy: Record<
     run: "Run",
     open: "Open",
     noActions: "No recommended actions yet.",
-    runRcaTargets: "Run RCA Targets",
-    noRcaTargets: "No RCA targets are available.",
-    evidenceSummary: (evidence, causes, missing) => `${evidence} evidence · ${causes} RCA candidates · ${missing} missing evidence`,
+    runRcaTargets: "Cause Analysis Targets",
+    noRcaTargets: "No cause analysis targets are available.",
+    evidenceSummary: (evidence, causes, missing) => `${evidence} evidence · ${causes} cause candidates · ${missing} missing evidence`,
     evidenceSection: "Evidence",
     missingSection: "Missing Evidence"
   }
@@ -568,6 +574,9 @@ const styles = `
   border-radius: 8px;
   bottom: calc(var(--pf-t--global--spacer--2xl, 48px) + var(--pf-t--global--spacer--lg, 24px) + 10px);
   box-shadow: var(--pf-t--global--box-shadow--lg, 0 18px 44px rgba(3, 22, 30, 0.24));
+  display: flex;
+  flex-direction: column;
+  height: min(760px, calc(100vh - 112px));
   max-height: min(760px, calc(100vh - 112px));
   overflow: hidden;
   position: fixed;
@@ -580,7 +589,9 @@ const styles = `
   align-items: center;
   border-bottom: 1px solid var(--cas-line);
   display: flex;
+  flex: 0 0 auto;
   gap: 12px;
+  min-height: 63px;
   padding: 14px 16px;
 }
 
@@ -683,8 +694,10 @@ const styles = `
 .cas-panel-body {
   display: grid;
   gap: 12px;
-  max-height: calc(min(760px, calc(100vh - 112px)) - 65px);
-  overflow: auto;
+  flex: 1 1 auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
   padding: 14px 16px 16px;
 }
 
@@ -698,6 +711,9 @@ const styles = `
 .cas-cockpit {
   display: grid;
   gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .cas-health-strip {
@@ -879,14 +895,20 @@ const styles = `
 }
 
 .cas-chat-thread {
+  align-content: start;
   display: grid;
   gap: 10px;
-  min-height: 220px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .cas-chat-surface {
   display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 12px;
+  min-height: 0;
 }
 
 .cas-chat-topline {
@@ -902,6 +924,8 @@ const styles = `
   border-radius: 8px;
   display: grid;
   gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 11px 12px;
 }
 
@@ -924,6 +948,10 @@ const styles = `
   padding: 0 2px;
 }
 
+.cas-message[data-pending="true"] {
+  min-height: 78px;
+}
+
 .cas-message-role {
   color: var(--cas-muted);
   font-size: 12px;
@@ -938,6 +966,51 @@ const styles = `
 .cas-answer[data-primary="true"] {
   color: var(--cas-ink);
   font-size: 15px;
+}
+
+.cas-pending-answer {
+  align-items: center;
+  color: var(--cas-muted);
+  display: inline-flex;
+  font-size: 14px;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.cas-pending-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.cas-pending-dots span {
+  animation: cas-pending-pulse 1.1s infinite ease-in-out;
+  background: var(--cas-accent);
+  border-radius: 999px;
+  display: inline-block;
+  height: 5px;
+  opacity: 0.34;
+  width: 5px;
+}
+
+.cas-pending-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.cas-pending-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes cas-pending-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.34;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
 }
 
 .cas-markdown {
@@ -1000,6 +1073,52 @@ const styles = `
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.cas-rca-trace {
+  align-items: center;
+  background: var(--cas-soft);
+  border: 1px solid var(--cas-line);
+  border-radius: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 8px;
+}
+
+.cas-rca-trace-label {
+  color: var(--cas-muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-right: 2px;
+}
+
+.cas-trace-chip {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 999px;
+  color: var(--cas-muted);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+  line-height: 1;
+  max-width: 100%;
+  min-height: 24px;
+  overflow-wrap: anywhere;
+  padding: 5px 7px;
+}
+
+.cas-trace-chip[data-status="collected"],
+.cas-trace-chip[data-status="ok"] {
+  border-color: rgba(8, 127, 140, 0.28);
+  color: var(--cas-accent-strong);
+}
+
+.cas-trace-chip[data-status="missing"],
+.cas-trace-chip[data-status="fallback"] {
+  border-color: rgba(166, 98, 0, 0.28);
+  color: var(--cas-warning);
 }
 
 .cas-message-tools {
@@ -1109,7 +1228,9 @@ const styles = `
 .cas-compose {
   border-top: 1px solid var(--cas-line);
   display: grid;
-  gap: 10px;
+  flex: 0 0 auto;
+  gap: 8px;
+  min-width: 0;
   padding-top: 12px;
 }
 
@@ -1130,9 +1251,12 @@ const styles = `
 }
 
 .cas-compose textarea {
-  min-height: 80px;
+  height: 76px;
+  max-height: 124px;
+  min-height: 76px;
+  overflow: auto;
   padding-right: 48px;
-  resize: vertical;
+  resize: none;
 }
 
 .cas-send-button {
@@ -1163,9 +1287,22 @@ const styles = `
 }
 
 .cas-suggestion-list {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.cas-suggestion-shell {
+  align-items: end;
+  display: grid;
+  min-height: 122px;
+}
+
+.cas-suggestion-shell[data-visible="false"] {
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .cas-suggestion {
@@ -1174,12 +1311,19 @@ const styles = `
   border-radius: 999px;
   color: var(--cas-muted);
   cursor: pointer;
+  display: -webkit-box;
   font: inherit;
   font-size: 12px;
   line-height: 1.35;
+  max-height: 38px;
   max-width: 100%;
+  min-height: 32px;
+  min-width: 0;
+  overflow: hidden;
   padding: 6px 9px;
   text-align: left;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .cas-suggestion:hover,
@@ -1245,6 +1389,7 @@ const styles = `
 @media (max-width: 620px) {
   .cas-panel {
     bottom: calc(var(--pf-t--global--spacer--2xl, 48px) + 22px);
+    height: min(720px, calc(100vh - 86px));
     left: 8px;
     right: 8px;
     width: auto;
@@ -1256,12 +1401,59 @@ const styles = `
   }
 
   .cas-panel-header {
-    align-items: flex-start;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .cas-panel-body {
+    gap: 10px;
+    padding: 12px;
   }
 
   .cas-header-tools {
-    align-items: flex-end;
-    flex-direction: column-reverse;
+    align-items: center;
+    flex-direction: row;
+    gap: 3px;
+    margin-left: auto;
+  }
+
+  .cas-view-switcher {
+    gap: 2px;
+  }
+
+  .cas-view-button {
+    height: 30px;
+    width: 30px;
+  }
+
+  .cas-language-toggle {
+    width: 42px;
+  }
+
+  .cas-close {
+    height: 30px;
+    width: 28px;
+  }
+
+  .cas-suggestion-shell {
+    min-height: 104px;
+  }
+
+  .cas-suggestion {
+    font-size: 11px;
+    max-height: 32px;
+    min-height: 28px;
+    padding: 4px 8px;
+  }
+
+  .cas-compose textarea {
+    height: 64px;
+    min-height: 64px;
+  }
+
+  .cas-secondary {
+    padding: 7px 10px;
   }
 
   .cas-fields,
@@ -1368,8 +1560,8 @@ function createMessageId(prefix: string) {
 
 function modeLabel(mode?: string) {
   if (mode === "lightspeed_read_only") return "Lightspeed real answer";
-  if (mode === "lightspeed_fallback_mock") return "Fallback mock RCA";
-  if (mode === "mock_read_only") return "Mock RCA";
+  if (mode === "lightspeed_fallback_mock") return "Fallback analysis";
+  if (mode === "mock_read_only") return "Mock analysis";
   return mode || "ready";
 }
 
@@ -1427,6 +1619,16 @@ function groupEvidenceBySource(evidence: EvidenceItem[]) {
 
 function statusFor(evidenceStatus: EvidenceStatus[] | undefined, type: string) {
   return evidenceStatus?.find((item) => item.type === type);
+}
+
+function traceCount(status: EvidenceStatus | undefined, fallbackCount: number) {
+  if (status) return status.count;
+  return fallbackCount;
+}
+
+function traceStatus(status: EvidenceStatus | undefined, fallbackCount: number) {
+  if (status?.status) return status.status;
+  return fallbackCount > 0 ? "collected" : "missing";
 }
 
 function parseMarkdownBlocks(content: string): MarkdownBlock[] {
@@ -1577,6 +1779,19 @@ function MarkdownAnswer({ content, primary }: { content: string; primary: boolea
   );
 }
 
+function PendingAnswer({ content }: { content: string }) {
+  return (
+    <div className="cas-pending-answer" data-test="cas-pending-answer">
+      <span>{content}</span>
+      <span aria-hidden="true" className="cas-pending-dots">
+        <span />
+        <span />
+        <span />
+      </span>
+    </div>
+  );
+}
+
 function EvidenceGroup({
   title,
   type,
@@ -1608,6 +1823,57 @@ function EvidenceGroup({
         ))}
         {items.length === 0 && <div className="cas-meta">{emptyText}</div>}
       </div>
+    </div>
+  );
+}
+
+function RcaTrace({ result, copy }: { result: RCAResult; copy: (typeof languageCopy)[Language] }) {
+  const evidence = result.evidence_bundle?.evidence ?? [];
+  const groups = groupEvidenceBySource(evidence);
+  const evidenceStatus = result.evidence_bundle?.evidence_status ?? [];
+  const openShift = statusFor(evidenceStatus, "openshift");
+  const metric = statusFor(evidenceStatus, "metric");
+  const runbook = statusFor(evidenceStatus, "runbook");
+  const toolSteps = result.tool_plan?.tool_plan ?? [];
+  const brainStatus = result.audit?.brain?.status ?? (result.mode === "lightspeed_fallback_mock" ? "fallback" : "ok");
+  const chips = [
+    {
+      label: "OpenShift",
+      status: traceStatus(openShift, groups.openshift.length),
+      count: traceCount(openShift, groups.openshift.length)
+    },
+    {
+      label: "Metric",
+      status: traceStatus(metric, groups.metric.length),
+      count: traceCount(metric, groups.metric.length)
+    },
+    {
+      label: "Runbook",
+      status: traceStatus(runbook, groups.runbook.length),
+      count: traceCount(runbook, groups.runbook.length)
+    },
+    {
+      label: "Tool Plan",
+      status: toolSteps.length > 0 ? "collected" : "missing",
+      count: toolSteps.length
+    },
+    {
+      label: copy.brain,
+      status: brainStatus,
+      count: brainStatus === "ok" ? 1 : 0
+    }
+  ];
+
+  return (
+    <div className="cas-rca-trace" data-test="cas-rca-trace">
+      <span className="cas-rca-trace-label">{copy.rcaTrace}</span>
+      {chips.map((chip) => (
+        <span className="cas-trace-chip" data-status={chip.status} key={chip.label}>
+          <strong>{chip.label}</strong>
+          <span>{chip.status}</span>
+          {chip.label !== copy.brain && <span>{chip.count}</span>}
+        </span>
+      ))}
     </div>
   );
 }
@@ -2116,7 +2382,7 @@ export function CASLauncher() {
     if (isOpen && activeView === "chat") {
       chatThreadRef.current?.scrollTo({
         top: chatThreadRef.current.scrollHeight,
-        behavior: "smooth"
+        behavior: "auto"
       });
     }
   }, [activeView, isOpen, messages]);
@@ -2388,15 +2654,6 @@ export function CASLauncher() {
 
             {activeView === "chat" ? (
               <div className="cas-chat-surface" data-test="cas-chat-default-view">
-                <div className="cas-chat-topline">
-                  <span className="cas-badge" data-state={overviewStatus === "ready" ? "ready" : "degraded"}>
-                    {copy.health} {scoreLabel(overview?.health?.score)} · {overview?.health?.risk ?? overviewStatus}
-                  </span>
-                  <button className="cas-link-button" onClick={() => openView("cockpit")} type="button">
-                    {copy.openCockpit}
-                  </button>
-                </div>
-
                 <div className="cas-chat-thread" data-test="cas-chat-thread" ref={chatThreadRef}>
                   {messages.map((message) => {
                     const isFallback = message.result?.mode === "lightspeed_fallback_mock";
@@ -2411,7 +2668,11 @@ export function CASLauncher() {
                         <strong className="cas-message-role">
                           {message.role === "user" ? "운영자" : message.role === "assistant" ? "AI Sentinel" : "시스템"}
                         </strong>
-                        <MarkdownAnswer content={message.content} primary={message.role === "assistant" && Boolean(message.result)} />
+                        {message.isPending ? (
+                          <PendingAnswer content={message.content} />
+                        ) : (
+                          <MarkdownAnswer content={message.content} primary={message.role === "assistant" && Boolean(message.result)} />
+                        )}
                         {message.result && (
                           <>
                             <div className="cas-result-meta">
@@ -2425,6 +2686,7 @@ export function CASLauncher() {
                                 fallback active
                               </div>
                             )}
+                            <RcaTrace copy={copy} result={message.result} />
                             <EvidenceSummary copy={copy} result={message.result} />
                           </>
                         )}
@@ -2451,7 +2713,7 @@ export function CASLauncher() {
                 </div>
 
                 <form className="cas-compose" onSubmit={runQuery}>
-                  {showSuggestions && question.trim().length === 0 && (
+                  <div className="cas-suggestion-shell" data-visible={showSuggestions && question.trim().length === 0 ? "true" : "false"}>
                     <div aria-label={copy.suggestionLabel} className="cas-suggestion-list" data-test="cas-suggestion-list">
                       {questionSuggestions.map((suggestion, index) => (
                         <button
@@ -2462,13 +2724,14 @@ export function CASLauncher() {
                           key={suggestion}
                           onClick={() => submitSuggestion(suggestion, index)}
                           onMouseEnter={() => setActiveSuggestionIndex(index)}
+                          title={suggestion}
                           type="button"
                         >
                           {suggestion}
                         </button>
                       ))}
                     </div>
-                  )}
+                  </div>
                   <div className="cas-input-wrap">
                     <textarea
                       aria-label="AI Sentinel question"

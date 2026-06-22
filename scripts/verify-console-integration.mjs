@@ -95,6 +95,48 @@ expectText(
   "launcher defaults to a chat-first surface"
 );
 expectText(
+  "console-chat:fixed-panel-height",
+  launcherSource,
+  "height: min(760px, calc(100vh - 112px))",
+  "launcher uses a fixed panel height so pending/results do not resize the outer chat window"
+);
+expectText(
+  "console-chat:internal-thread-scroll",
+  launcherSource,
+  "grid-template-rows: minmax(0, 1fr) auto",
+  "chat surface gives the message thread the flexible scroll area"
+);
+expectText(
+  "console-chat:scrollbar-stability",
+  launcherSource,
+  "scrollbar-gutter: stable",
+  "chat thread reserves scrollbar gutter to reduce layout jump"
+);
+expectText(
+  "console-chat:pending-indicator",
+  launcherSource,
+  "data-test=\"cas-pending-answer\"",
+  "launcher renders a compact pending indicator instead of a long loading paragraph"
+);
+expectText(
+  "console-chat:suggestion-slot",
+  launcherSource,
+  "className=\"cas-suggestion-shell\"",
+  "recommended questions live in a reserved slot so focusing/submitting does not move the input"
+);
+expectText(
+  "console-chat:auto-scroll-no-animation-jank",
+  launcherSource,
+  "behavior: \"auto\"",
+  "chat autoscroll avoids smooth-scroll animation during submit/pending transitions"
+);
+rejectText(
+  "console-chat:no-lightspeed-loading-copy",
+  launcherSource,
+  "Gateway를 통해 Lightspeed brain",
+  "loading copy does not expose the internal Lightspeed call as the primary user experience"
+);
+expectText(
   "console-chat:view-switcher",
   launcherSource,
   "data-test=\"cas-view-switcher\"",
@@ -352,6 +394,18 @@ expectText(
   "launcher keeps the read-only Tool Plan in the folded answer panel"
 );
 expectText(
+  "console-chat:rca-trace",
+  launcherSource,
+  "data-test=\"cas-rca-trace\"",
+  "launcher surfaces OpenShift/Metric/Runbook/Tool Plan/Brain collection flow on the answer card"
+);
+expectText(
+  "console-chat:trace-chips",
+  launcherSource,
+  "cas-trace-chip",
+  "launcher renders compact trace chips for collected and missing evidence"
+);
+expectText(
   "console-cockpit:action-queue",
   launcherSource,
   "data-test=\"cas-action-queue\"",
@@ -464,6 +518,12 @@ expectText(
   launcherBundle,
   "cas-md-inline-code",
   "built launcher bundle contains inline code styling for Markdown answers"
+);
+expectText(
+  "console-chat:bundle-rca-trace",
+  launcherBundle,
+  "cas-rca-trace",
+  "built launcher bundle contains the visible RCA collection flow"
 );
 expectText(
   "console-chat:bundle-suggestions",
