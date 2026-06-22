@@ -95,10 +95,10 @@ for (const file of files) {
       } else {
         fail("gateway:openshift-api-url", "gateway Kubernetes API URL missing");
       }
-      if (text.includes("CAS_RUNBOOK_PROVIDER") && text.includes("jsonl") && text.includes("komsco-ocp-mini.jsonl")) {
-        pass("gateway:runbook-jsonl", "gateway includes curated JSONL runbook adapter config");
+      if (text.includes("CAS_RUNBOOK_PROVIDER") && text.includes("jsonl") && text.includes("komsco-ops-sim.jsonl")) {
+        pass("gateway:runbook-jsonl", "gateway includes synthetic customer JSONL runbook adapter config");
       } else {
-        fail("gateway:runbook-jsonl", "gateway curated JSONL runbook config missing");
+        fail("gateway:runbook-jsonl", "gateway synthetic customer JSONL runbook config missing");
       }
       if (text.includes("CAS_METRIC_PROVIDER") && text.includes("thanos") && text.includes("thanos-querier.openshift-monitoring")) {
         pass("gateway:metric-thanos", "gateway includes Thanos metric adapter config");

@@ -230,11 +230,48 @@ if (consolePod) {
       overview.stderr || overview.stdout
     );
 
+    const simulationsCode = [
+      "const https=require('https');",
+      "https.get('https://127.0.0.1:9443/api/aiops/simulations',{rejectUnauthorized:false,headers:{accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,count:j.scenarios?.length||0,first:j.scenarios?.[0]?.id,actions:j.scenarios?.[0]?.remediations?.length||0}));});}).on('error',e=>{console.error(e.message);process.exit(1);});"
+    ].join("");
+    const simulations = execNode(consolePod.metadata.name, simulationsCode, 60000);
+    expect(
+      "runtime:simulations-through-plugin",
+      simulations.ok &&
+        simulations.stdout.includes("simulation_catalog") &&
+        simulations.stdout.includes("\"count\":4") &&
+        simulations.stdout.includes("issuance-api-oom") &&
+        simulations.stdout.includes("\"actions\":1"),
+      "console plugin exposes data-driven Simulation Lab scenarios",
+      simulations.stderr || simulations.stdout
+    );
+
+    const simulationQueryCode = [
+      "const https=require('https');",
+      `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
+      "const payload=JSON.stringify({question:'해결 시뮬레이션 후 상태 확인',simulation_id:'issuance-api-oom',simulation_action_id:'simulate-memory-baseline-review',mode:'read_only',stream:false,locale:'ko-KR'});",
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/query',{method:'POST',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,'content-type':'application/json','content-length':Buffer.byteLength(payload)}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,brain:j.audit?.brain?.status,simulation:(j.evidence_bundle?.evidence??[]).filter(e=>e.type==='simulation').map(e=>e.id),metric:(j.evidence_bundle?.evidence??[]).filter(e=>e.type==='metric').map(e=>e.summary).slice(0,3),runbook:(j.evidence_bundle?.evidence??[]).filter(e=>e.type==='runbook').map(e=>e.id).slice(0,3)}));});});",
+      "req.on('error',e=>{console.error(e.message);process.exit(1);});req.write(payload);req.end();"
+    ].join("");
+    const simulationQuery = execNode(consolePod.metadata.name, simulationQueryCode, 150000);
+    expect(
+      "runtime:simulation-query-through-plugin",
+      simulationQuery.ok &&
+        simulationQuery.stdout.includes("lightspeed_read_only") &&
+        simulationQuery.stdout.includes("\"brain\":\"ok\"") &&
+        simulationQuery.stdout.includes("simulation:action:issuance-api-oom:simulate-memory-baseline-review") &&
+        simulationQuery.stdout.includes("pod_restart_increase") &&
+        simulationQuery.stdout.includes("pod_memory_working_set") &&
+        simulationQuery.stdout.includes("runbook:"),
+      "console plugin runs Simulation Lab remediation through Gateway, RAG, Metric, and Lightspeed",
+      simulationQuery.stderr || simulationQuery.stdout
+    );
+
     const liveQueryCode = [
       "const https=require('https');",
       `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
-      "const payload=JSON.stringify({question:'ClusterVersion 상태를 한 문장으로 요약해줘.',scope:{cluster:'local-cluster',namespaces:['default']},resourceRef:{kind:'ClusterVersion',name:'version'},mode:'read_only',stream:false,locale:'ko-KR'});",
-      "const req=https.request('https://127.0.0.1:9443/api/aiops/query',{method:'POST',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,'content-type':'application/json','content-length':Buffer.byteLength(payload)}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,provider:j.audit?.answer_provider,brain:j.audit?.brain?.status,evidence:j.audit?.evidence,answerLength:j.rca_result?.answer?.length||0,conversation:!!j.conversation_id,evidenceIds:(j.evidence_bundle?.evidence??[]).map(e=>e.id).slice(0,12),metric:(j.evidence_bundle?.evidence??[]).filter(e=>e.type==='metric').map(e=>e.summary),runbook:(j.evidence_bundle?.evidence??[]).filter(e=>e.type==='runbook').map(e=>e.id)}));});});",
+      "const payload=JSON.stringify({question:'ClusterVersion 상태를 한 문장으로 요약해줘.',scope:{cluster:'local-cluster',namespaces:['default']},resourceRef:{kind:'ClusterVersion',name:'version'},mode:'read_only',brain_mode:'troubleshooting',stream:false,locale:'ko-KR'});",
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/query',{method:'POST',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,'content-type':'application/json','content-length':Buffer.byteLength(payload)}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,provider:j.audit?.answer_provider,brain:j.audit?.brain?.status,brainMode:j.audit?.brain?.mode,evidence:j.audit?.evidence,answerLength:j.rca_result?.answer?.length||0,conversation:!!j.conversation_id,evidenceIds:(j.evidence_bundle?.evidence??[]).map(e=>e.id).slice(0,12),metric:(j.evidence_bundle?.evidence??[]).filter(e=>e.type==='metric').map(e=>e.summary),runbook:(j.evidence_bundle?.evidence??[]).filter(e=>e.type==='runbook').map(e=>e.id)}));});});",
       "req.on('error',e=>{console.error(e.message);process.exit(1);});req.write(payload);req.end();"
     ].join("");
     const liveQuery = execNode(consolePod.metadata.name, liveQueryCode, 150000);
@@ -244,11 +281,33 @@ if (consolePod) {
         liveQuery.stdout.includes("lightspeed_read_only") &&
         liveQuery.stdout.includes("openshift-lightspeed") &&
         liveQuery.stdout.includes("\"brain\":\"ok\"") &&
+        liveQuery.stdout.includes("\"brainMode\":\"troubleshooting\"") &&
         liveQuery.stdout.includes("openshift:clusterversion:version") &&
         liveQuery.stdout.includes("metric:") &&
         liveQuery.stdout.includes("runbook:"),
       "console plugin forwards user token, CAS collects OpenShift/metric/runbook evidence, and Lightspeed answers",
       liveQuery.stderr || liveQuery.stdout
+    );
+
+    const streamQueryCode = [
+      "const https=require('https');",
+      `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
+      "const payload=JSON.stringify({question:'ClusterVersion 상태를 한 문장으로 요약해줘.',scope:{cluster:'local-cluster',namespaces:['default']},resourceRef:{kind:'ClusterVersion',name:'version'},mode:'read_only',brain_mode:'troubleshooting',stream:true,locale:'ko-KR'});",
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/query',{method:'POST',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'text/event-stream','content-length':Buffer.byteLength(payload)}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const events=[...b.matchAll(/^event: (.+)$/gm)].map(m=>m[1]);console.log(JSON.stringify({status:r.statusCode,events:events.slice(0,12),hasFinal:b.includes('event: final_answer'),hasToken:b.includes('event: token'),hasEvidence:b.includes('event: evidence'),hasLightspeed:b.includes('lightspeed_read_only'),hasBrainMode:b.includes('\"mode\":\"troubleshooting\"')}));});});",
+      "req.on('error',e=>{console.error(e.message);process.exit(1);});req.write(payload);req.end();"
+    ].join("");
+    const streamQuery = execNode(consolePod.metadata.name, streamQueryCode, 150000);
+    expect(
+      "runtime:stream-query-through-plugin",
+      streamQuery.ok &&
+        streamQuery.stdout.includes("\"status\":200") &&
+        streamQuery.stdout.includes("\"hasToken\":true") &&
+        streamQuery.stdout.includes("\"hasFinal\":true") &&
+        streamQuery.stdout.includes("\"hasEvidence\":true") &&
+        streamQuery.stdout.includes("\"hasLightspeed\":true") &&
+        streamQuery.stdout.includes("\"hasBrainMode\":true"),
+      "console plugin query endpoint streams status/evidence/tokens/final answer through the Gateway",
+      streamQuery.stderr || streamQuery.stdout
     );
   }
 } else {

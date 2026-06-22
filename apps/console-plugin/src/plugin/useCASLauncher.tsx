@@ -64,8 +64,9 @@ type BrainStatus = {
   detail: string;
 };
 
-type ActiveView = "chat" | "cockpit" | "evidence" | "actions";
+type ActiveView = "chat" | "cockpit" | "evidence" | "actions" | "simulation";
 type Language = "ko" | "en";
+type ChatMode = "ask" | "troubleshooting";
 
 type ChatMessage = {
   id: string;
@@ -137,6 +138,44 @@ type OverviewResult = {
   evidence_status?: EvidenceStatus[];
   actions?: OverviewAction[];
   missing?: MissingEvidence[];
+};
+
+type SimulationRemediation = {
+  id: string;
+  label: string;
+  description?: string;
+  question?: string;
+};
+
+type SimulationScenario = {
+  id: string;
+  title: string;
+  summary?: string;
+  risk?: string;
+  question: string;
+  target: {
+    namespace: string;
+    kind: string;
+    name: string;
+    container?: string;
+  };
+  signals?: {
+    warnings?: number;
+    restarts?: number;
+    metric_series?: number;
+  };
+  remediations?: SimulationRemediation[];
+};
+
+type QueryTarget = {
+  namespace: string;
+  kind: string;
+  name: string;
+};
+
+type StreamEvent = {
+  event: string;
+  data: unknown;
 };
 
 type MarkdownBlock =
@@ -273,6 +312,10 @@ const languageCopy: Record<
     newChat: string;
     recommendationMeta: string;
     openCockpit: string;
+    scrollBottom: string;
+    statusConnected: string;
+    statusChecking: string;
+    statusDegraded: string;
     pending: string;
     abort: string;
     failure: string;
@@ -281,6 +324,17 @@ const languageCopy: Record<
     systemReset: string;
     subtitle: string;
     targetPrefix: string;
+    targetTitle: string;
+    targetCurrent: string;
+    targetNamespace: string;
+    targetKind: string;
+    targetName: string;
+    targetApply: string;
+    targetClose: string;
+    modeSelectorLabel: string;
+    modeLabels: Record<ChatMode, string>;
+    modeDescriptions: Record<ChatMode, string>;
+    modeTitles: Record<ChatMode, string>;
     languageTitle: string;
     viewLabels: Record<ActiveView, string>;
     viewsNavLabel: string;
@@ -333,30 +387,62 @@ const languageCopy: Record<
     evidenceSummary: (evidence: number, causes: number, missing: number) => string;
     evidenceSection: string;
     missingSection: string;
+    simulationLab: string;
+    simulationLoading: string;
+    simulationIntro: string;
+    simulationRun: string;
+    simulationFix: string;
+    simulationSignals: string;
+    simulationNoScenarios: string;
   }
 > = {
   ko: {
-    suggestionLabel: "추천 질문",
-    inputPlaceholder: "OpenShift 운영 질문을 입력하세요. Enter 전송, Shift+Enter 줄바꿈",
+    suggestionLabel: "자주 확인",
+    inputPlaceholder: "무엇을 확인할까요?",
     sendLabel: "질의 전송",
     stopLabel: "분석 중지",
     newChat: "새 대화",
-    recommendationMeta: "추천 질문 5개 · Enter 전송",
+    recommendationMeta: "자주 확인 5개 · Enter 전송",
     openCockpit: "상황 열기",
-    pending: "증적 수집과 답변 생성을 진행 중입니다.",
+    scrollBottom: "아래로",
+    statusConnected: "연결됨",
+    statusChecking: "확인 중",
+    statusDegraded: "점검 필요",
+    pending: "자료 확인 중",
     abort: "요청을 중지했습니다.",
     failure: "분석 요청에 실패했습니다.",
     emptyAnswer: "Gateway 응답은 도착했지만 answer 필드가 비어 있습니다.",
-    systemReady: "CAS가 OpenShift 증적을 읽기 전용으로 수집하고 원인 분석 답변을 생성합니다.",
-    systemReset: "새 대화를 시작했습니다. CAS는 읽기 전용 원인 분석만 수행합니다.",
+    systemReady: "",
+    systemReset: "",
     subtitle: "KOMSCO AI AGENT",
-    targetPrefix: "대상",
+    targetPrefix: "대상 설정",
+    targetTitle: "분석 대상",
+    targetCurrent: "현재 대상",
+    targetNamespace: "Namespace",
+    targetKind: "Kind",
+    targetName: "Name",
+    targetApply: "적용",
+    targetClose: "닫기",
+    modeSelectorLabel: "질문 모드",
+    modeLabels: {
+      ask: "Ask",
+      troubleshooting: "Troubleshooting"
+    },
+    modeDescriptions: {
+      ask: "명확한 설명과 운영 가이드",
+      troubleshooting: "장애 진단과 해결 방향 탐색"
+    },
+    modeTitles: {
+      ask: "개념, 문서, 설정, 사용법 질문",
+      troubleshooting: "Troubleshooting: 현재 클러스터 증적 기반 장애 분석"
+    },
     languageTitle: "언어: 한국어. 영어로 전환",
     viewLabels: {
       chat: "채팅",
       cockpit: "상황",
       evidence: "근거",
-      actions: "다음 행동"
+      actions: "다음 행동",
+      simulation: "시뮬레이션"
     },
     viewsNavLabel: "AI Sentinel 화면",
     closeLabel: "AI Sentinel 닫기",
@@ -407,30 +493,62 @@ const languageCopy: Record<
     noRcaTargets: "현재 실행 가능한 원인 분석 대상이 없습니다.",
     evidenceSummary: (evidence, causes, missing) => `근거 ${evidence}개 · 원인 후보 ${causes}개 · 부족한 증적 ${missing}개`,
     evidenceSection: "근거",
-    missingSection: "부족한 증적"
+    missingSection: "부족한 증적",
+    simulationLab: "운영 시뮬레이션",
+    simulationLoading: "시뮬레이션을 불러오는 중입니다.",
+    simulationIntro: "목업 운영 세계를 선택하면 CAS가 실제처럼 증적, metric, Runbook을 수집해 분석합니다.",
+    simulationRun: "문제 분석",
+    simulationFix: "해결 시뮬레이션",
+    simulationSignals: "신호",
+    simulationNoScenarios: "시뮬레이션 시나리오가 없습니다."
   },
   en: {
-    suggestionLabel: "Recommended questions",
-    inputPlaceholder: "Ask an OpenShift operations question. Enter to send, Shift+Enter for newline",
+    suggestionLabel: "Frequent checks",
+    inputPlaceholder: "Ask about OpenShift operations",
     sendLabel: "Send question",
     stopLabel: "Stop analysis",
     newChat: "New chat",
-    recommendationMeta: "5 recommended questions · Enter to send",
+    recommendationMeta: "5 frequent checks · Enter to send",
     openCockpit: "Open Situation",
-    pending: "Collecting evidence and preparing the answer.",
+    scrollBottom: "Bottom",
+    statusConnected: "Connected",
+    statusChecking: "Checking",
+    statusDegraded: "Needs attention",
+    pending: "Checking data",
     abort: "Request stopped.",
     failure: "Analysis request failed.",
     emptyAnswer: "The Gateway responded, but the answer field is empty.",
-    systemReady: "CAS collects OpenShift evidence in read-only mode and prepares cause analysis.",
-    systemReset: "Started a new chat. CAS only performs read-only cause analysis.",
+    systemReady: "",
+    systemReset: "",
     subtitle: "KOMSCO AI AGENT",
-    targetPrefix: "Target",
+    targetPrefix: "Target settings",
+    targetTitle: "Analysis Target",
+    targetCurrent: "Current target",
+    targetNamespace: "Namespace",
+    targetKind: "Kind",
+    targetName: "Name",
+    targetApply: "Apply",
+    targetClose: "Close",
+    modeSelectorLabel: "Question mode",
+    modeLabels: {
+      ask: "Ask",
+      troubleshooting: "Troubleshooting"
+    },
+    modeDescriptions: {
+      ask: "Explanations and operations guidance",
+      troubleshooting: "Incident diagnosis and next steps"
+    },
+    modeTitles: {
+      ask: "Concepts, docs, configuration, and how-to questions",
+      troubleshooting: "Troubleshooting: live evidence-based incident analysis"
+    },
     languageTitle: "Language: English. Switch to Korean",
     viewLabels: {
       chat: "Chat",
       cockpit: "Situation",
       evidence: "Grounds",
-      actions: "Next Actions"
+      actions: "Next Actions",
+      simulation: "Simulation"
     },
     viewsNavLabel: "AI Sentinel views",
     closeLabel: "Close AI Sentinel",
@@ -481,7 +599,14 @@ const languageCopy: Record<
     noRcaTargets: "No cause analysis targets are available.",
     evidenceSummary: (evidence, causes, missing) => `${evidence} evidence · ${causes} cause candidates · ${missing} missing evidence`,
     evidenceSection: "Evidence",
-    missingSection: "Missing Evidence"
+    missingSection: "Missing Evidence",
+    simulationLab: "Operations Simulation",
+    simulationLoading: "Loading simulations.",
+    simulationIntro: "Choose a mock operations world. CAS will collect synthetic evidence, metrics, and runbooks as if it were live.",
+    simulationRun: "Analyze Issue",
+    simulationFix: "Simulate Fix",
+    simulationSignals: "Signals",
+    simulationNoScenarios: "No simulation scenarios are available."
   }
 };
 
@@ -666,8 +791,7 @@ const styles = `
 
 .cas-panel-title span,
 .cas-meta,
-.cas-evidence-item span,
-.cas-conversation {
+.cas-evidence-item span {
   color: var(--cas-muted);
   font-size: 12px;
 }
@@ -695,17 +819,49 @@ const styles = `
   display: grid;
   gap: 12px;
   flex: 1 1 auto;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   padding: 14px 16px 16px;
 }
 
+.cas-panel-body[data-target-open="true"] {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
 .cas-status-row {
   align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: inline-flex;
+  gap: 6px;
+  justify-self: end;
+  min-height: 18px;
+}
+
+.cas-status-light {
+  background: var(--cas-muted);
+  border-radius: 999px;
+  display: inline-block;
+  height: 8px;
+  margin-top: 1px;
+  width: 8px;
+}
+
+.cas-status-light[data-state="ready"] {
+  background: var(--cas-accent);
+}
+
+.cas-status-light[data-state="checking"] {
+  background: var(--cas-warning);
+}
+
+.cas-status-light[data-state="degraded"] {
+  background: var(--cas-danger);
+}
+
+.cas-status-label {
+  color: var(--cas-muted);
+  font-size: 11px;
+  line-height: 1;
 }
 
 .cas-cockpit {
@@ -761,6 +917,32 @@ const styles = `
 
 .cas-cockpit-panel[data-wide="true"] {
   grid-column: 1 / -1;
+}
+
+.cas-simulation-list {
+  display: grid;
+  gap: 10px;
+}
+
+.cas-simulation-card {
+  background: var(--cas-soft);
+  border: 1px solid var(--cas-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.cas-simulation-card[data-selected="true"] {
+  border-color: rgba(8, 127, 140, 0.45);
+  box-shadow: inset 3px 0 0 var(--cas-accent);
+}
+
+.cas-simulation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .cas-panel-heading {
@@ -847,14 +1029,24 @@ const styles = `
 
 .cas-action-row {
   align-items: center;
-  display: flex;
+  display: grid;
   gap: 8px;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .cas-action-row span {
+  display: -webkit-box;
   min-width: 0;
+  overflow: hidden;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.cas-action-row .cas-link-button {
+  justify-self: end;
+  min-width: max-content;
+  white-space: nowrap;
 }
 
 .cas-link-button {
@@ -909,6 +1101,7 @@ const styles = `
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 12px;
   min-height: 0;
+  position: relative;
 }
 
 .cas-chat-topline {
@@ -1068,13 +1261,6 @@ const styles = `
   white-space: pre-wrap;
 }
 
-.cas-result-meta {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
 .cas-rca-trace {
   align-items: center;
   background: var(--cas-soft);
@@ -1229,9 +1415,140 @@ const styles = `
   border-top: 1px solid var(--cas-line);
   display: grid;
   flex: 0 0 auto;
-  gap: 8px;
+  gap: 0;
   min-width: 0;
-  padding-top: 12px;
+  padding-top: 10px;
+  position: relative;
+}
+
+.cas-mode-selector {
+  display: inline-flex;
+  position: relative;
+}
+
+.cas-mode-button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 4px;
+  color: var(--cas-ink);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 5px;
+  height: 28px;
+  line-height: 1.1;
+  max-width: 160px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cas-mode-button:hover,
+.cas-mode-button:focus,
+.cas-mode-button[data-open="true"] {
+  background: var(--cas-soft);
+  border-color: rgba(8, 127, 140, 0.28);
+  color: var(--cas-accent-strong);
+  outline: 0;
+}
+
+.cas-mode-button svg {
+  flex: 0 0 auto;
+  height: 14px;
+  width: 14px;
+}
+
+.cas-mode-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cas-mode-chevron {
+  height: 12px;
+  width: 12px;
+}
+
+.cas-mode-menu {
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 4px;
+  bottom: calc(100% + 6px);
+  box-shadow: 0 12px 28px rgba(3, 22, 30, 0.16);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  max-width: calc(100vw - 48px);
+  min-width: 260px;
+  padding: 6px;
+  position: absolute;
+  z-index: 5;
+}
+
+.cas-mode-menu[data-open="false"] {
+  display: none;
+}
+
+.cas-mode-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--cas-ink);
+  cursor: pointer;
+  display: grid;
+  gap: 2px 10px;
+  grid-template-columns: 18px 1fr 16px;
+  padding: 8px;
+  text-align: left;
+}
+
+.cas-mode-option:hover,
+.cas-mode-option:focus,
+.cas-mode-option[data-active="true"] {
+  background: var(--cas-soft);
+  outline: 0;
+}
+
+.cas-mode-option > svg {
+  color: var(--cas-ink);
+  grid-row: 1 / span 2;
+  height: 16px;
+  width: 16px;
+}
+
+.cas-mode-option strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.cas-mode-option span {
+  color: var(--cas-muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.cas-mode-check {
+  align-self: center;
+  color: var(--cas-accent-strong);
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  visibility: hidden;
+}
+
+.cas-mode-option[data-active="true"] .cas-mode-check {
+  visibility: visible;
+}
+
+.cas-mode-check svg {
+  color: var(--cas-accent-strong);
+  height: 16px;
+  width: 16px;
 }
 
 .cas-input-wrap {
@@ -1251,34 +1568,113 @@ const styles = `
 }
 
 .cas-compose textarea {
-  height: 76px;
-  max-height: 124px;
-  min-height: 76px;
+  height: 92px;
+  max-height: 112px;
+  min-height: 92px;
   overflow: auto;
+  padding-bottom: 40px;
   padding-right: 48px;
   resize: none;
 }
 
-.cas-send-button {
+.cas-input-tools {
+  align-items: center;
+  bottom: 8px;
+  display: inline-flex;
+  gap: 4px;
+  left: 8px;
+  max-width: calc(100% - 58px);
+  min-width: 0;
+  position: absolute;
+  z-index: 1;
+}
+
+.cas-compose-icon-button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 4px;
+  color: var(--cas-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+}
+
+.cas-compose-icon-button:hover,
+.cas-compose-icon-button:focus,
+.cas-compose-icon-button[data-active="true"] {
+  background: var(--cas-soft-strong);
+  color: var(--cas-accent-strong);
+  outline: 0;
+}
+
+.cas-compose-icon-button svg {
+  height: 14px;
+  width: 14px;
+}
+
+.cas-suggestion-button {
+  position: static;
+}
+
+.cas-scroll-bottom {
   align-items: center;
   background: var(--cas-accent);
   border: 0;
-  border-radius: 6px;
-  bottom: 8px;
+  border-radius: 999px;
+  bottom: 76px;
+  box-shadow: 0 8px 20px rgba(3, 22, 30, 0.18);
   color: #fff;
   cursor: pointer;
   display: inline-flex;
-  height: 34px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 5px;
+  justify-self: center;
+  left: 50%;
+  padding: 7px 10px;
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.cas-scroll-bottom svg {
+  height: 15px;
+  width: 15px;
+}
+
+.cas-send-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  bottom: 8px;
+  color: var(--cas-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 28px;
   justify-content: center;
   padding: 0;
   position: absolute;
   right: 8px;
-  width: 34px;
+  width: 28px;
+}
+
+.cas-send-button:hover,
+.cas-send-button:focus {
+  background: var(--cas-soft-strong);
+  color: var(--cas-accent-strong);
+  outline: 0;
 }
 
 .cas-send-button svg {
-  height: 18px;
-  width: 18px;
+  height: 20px;
+  width: 20px;
 }
 
 .cas-send-button:disabled {
@@ -1288,21 +1684,30 @@ const styles = `
 
 .cas-suggestion-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 6px;
   max-width: 100%;
-  overflow: hidden;
 }
 
 .cas-suggestion-shell {
-  align-items: end;
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 8px;
+  bottom: calc(100% - 2px);
+  box-shadow: 0 10px 24px rgba(3, 22, 30, 0.16);
   display: grid;
-  min-height: 122px;
+  left: 0;
+  max-height: 196px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  z-index: 3;
 }
 
 .cas-suggestion-shell[data-visible="false"] {
-  pointer-events: none;
-  visibility: hidden;
+  display: none;
 }
 
 .cas-suggestion {
@@ -1336,25 +1741,103 @@ const styles = `
 
 .cas-compose-toolbar {
   align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  gap: 7px;
   justify-content: space-between;
+  margin-top: 8px;
 }
 
 .cas-target-toggle {
+  color: var(--cas-muted);
+  font-size: 12px;
+  justify-self: start;
   max-width: 100%;
 }
 
 .cas-fields {
   display: grid;
   gap: 8px;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.cas-target-popover {
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(3, 22, 30, 0.12);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.cas-target-heading {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.cas-target-heading strong {
+  display: block;
+  font-size: 13px;
+}
+
+.cas-target-current {
+  color: var(--cas-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.cas-target-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cas-target-field input {
+  min-width: 0;
+}
+
+.cas-target-field span {
+  color: var(--cas-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cas-target-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.cas-small-button {
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 10px;
+}
+
+.cas-small-button[data-variant="primary"] {
+  background: var(--cas-accent);
+  border: 1px solid var(--cas-accent);
+  color: #fff;
+}
+
+.cas-small-button[data-variant="secondary"] {
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  color: var(--cas-muted);
 }
 
 .cas-actions {
   align-items: center;
-  display: flex;
+  display: none;
   gap: 8px;
   justify-content: space-between;
 }
@@ -1437,7 +1920,7 @@ const styles = `
   }
 
   .cas-suggestion-shell {
-    min-height: 104px;
+    max-height: 172px;
   }
 
   .cas-suggestion {
@@ -1448,8 +1931,8 @@ const styles = `
   }
 
   .cas-compose textarea {
-    height: 64px;
-    min-height: 64px;
+    height: 92px;
+    min-height: 92px;
   }
 
   .cas-secondary {
@@ -1459,6 +1942,10 @@ const styles = `
   .cas-fields,
   .cas-actions {
     grid-template-columns: 1fr;
+  }
+
+  .cas-target-popover .cas-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .cas-actions {
@@ -1522,6 +2009,15 @@ function ViewIcon({ view }: { view: ActiveView }) {
       </svg>
     );
   }
+  if (view === "simulation") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+        <path d="M5 6.5h14v11H5z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="2" />
+        <path d="M8.3 10 11.5 12l-3.2 2z" fill="currentColor" />
+        <path d="M14 10h3M14 14h3" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+      </svg>
+    );
+  }
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
       <path d="M5 12h12M13 8l4 4-4 4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
@@ -1554,23 +2050,84 @@ function GlobeIcon() {
   );
 }
 
+function NewChatIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+      <path d="M5 6.5h11.5v8H9l-4 3v-11Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="2" />
+      <path d="M17 5v5M14.5 7.5h5" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function TargetIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+      <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2.2" />
+    </svg>
+  );
+}
+
+function ModeIcon({ mode }: { mode: ChatMode }) {
+  if (mode === "troubleshooting") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+        <path d="m14.7 5.3 4 4-2.6 2.6-1.5-1.5-5.8 5.8-2-2 5.8-5.8-1.5-1.5 3.6-1.6Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+        <path d="m5.5 18.5 3-3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+      <path d="M5 6.5h14v8.8H9.2L5 18.5v-12Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg aria-hidden="true" className="cas-mode-chevron" viewBox="0 0 24 24" role="img">
+      <path d="m7 10 5 5 5-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+      <path d="m6 12 4 4 8-8" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" />
+    </svg>
+  );
+}
+
+function ArrowDownIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+      <path d="M12 5v13M7 13l5 5 5-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
 function createMessageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function modeLabel(mode?: string) {
-  if (mode === "lightspeed_read_only") return "Lightspeed real answer";
-  if (mode === "lightspeed_fallback_mock") return "Fallback analysis";
-  if (mode === "mock_read_only") return "Mock analysis";
-  return mode || "ready";
-}
-
-function resultProvider(result?: RCAResult) {
-  return result?.audit?.answer_provider ?? result?.audit?.brain?.provider ?? "cas-gateway";
-}
-
 function normalizeQuestion(value: string, fallback = initialQuestionByLanguage.ko) {
   return value.trim() || fallback;
+}
+
+function isOpenShiftConsoleHref(value?: string) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return false;
+  return value.startsWith("/k8s/") || value.startsWith("/events/") || value.startsWith("/search") || value.startsWith("/monitoring");
 }
 
 function pickQuestionSuggestions(language: Language, count = RECOMMENDED_QUESTION_COUNT) {
@@ -1580,6 +2137,79 @@ function pickQuestionSuggestions(language: Language, count = RECOMMENDED_QUESTIO
     [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
   }
   return pool.slice(0, count);
+}
+
+function inferTargetFromQuestion(question: string, scenarios: SimulationScenario[]): QueryTarget | undefined {
+  const normalized = question.toLowerCase();
+  const matchedScenario = scenarios.find((scenario) => {
+    const terms = [
+      scenario.id,
+      scenario.title,
+      scenario.target.namespace,
+      scenario.target.kind,
+      scenario.target.name,
+      scenario.target.container
+    ].filter(Boolean) as string[];
+    return terms.some((term) => term.length >= 4 && normalized.includes(term.toLowerCase()));
+  });
+  if (!matchedScenario) return undefined;
+  return {
+    namespace: matchedScenario.target.namespace,
+    kind: matchedScenario.target.kind,
+    name: matchedScenario.target.name
+  };
+}
+
+function isNearBottom(element: HTMLElement, threshold = 56) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+}
+
+function statusMessageFromStream(data: unknown, fallback: string) {
+  if (!data || typeof data !== "object") return fallback;
+  const message = (data as { message?: unknown }).message;
+  return typeof message === "string" && message.trim() ? message : fallback;
+}
+
+function tokenFromStream(data: unknown) {
+  if (typeof data === "string") return data;
+  if (!data || typeof data !== "object") return "";
+  const token = (data as { token?: unknown }).token;
+  return typeof token === "string" ? token : "";
+}
+
+async function readSseStream(response: Response, onEvent: (event: StreamEvent) => void) {
+  if (!response.body) throw new Error("stream response body is empty");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const flushEvent = (rawEvent: string) => {
+    const lines = rawEvent.split(/\r?\n/);
+    let event = "message";
+    const dataLines: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) event = line.slice(6).trim() || "message";
+      if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    }
+    if (dataLines.length === 0) return;
+    const dataText = dataLines.join("\n");
+    try {
+      onEvent({ event, data: JSON.parse(dataText) });
+    } catch {
+      onEvent({ event, data: dataText });
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split(/\n\n|\r\n\r\n/);
+    buffer = parts.pop() ?? "";
+    for (const part of parts) flushEvent(part);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) flushEvent(buffer);
 }
 
 function confidenceLabel(value?: number) {
@@ -1890,7 +2520,7 @@ function OverviewCockpit({
 }: {
   overview: OverviewResult | null;
   status: "idle" | "loading" | "ready" | "degraded";
-  activeView: Exclude<ActiveView, "chat">;
+  activeView: Exclude<ActiveView, "chat" | "simulation">;
   copy: (typeof languageCopy)[Language];
   onRefresh: () => void;
   onRunQuestion: (question: string, resourceName?: string) => void;
@@ -2124,20 +2754,25 @@ function OverviewCockpit({
               </span>
             </div>
             <div className="cas-action-list">
-              {actions.slice(0, 6).map((action) => (
-                <div className="cas-action-row" key={`${action.type}-${action.label}`}>
-                  <span>{action.label}</span>
-                  {action.type === "cas_query" && action.question ? (
-                    <button className="cas-link-button" disabled={isRunning} onClick={() => onRunQuestion(action.question ?? "")} type="button">
-                      {copy.run}
-                    </button>
-                  ) : (
-                    <a className="cas-link-button" href={action.href ?? "/"} rel="noreferrer">
-                      {copy.open}
-                    </a>
-                  )}
-                </div>
-              ))}
+              {actions.slice(0, 6).map((action) => {
+                const canOpenConsole = action.type === "console_link" && isOpenShiftConsoleHref(action.href);
+                const fallbackQuestion =
+                  action.question ?? `다음 행동 "${action.label}"을 수행하기 위한 안전한 확인 절차와 콘솔 위치를 알려줘.`;
+                return (
+                  <div className="cas-action-row" key={`${action.type}-${action.label}`}>
+                    <span title={action.label}>{action.label}</span>
+                    {canOpenConsole ? (
+                      <a className="cas-link-button" href={action.href} rel="noreferrer">
+                        {copy.open}
+                      </a>
+                    ) : (
+                      <button className="cas-link-button" disabled={isRunning} onClick={() => onRunQuestion(fallbackQuestion)} type="button">
+                        {copy.run}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
               {actions.length === 0 && <div className="cas-meta">{copy.noActions}</div>}
             </div>
           </article>
@@ -2174,6 +2809,81 @@ function OverviewCockpit({
           </article>
         </div>
       )}
+    </section>
+  );
+}
+
+function SimulationLab({
+  scenarios,
+  status,
+  selectedScenarioId,
+  copy,
+  isRunning,
+  onRefresh,
+  onRunScenario,
+  onRunRemediation
+}: {
+  scenarios: SimulationScenario[];
+  status: "idle" | "loading" | "ready" | "degraded";
+  selectedScenarioId: string | null;
+  copy: (typeof languageCopy)[Language];
+  isRunning: boolean;
+  onRefresh: () => void;
+  onRunScenario: (scenario: SimulationScenario) => void;
+  onRunRemediation: (scenario: SimulationScenario, remediation: SimulationRemediation) => void;
+}) {
+  return (
+    <section className="cas-cockpit" data-test="cas-simulation-lab">
+      <div className="cas-panel-heading">
+        <strong>{copy.simulationLab}</strong>
+        <button className="cas-link-button" onClick={onRefresh} type="button">
+          {status === "loading" ? copy.refreshing : copy.refresh}
+        </button>
+      </div>
+      <div className="cas-meta">{status === "loading" ? copy.simulationLoading : copy.simulationIntro}</div>
+      <div className="cas-simulation-list" data-test="cas-simulation-list">
+        {scenarios.map((scenario) => (
+          <article
+            className="cas-simulation-card"
+            data-selected={selectedScenarioId === scenario.id ? "true" : "false"}
+            data-test="cas-simulation-card"
+            key={scenario.id}
+          >
+            <div className="cas-panel-heading">
+              <strong>{scenario.title}</strong>
+              <span className="cas-risk-pill" data-risk={scenario.risk ?? "medium"}>
+                {scenario.risk ?? "medium"}
+              </span>
+            </div>
+            <div>{scenario.summary ?? scenario.question}</div>
+            <div className="cas-meta">
+              {scenario.target.namespace} · {scenario.target.kind}/{scenario.target.name}
+            </div>
+            <div className="cas-meta">
+              {copy.simulationSignals}: warnings {scenario.signals?.warnings ?? 0} · restarts {scenario.signals?.restarts ?? 0} · metrics{" "}
+              {scenario.signals?.metric_series ?? 0}
+            </div>
+            <div className="cas-simulation-actions">
+              <button className="cas-secondary" disabled={isRunning} onClick={() => onRunScenario(scenario)} type="button">
+                {copy.simulationRun}
+              </button>
+              {(scenario.remediations ?? []).map((remediation) => (
+                <button
+                  className="cas-link-button"
+                  disabled={isRunning}
+                  key={remediation.id}
+                  onClick={() => onRunRemediation(scenario, remediation)}
+                  title={remediation.description}
+                  type="button"
+                >
+                  {copy.simulationFix}: {remediation.label}
+                </button>
+              ))}
+            </div>
+          </article>
+        ))}
+        {status !== "loading" && scenarios.length === 0 && <div className="cas-meta">{copy.simulationNoScenarios}</div>}
+      </div>
     </section>
   );
 }
@@ -2272,10 +2982,12 @@ export function CASLauncher() {
   const [isOpen, setIsOpen] = React.useState(false);
   const [activeView, setActiveView] = React.useState<ActiveView>("chat");
   const [language, setLanguage] = React.useState<Language>("ko");
+  const [chatMode, setChatMode] = React.useState<ChatMode>("ask");
   const [question, setQuestion] = React.useState("");
   const [questionSuggestions, setQuestionSuggestions] = React.useState(() => pickQuestionSuggestions("ko"));
   const [activeSuggestionIndex, setActiveSuggestionIndex] = React.useState(0);
-  const [showSuggestions, setShowSuggestions] = React.useState(true);
+  const [showSuggestions, setShowSuggestions] = React.useState(false);
+  const [showModeMenu, setShowModeMenu] = React.useState(false);
   const [showTargetControls, setShowTargetControls] = React.useState(false);
   const [namespace, setNamespace] = React.useState("default");
   const [resourceName, setResourceName] = React.useState("version");
@@ -2285,42 +2997,44 @@ export function CASLauncher() {
   const [copiedMessageId, setCopiedMessageId] = React.useState<string | null>(null);
   const [overviewStatus, setOverviewStatus] = React.useState<"idle" | "loading" | "ready" | "degraded">("idle");
   const [overview, setOverview] = React.useState<OverviewResult | null>(null);
+  const [simulationStatus, setSimulationStatus] = React.useState<"idle" | "loading" | "ready" | "degraded">("idle");
+  const [simulations, setSimulations] = React.useState<SimulationScenario[]>([]);
+  const [selectedSimulationId, setSelectedSimulationId] = React.useState<string | null>(null);
   const [brainStatus, setBrainStatus] = React.useState<BrainStatus>({
     state: "checking",
     provider: "openshift-lightspeed",
     detail: "연결 확인 중"
   });
-  const [messages, setMessages] = React.useState<ChatMessage[]>([
-    {
-      id: "system-ready",
-      role: "system",
-      content: languageCopy.ko.systemReady
-    }
-  ]);
+  const [messages, setMessages] = React.useState<ChatMessage[]>([]);
+  const [showScrollBottom, setShowScrollBottom] = React.useState(false);
   const chatThreadRef = React.useRef<HTMLDivElement | null>(null);
   const abortControllerRef = React.useRef<AbortController | null>(null);
+  const autoScrollRef = React.useRef(true);
   const copy = languageCopy[language];
   const activeSuggestion = questionSuggestions[activeSuggestionIndex] ?? initialQuestionByLanguage[language];
   const targetSummary = `${namespace || "default"} · ${resourceKind || "Resource"}/${resourceName || "name"}`;
+  const statusLabel =
+    brainStatus.state === "ready"
+      ? copy.statusConnected
+      : brainStatus.state === "checking"
+      ? copy.statusChecking
+      : copy.statusDegraded;
 
   const rotateQuestionSuggestions = React.useCallback((nextLanguage = language) => {
     setQuestionSuggestions(pickQuestionSuggestions(nextLanguage));
     setActiveSuggestionIndex(0);
-    setShowSuggestions(true);
+    setShowSuggestions(false);
+    setShowModeMenu(false);
   }, [language]);
 
   const toggleLanguage = React.useCallback(() => {
     const nextLanguage: Language = language === "ko" ? "en" : "ko";
     setLanguage(nextLanguage);
     setQuestion("");
-    setShowSuggestions(true);
+    setShowSuggestions(false);
+    setShowModeMenu(false);
     setQuestionSuggestions(pickQuestionSuggestions(nextLanguage));
     setActiveSuggestionIndex(0);
-    setMessages((current) =>
-      current.length === 1 && current[0]?.id === "system-ready"
-        ? [{ ...current[0], content: languageCopy[nextLanguage].systemReady }]
-        : current
-    );
   }, [language]);
 
   const refreshBrainStatus = React.useCallback(async () => {
@@ -2374,12 +3088,32 @@ export function CASLauncher() {
     }
   }, [namespace]);
 
+  const refreshSimulations = React.useCallback(async () => {
+    setSimulationStatus("loading");
+    try {
+      const response = await fetch(`${API_BASE}/api/aiops/simulations`, {
+        credentials: "same-origin",
+        headers: gatewayHeaders({ accept: "application/json" })
+      });
+      const body = await response.json();
+      setSimulations(Array.isArray(body?.scenarios) ? body.scenarios : []);
+      setSimulationStatus(response.ok && body?.mode === "simulation_catalog" ? "ready" : "degraded");
+    } catch {
+      setSimulations([]);
+      setSimulationStatus("degraded");
+    }
+  }, []);
+
   React.useEffect(() => {
     if (isOpen) void refreshOverview();
   }, [isOpen]);
 
   React.useEffect(() => {
-    if (isOpen && activeView === "chat") {
+    if (isOpen && simulationStatus === "idle") void refreshSimulations();
+  }, [isOpen, refreshSimulations, simulationStatus]);
+
+  React.useEffect(() => {
+    if (isOpen && activeView === "chat" && autoScrollRef.current) {
       chatThreadRef.current?.scrollTo({
         top: chatThreadRef.current.scrollHeight,
         behavior: "auto"
@@ -2387,14 +3121,36 @@ export function CASLauncher() {
     }
   }, [activeView, isOpen, messages]);
 
+  const handleChatScroll = React.useCallback(() => {
+    const thread = chatThreadRef.current;
+    if (!thread) return;
+    const nearBottom = isNearBottom(thread);
+    autoScrollRef.current = nearBottom;
+    setShowScrollBottom(!nearBottom);
+  }, []);
+
+  const scrollToBottom = React.useCallback(() => {
+    const thread = chatThreadRef.current;
+    if (!thread) return;
+    autoScrollRef.current = true;
+    setShowScrollBottom(false);
+    thread.scrollTo({
+      top: thread.scrollHeight,
+      behavior: "auto"
+    });
+  }, []);
+
   const openView = React.useCallback(
     (view: ActiveView) => {
       setActiveView(view);
-      if (view !== "chat" && overviewStatus === "idle") {
+      if (view === "simulation" && simulationStatus === "idle") {
+        void refreshSimulations();
+      }
+      if (view !== "chat" && view !== "simulation" && overviewStatus === "idle") {
         void refreshOverview();
       }
     },
-    [overviewStatus, refreshOverview]
+    [overviewStatus, refreshOverview, refreshSimulations, simulationStatus]
   );
 
   const copyMessage = React.useCallback(async (message: ChatMessage) => {
@@ -2408,12 +3164,25 @@ export function CASLauncher() {
   }, []);
 
   const submitQuestion = React.useCallback(
-    async (questionText: string, nextResourceName?: string, nextNamespace?: string, nextResourceKind?: string) => {
+    async (
+      questionText: string,
+      nextResourceName?: string,
+      nextNamespace?: string,
+      nextResourceKind?: string,
+      simulationId?: string,
+      simulationActionId?: string
+    ) => {
       if (isRunning) return;
       const submittedQuestion = normalizeQuestion(questionText, initialQuestionByLanguage[language]);
-      const targetResourceName = nextResourceName ?? resourceName;
-      const targetNamespace = nextNamespace ?? namespace;
-      const targetResourceKind = nextResourceKind ?? resourceKind;
+      const inferredTarget = nextResourceName || nextNamespace || nextResourceKind ? undefined : inferTargetFromQuestion(submittedQuestion, simulations);
+      const targetResourceName = nextResourceName ?? inferredTarget?.name ?? resourceName;
+      const targetNamespace = nextNamespace ?? inferredTarget?.namespace ?? namespace;
+      const targetResourceKind = nextResourceKind ?? inferredTarget?.kind ?? resourceKind;
+      if (inferredTarget) {
+        setNamespace(inferredTarget.namespace);
+        setResourceKind(inferredTarget.kind);
+        setResourceName(inferredTarget.name);
+      }
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
       const userMessage: ChatMessage = {
@@ -2437,6 +3206,9 @@ export function CASLauncher() {
       setActiveView("chat");
       setQuestion("");
       setShowSuggestions(false);
+      setShowModeMenu(false);
+      autoScrollRef.current = true;
+      setShowScrollBottom(false);
 
       try {
         const response = await fetch(`${API_BASE}/api/aiops/query`, {
@@ -2445,12 +3217,12 @@ export function CASLauncher() {
           signal: abortController.signal,
           headers: gatewayHeaders({
             "content-type": "application/json",
-            accept: "application/json"
+            accept: "text/event-stream"
           }),
           body: JSON.stringify({
             question: submittedQuestion,
             scope: {
-              cluster: "local-cluster",
+              cluster: simulationId ? "cas-simulation" : "local-cluster",
               namespaces: [targetNamespace || "default"]
             },
             resourceRef: {
@@ -2458,9 +3230,24 @@ export function CASLauncher() {
               name: targetResourceName || "version"
             },
             mode: "read_only",
-            stream: false,
+            brain_mode: chatMode,
+            stream: true,
             locale: localeByLanguage[language],
-            conversation_id: conversationId
+            conversation_id: conversationId,
+            context: {
+              namespace: targetNamespace || "default",
+              resourceKind: targetResourceKind || (targetResourceName === "version" ? "ClusterVersion" : "Pod"),
+              resourceName: targetResourceName || "version",
+              timeRange: chatMode === "troubleshooting" ? "1h" : null,
+              safety: "read_only"
+            },
+            ui: {
+              source: "console-plugin",
+              selectedMode: chatMode,
+              conversationId
+            },
+            simulation_id: simulationId,
+            simulation_action_id: simulationActionId
           })
         });
 
@@ -2468,20 +3255,73 @@ export function CASLauncher() {
           throw new Error(await gatewayErrorMessage(response));
         }
 
-        const body = (await response.json()) as RCAResult;
-        setConversationId(body.conversation_id ?? conversationId);
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === pendingMessageId
-              ? {
-                  ...message,
-                  content: body.rca_result?.answer ?? copy.emptyAnswer,
-                  isPending: false,
-                  result: body
-                }
-              : message
-          )
-        );
+        let streamedAnswer = "";
+        let finalRun: RCAResult | null = null;
+        const applyAssistantMessage = (patch: Partial<ChatMessage>) => {
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === pendingMessageId
+                ? {
+                    ...message,
+                    ...patch
+                  }
+                : message
+            )
+          );
+        };
+
+        if (response.body && String(response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+          await readSseStream(response, ({ event, data }) => {
+            if (event === "status") {
+              if (!streamedAnswer) {
+                applyAssistantMessage({
+                  content: statusMessageFromStream(data, copy.pending),
+                  isPending: true
+                });
+              }
+              return;
+            }
+            if (event === "token") {
+              streamedAnswer += tokenFromStream(data);
+              applyAssistantMessage({
+                content: streamedAnswer || copy.pending,
+                isPending: false
+              });
+              return;
+            }
+            if (event === "final_answer") {
+              finalRun = data as RCAResult;
+              const finalAnswer = finalRun.rca_result?.answer ?? streamedAnswer ?? copy.emptyAnswer;
+              setConversationId(finalRun.conversation_id ?? conversationId);
+              applyAssistantMessage({
+                content: finalAnswer,
+                isPending: false,
+                result: finalRun
+              });
+              return;
+            }
+            if (event === "error") {
+              const errorMessage =
+                data && typeof data === "object" && typeof (data as { error?: unknown }).error === "string"
+                  ? String((data as { error?: unknown }).error)
+                  : copy.failure;
+              throw new Error(errorMessage);
+            }
+          });
+        } else {
+          const body = (await response.json()) as RCAResult;
+          finalRun = body;
+          setConversationId(body.conversation_id ?? conversationId);
+          applyAssistantMessage({
+            content: body.rca_result?.answer ?? copy.emptyAnswer,
+            isPending: false,
+            result: body
+          });
+        }
+
+        if (!finalRun) {
+          throw new Error(copy.emptyAnswer);
+        }
       } catch (queryError) {
         const isAbort = queryError instanceof DOMException && queryError.name === "AbortError";
         setMessages((current) =>
@@ -2503,15 +3343,25 @@ export function CASLauncher() {
         rotateQuestionSuggestions();
       }
     },
-    [conversationId, copy, isRunning, language, namespace, resourceKind, resourceName, rotateQuestionSuggestions]
+    [chatMode, conversationId, copy, isRunning, language, namespace, resourceKind, resourceName, rotateQuestionSuggestions, simulations]
   );
 
   const runQuery = React.useCallback(
     async (event?: React.FormEvent<HTMLFormElement>) => {
       event?.preventDefault();
-      await submitQuestion(normalizeQuestion(question, activeSuggestion));
+      const trimmedQuestion = question.trim();
+      if (!trimmedQuestion) {
+        if (showSuggestions) {
+          await submitQuestion(activeSuggestion);
+          return;
+        }
+        setShowModeMenu(false);
+        setShowSuggestions(true);
+        return;
+      }
+      await submitQuestion(trimmedQuestion);
     },
-    [activeSuggestion, question, submitQuestion]
+    [activeSuggestion, question, showSuggestions, submitQuestion]
   );
 
   const stopQuery = React.useCallback(() => {
@@ -2541,11 +3391,21 @@ export function CASLauncher() {
       if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
         event.preventDefault();
         if (!isRunning) {
-          void submitQuestion(normalizeQuestion(question, activeSuggestion));
+          const trimmedQuestion = question.trim();
+          if (!trimmedQuestion) {
+            if (showSuggestions) {
+              void submitQuestion(activeSuggestion);
+              return;
+            }
+            setShowModeMenu(false);
+            setShowSuggestions(true);
+            return;
+          }
+          void submitQuestion(trimmedQuestion);
         }
       }
     },
-    [activeSuggestion, isRunning, question, submitQuestion]
+    [activeSuggestion, isRunning, question, showSuggestions, submitQuestion]
   );
 
   const runOverviewQuestion = React.useCallback(
@@ -2556,6 +3416,43 @@ export function CASLauncher() {
       if (nextResourceKind) setResourceKind(nextResourceKind);
       setActiveView("chat");
       void submitQuestion(nextQuestion, nextResourceName, nextNamespace, nextResourceKind);
+    },
+    [submitQuestion]
+  );
+
+  const runSimulationScenario = React.useCallback(
+    (scenario: SimulationScenario) => {
+      setSelectedSimulationId(scenario.id);
+      setNamespace(scenario.target.namespace);
+      setResourceKind(scenario.target.kind);
+      setResourceName(scenario.target.name);
+      setActiveView("chat");
+      void submitQuestion(
+        scenario.question,
+        scenario.target.name,
+        scenario.target.namespace,
+        scenario.target.kind,
+        scenario.id
+      );
+    },
+    [submitQuestion]
+  );
+
+  const runSimulationRemediation = React.useCallback(
+    (scenario: SimulationScenario, remediation: SimulationRemediation) => {
+      setSelectedSimulationId(scenario.id);
+      setNamespace(scenario.target.namespace);
+      setResourceKind(scenario.target.kind);
+      setResourceName(scenario.target.name);
+      setActiveView("chat");
+      void submitQuestion(
+        remediation.question ?? scenario.question,
+        scenario.target.name,
+        scenario.target.namespace,
+        scenario.target.kind,
+        scenario.id,
+        remediation.id
+      );
     },
     [submitQuestion]
   );
@@ -2579,15 +3476,12 @@ export function CASLauncher() {
     setActiveView("chat");
     setQuestion("");
     setShowTargetControls(false);
+    setSelectedSimulationId(null);
     rotateQuestionSuggestions(language);
-    setMessages([
-      {
-        id: "system-ready",
-        role: "system",
-        content: copy.systemReset
-      }
-    ]);
-  }, [copy.systemReset, language, rotateQuestionSuggestions]);
+    autoScrollRef.current = true;
+    setShowScrollBottom(false);
+    setMessages([]);
+  }, [language, rotateQuestionSuggestions]);
 
   return (
     <div className="cas-launcher-root" data-test="cas-launcher-root">
@@ -2602,21 +3496,46 @@ export function CASLauncher() {
             </div>
             <div className="cas-header-tools">
               <nav aria-label={copy.viewsNavLabel} className="cas-view-switcher" data-test="cas-view-switcher">
-                {(["chat", "cockpit", "evidence", "actions"] as ActiveView[]).map((view) => (
-                  <button
-                    aria-label={copy.viewLabels[view]}
-                    className="cas-view-button"
-                    data-active={activeView === view}
-                    data-test={`cas-view-${view}`}
-                    key={view}
-                    onClick={() => openView(view)}
-                    title={copy.viewLabels[view]}
-                    type="button"
-                  >
-                    <ViewIcon view={view} />
-                  </button>
+                {(["chat", "cockpit", "evidence", "actions", "simulation"] as ActiveView[]).map((view) => (
+                  <React.Fragment key={view}>
+                    <button
+                      aria-label={copy.viewLabels[view]}
+                      className="cas-view-button"
+                      data-active={activeView === view}
+                      data-test={`cas-view-${view}`}
+                      onClick={() => openView(view)}
+                      title={copy.viewLabels[view]}
+                      type="button"
+                    >
+                      <ViewIcon view={view} />
+                    </button>
+                    {view === "chat" && (
+                      <button
+                        aria-label={copy.newChat}
+                        className="cas-view-button"
+                        data-test="cas-new-chat"
+                        disabled={isRunning}
+                        onClick={resetConversation}
+                        title={copy.newChat}
+                        type="button"
+                      >
+                        <NewChatIcon />
+                      </button>
+                    )}
+                  </React.Fragment>
                 ))}
               </nav>
+              <button
+                aria-label={`${copy.targetPrefix}: ${targetSummary}`}
+                className="cas-view-button"
+                data-active={showTargetControls}
+                data-test="cas-target-toggle"
+                onClick={() => setShowTargetControls((current) => !current)}
+                title={`${copy.targetPrefix}: ${targetSummary}`}
+                type="button"
+              >
+                <TargetIcon />
+              </button>
               <button
                 aria-label={copy.languageTitle}
                 className="cas-view-button cas-language-toggle"
@@ -2635,26 +3554,86 @@ export function CASLauncher() {
             </div>
           </header>
 
-          <div className="cas-panel-body">
-            <div className="cas-status-row">
-              <span className="cas-badge" data-state={brainStatus.state} data-test="cas-brain-status">
-                {brainStatus.state === "checking" ? "checking" : brainStatus.state} · {brainStatus.provider}
-              </span>
-              <span className="cas-badge" data-test="cas-provider-badge">
-                UserToken proxy
-              </span>
-              {conversationId && (
-                <span className="cas-conversation" data-test="cas-conversation-id">
-                  conversation {conversationId}
-                </span>
-              )}
+          <div className="cas-panel-body" data-target-open={showTargetControls ? "true" : "false"}>
+            <div
+              className="cas-status-row"
+              data-test="cas-brain-status"
+              title={`${brainStatus.provider} · ${brainStatus.detail}${conversationId ? ` · ${conversationId}` : ""}`}
+            >
+              <span className="cas-status-light" data-state={brainStatus.state} />
+              <span className="cas-status-label">{statusLabel}</span>
             </div>
 
-            <div className="cas-meta">{brainStatus.detail}</div>
+            {showTargetControls && (
+              <div className="cas-target-popover" data-test="cas-target-fields">
+                <div className="cas-target-heading">
+                  <div>
+                    <strong>{copy.targetTitle}</strong>
+                    <div className="cas-target-current">
+                      {copy.targetCurrent}: {targetSummary}
+                    </div>
+                  </div>
+                  <button
+                    className="cas-link-button"
+                    onClick={() => setShowTargetControls(false)}
+                    type="button"
+                  >
+                    {copy.targetClose}
+                  </button>
+                </div>
+                <div className="cas-fields">
+                  <label className="cas-target-field">
+                    <span>{copy.targetNamespace}</span>
+                    <input
+                      aria-label={copy.targetNamespace}
+                      onChange={(event) => setNamespace(event.currentTarget.value)}
+                      placeholder="default"
+                      value={namespace}
+                    />
+                  </label>
+                  <label className="cas-target-field">
+                    <span>{copy.targetKind}</span>
+                    <input
+                      aria-label={copy.targetKind}
+                      onChange={(event) => setResourceKind(event.currentTarget.value)}
+                      placeholder="Pod"
+                      value={resourceKind}
+                    />
+                  </label>
+                  <label className="cas-target-field">
+                    <span>{copy.targetName}</span>
+                    <input
+                      aria-label={copy.targetName}
+                      onChange={(event) => setResourceName(event.currentTarget.value)}
+                      placeholder="resource-name"
+                      value={resourceName}
+                    />
+                  </label>
+                </div>
+                <div className="cas-target-actions">
+                  <button
+                    className="cas-small-button"
+                    data-variant="secondary"
+                    onClick={() => setShowTargetControls(false)}
+                    type="button"
+                  >
+                    {copy.targetClose}
+                  </button>
+                  <button
+                    className="cas-small-button"
+                    data-variant="primary"
+                    onClick={() => setShowTargetControls(false)}
+                    type="button"
+                  >
+                    {copy.targetApply}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {activeView === "chat" ? (
               <div className="cas-chat-surface" data-test="cas-chat-default-view">
-                <div className="cas-chat-thread" data-test="cas-chat-thread" ref={chatThreadRef}>
+                <div className="cas-chat-thread" data-test="cas-chat-thread" onScroll={handleChatScroll} ref={chatThreadRef}>
                   {messages.map((message) => {
                     const isFallback = message.result?.mode === "lightspeed_fallback_mock";
                     return (
@@ -2675,12 +3654,6 @@ export function CASLauncher() {
                         )}
                         {message.result && (
                           <>
-                            <div className="cas-result-meta">
-                              <span className="cas-meta">
-                                {modeLabel(message.result.mode)} · {resultProvider(message.result)}
-                              </span>
-                              {message.result.run_id ? ` · ${message.result.run_id}` : ""}
-                            </div>
                             {isFallback && (
                               <div className="cas-badge" data-state="degraded" data-test="cas-fallback-notice">
                                 fallback active
@@ -2711,6 +3684,12 @@ export function CASLauncher() {
                     );
                   })}
                 </div>
+                {showScrollBottom && (
+                  <button className="cas-scroll-bottom" data-test="cas-scroll-bottom" onClick={scrollToBottom} type="button">
+                    <ArrowDownIcon />
+                    {copy.scrollBottom}
+                  </button>
+                )}
 
                 <form className="cas-compose" onSubmit={runQuery}>
                   <div className="cas-suggestion-shell" data-visible={showSuggestions && question.trim().length === 0 ? "true" : "false"}>
@@ -2735,18 +3714,84 @@ export function CASLauncher() {
                   <div className="cas-input-wrap">
                     <textarea
                       aria-label="AI Sentinel question"
-                      onBlur={() => {
-                        if (question.trim().length === 0) setShowSuggestions(true);
-                      }}
                       onChange={(event) => {
                         setQuestion(event.currentTarget.value);
                         setShowSuggestions(false);
                       }}
                       onFocus={() => setShowSuggestions(false)}
                       onKeyDown={handleQuestionKeyDown}
-                      placeholder={showSuggestions ? activeSuggestion : copy.inputPlaceholder}
+                      placeholder={copy.inputPlaceholder}
                       value={question}
                     />
+                    <div className="cas-input-tools">
+                      <button
+                        aria-expanded={showSuggestions}
+                        aria-label={copy.suggestionLabel}
+                        className="cas-compose-icon-button cas-suggestion-button"
+                        data-active={showSuggestions}
+                        data-test="cas-suggestion-toggle"
+                        disabled={isRunning}
+                        onClick={() => {
+                          setShowModeMenu(false);
+                          setShowSuggestions((current) => !current);
+                        }}
+                        title={copy.suggestionLabel}
+                        type="button"
+                      >
+                        <PlusIcon />
+                      </button>
+                      <div
+                        aria-label={copy.modeSelectorLabel}
+                        className="cas-mode-selector"
+                        data-test="cas-mode-selector"
+                        onBlur={(event) => {
+                          const nextTarget = event.relatedTarget;
+                          if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                            setShowModeMenu(false);
+                          }
+                        }}
+                      >
+                        <button
+                          aria-expanded={showModeMenu}
+                          aria-haspopup="menu"
+                          className="cas-mode-button"
+                          data-open={showModeMenu}
+                          data-test="cas-mode-current"
+                          onClick={() => setShowModeMenu((current) => !current)}
+                          title={copy.modeTitles[chatMode]}
+                          type="button"
+                        >
+                          <ModeIcon mode={chatMode} />
+                          <span>{copy.modeLabels[chatMode]}</span>
+                          <ChevronDownIcon />
+                        </button>
+                        <div className="cas-mode-menu" data-open={showModeMenu ? "true" : "false"} role="menu">
+                          {(["ask", "troubleshooting"] as ChatMode[]).map((mode) => (
+                          <button
+                            aria-checked={chatMode === mode}
+                            className="cas-mode-option"
+                            data-active={chatMode === mode}
+                            data-test={`cas-mode-${mode}`}
+                            key={mode}
+                            onClick={() => {
+                              setChatMode(mode);
+                              setShowModeMenu(false);
+                            }}
+                            role="menuitemradio"
+                            title={copy.modeTitles[mode]}
+                            type="button"
+                          >
+                            <ModeIcon mode={mode} />
+                            <strong>{copy.modeLabels[mode]}</strong>
+                            <span>{copy.modeDescriptions[mode]}</span>
+                            <span className="cas-mode-check">
+                              <CheckIcon />
+                            </span>
+                          </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                     {isRunning ? (
                       <button
                         aria-label={copy.stopLabel}
@@ -2770,46 +3815,19 @@ export function CASLauncher() {
                       </button>
                     )}
                   </div>
-                  <div className="cas-compose-toolbar">
-                    <button
-                      aria-expanded={showTargetControls}
-                      className="cas-link-button cas-target-toggle"
-                      onClick={() => setShowTargetControls((current) => !current)}
-                      type="button"
-                    >
-                      {copy.targetPrefix} {targetSummary}
-                    </button>
-                    <span className="cas-meta">{copy.recommendationMeta}</span>
-                  </div>
-                  {showTargetControls && (
-                    <div className="cas-fields" data-test="cas-target-fields">
-                      <input
-                        aria-label="Namespace"
-                        onChange={(event) => setNamespace(event.currentTarget.value)}
-                        placeholder="namespace"
-                        value={namespace}
-                      />
-                      <input
-                        aria-label="Resource name"
-                        onChange={(event) => setResourceName(event.currentTarget.value)}
-                        placeholder="resource"
-                        value={resourceName}
-                      />
-                      <input
-                        aria-label="Resource kind"
-                        onChange={(event) => setResourceKind(event.currentTarget.value)}
-                        placeholder="kind"
-                        value={resourceKind}
-                      />
-                    </div>
-                  )}
-                  <div className="cas-actions">
-                    <button className="cas-secondary" disabled={isRunning} onClick={resetConversation} type="button">
-                      {copy.newChat}
-                    </button>
-                  </div>
                 </form>
               </div>
+            ) : activeView === "simulation" ? (
+              <SimulationLab
+                copy={copy}
+                isRunning={isRunning}
+                scenarios={simulations}
+                selectedScenarioId={selectedSimulationId}
+                status={simulationStatus}
+                onRefresh={refreshSimulations}
+                onRunRemediation={runSimulationRemediation}
+                onRunScenario={runSimulationScenario}
+              />
             ) : (
               <OverviewCockpit
                 activeView={activeView}

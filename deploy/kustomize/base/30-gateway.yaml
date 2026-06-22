@@ -54,9 +54,9 @@ spec:
             - name: CAS_RUNBOOK_PROVIDER
               value: jsonl
             - name: CAS_RUNBOOK_CORPUS_PATH
-              value: /opt/app-root/src/apps/gateway/runbooks/komsco-ocp-mini.jsonl
+              value: /opt/app-root/src/apps/gateway/runbooks/komsco-ops-sim.jsonl
             - name: CAS_RUNBOOK_TOP_K
-              value: "3"
+              value: "5"
             - name: CAS_METRIC_PROVIDER
               value: thanos
             - name: CAS_THANOS_URL

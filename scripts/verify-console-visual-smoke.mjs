@@ -85,10 +85,18 @@ ${styles}
 </div>
 <div class="cas-launcher-root" data-test="cas-launcher-root">
 <section aria-label="Cywell AI Sentinel" class="cas-panel" data-test="cas-launcher-panel" role="dialog">
-  <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>KOMSCO AI AGENT</span></div><div class="cas-header-tools"><nav aria-label="AI Sentinel 화면" class="cas-view-switcher" data-test="cas-view-switcher"><button aria-label="채팅" class="cas-view-button" data-active="true" type="button">C</button><button aria-label="상황" class="cas-view-button" type="button">S</button><button aria-label="근거" class="cas-view-button" type="button">G</button><button aria-label="다음 행동" class="cas-view-button" type="button">N</button></nav><button aria-label="언어: 한국어. 영어로 전환" class="cas-view-button cas-language-toggle" data-language="ko" data-test="cas-language-toggle" type="button">${globe}<span>한</span></button><button aria-label="AI Sentinel 닫기" class="cas-close" type="button">x</button></div></header>
-  <div class="cas-panel-body">
-    <div class="cas-status-row"><span class="cas-badge" data-state="ready" data-test="cas-brain-status">ready · openshift-lightspeed</span><span class="cas-badge" data-test="cas-provider-badge">UserToken proxy</span><span class="cas-conversation" data-test="cas-conversation-id">conversation smoke-test</span></div>
-    <div class="cas-meta">OpenShift Lightspeed readiness 확인됨</div>
+  <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>KOMSCO AI AGENT</span></div><div class="cas-header-tools"><nav aria-label="AI Sentinel 화면" class="cas-view-switcher" data-test="cas-view-switcher"><button aria-label="채팅" class="cas-view-button" data-active="true" type="button">C</button><button aria-label="새 대화" class="cas-view-button" data-test="cas-new-chat" type="button">+</button><button aria-label="상황" class="cas-view-button" type="button">S</button><button aria-label="근거" class="cas-view-button" type="button">G</button><button aria-label="다음 행동" class="cas-view-button" type="button">N</button></nav><button aria-label="대상 설정" class="cas-view-button" data-test="cas-target-toggle" type="button">◎</button><button aria-label="언어: 한국어. 영어로 전환" class="cas-view-button cas-language-toggle" data-language="ko" data-test="cas-language-toggle" type="button">${globe}<span>한</span></button><button aria-label="AI Sentinel 닫기" class="cas-close" type="button">x</button></div></header>
+  <div class="cas-panel-body" data-target-open="true">
+    <div class="cas-status-row" data-test="cas-brain-status" title="openshift-lightspeed · OpenShift Lightspeed readiness 확인됨"><span class="cas-status-light" data-state="ready"></span><span class="cas-status-label">연결됨</span></div>
+    <div class="cas-target-popover" data-test="cas-target-fields">
+      <div class="cas-target-heading"><div><strong>분석 대상</strong><div class="cas-target-current">현재 대상: default · ClusterVersion/version</div></div><button class="cas-link-button" type="button">닫기</button></div>
+      <div class="cas-fields">
+        <label class="cas-target-field"><span>Namespace</span><input aria-label="Namespace" value="default"></label>
+        <label class="cas-target-field"><span>Kind</span><input aria-label="Kind" value="ClusterVersion"></label>
+        <label class="cas-target-field"><span>Name</span><input aria-label="Name" value="version"></label>
+      </div>
+      <div class="cas-target-actions"><button class="cas-small-button" data-variant="secondary" type="button">닫기</button><button class="cas-small-button" data-variant="primary" type="button">적용</button></div>
+    </div>
     <div class="cas-chat-surface" data-test="cas-chat-default-view">
     <div class="cas-chat-thread" data-test="cas-chat-thread">
       <article class="cas-message" data-role="user">
@@ -97,7 +105,7 @@ ${styles}
       </article>
       <article class="cas-message" data-pending="true" data-role="assistant">
         <strong class="cas-message-role">AI Sentinel</strong>
-        <div class="cas-pending-answer" data-test="cas-pending-answer"><span>증적 수집과 답변 생성을 진행 중입니다.</span><span aria-hidden="true" class="cas-pending-dots"><span></span><span></span><span></span></span></div>
+        <div class="cas-pending-answer" data-test="cas-pending-answer"><span>자료 확인 중</span><span aria-hidden="true" class="cas-pending-dots"><span></span><span></span><span></span></span></div>
       </article>
       <article class="cas-message" data-role="assistant">
         <strong class="cas-message-role">AI Sentinel</strong>
@@ -108,16 +116,13 @@ ${styles}
           <h3 class="cas-md-heading" data-level="3">다음 확인</h3>
           <ol class="cas-md-list"><li><code class="cas-md-inline-code">oc get clusterversion version -o yaml</code></li><li>Degraded 조건과 availableUpdates 확인</li></ol>
         </div>
-        <div class="cas-result-meta"><span class="cas-meta">Lightspeed real answer · openshift-lightspeed</span></div>
         <div class="cas-rca-trace" data-test="cas-rca-trace"><span class="cas-rca-trace-label">수집 흐름</span><span class="cas-trace-chip" data-status="collected"><strong>OpenShift</strong><span>collected</span><span>1</span></span><span class="cas-trace-chip" data-status="collected"><strong>Metric</strong><span>collected</span><span>1</span></span><span class="cas-trace-chip" data-status="collected"><strong>Runbook</strong><span>collected</span><span>3</span></span><span class="cas-trace-chip" data-status="collected"><strong>Tool Plan</strong><span>collected</span><span>5</span></span><span class="cas-trace-chip" data-status="ok"><strong>Brain</strong><span>ok</span></span></div>
         <details class="cas-result-details" data-test="cas-evidence-panel"><summary>근거 5개 · RCA 후보 1개 · 부족한 증적 0개</summary><div class="cas-result-details-body"><div class="cas-evidence-list"><div class="cas-evidence-group"><div class="cas-panel-heading"><strong>OpenShift 상태/이벤트</strong><span class="cas-meta">1</span></div><div class="cas-meta">왜 보는가: OpenShift 상태, 이벤트, 로그는 RCA의 1차 사실 근거입니다.</div><div class="cas-evidence-item"><strong>openshift:clusterversion:version</strong><div>ClusterVersion desired=4.20.5 conditions=[Available=True, Progressing=False]</div><span>apis/config.openshift.io/v1/clusterversions/version</span></div></div><div class="cas-evidence-group"><div class="cas-panel-heading"><strong>Metric 관측값</strong><span class="cas-meta">1</span></div><div class="cas-evidence-item"><strong>metric:namespace_restart_increase_by_pod:default:Namespace:default</strong><div>namespace_restart_increase_by_pod returned no-series</div><span>thanos.api.v1.query</span></div></div></div></div></details>
       </article>
     </div>
     <form class="cas-compose">
-      <div class="cas-suggestion-shell" data-visible="true"><div aria-label="추천 질문" class="cas-suggestion-list" data-test="cas-suggestion-list"><button class="cas-suggestion" data-active="true" type="button">ClusterVersion 상태를 한 문장으로 요약해줘.</button><button class="cas-suggestion" type="button">최근 Warning 이벤트 기준으로 장애 가능성이 높은 리소스를 알려줘.</button><button class="cas-suggestion" type="button">Pending 상태 Pod가 있다면 스케줄링 실패 원인을 분석해줘.</button><button class="cas-suggestion" type="button">Node NotReady 또는 pressure condition이 있는지 점검해줘.</button><button class="cas-suggestion" type="button">운영자가 지금 바로 봐야 할 Top 5 신호를 요약해줘.</button></div></div>
-      <div class="cas-input-wrap"><textarea aria-label="AI Sentinel question" placeholder="OpenShift 운영 질문을 입력하세요. Enter 전송, Shift+Enter 줄바꿈"></textarea><button aria-label="질의 전송" class="cas-send-button" data-test="cas-send-question" type="submit"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4.5 19.5 20 12 4.5 4.5 7 11.2 14 12l-7 .8-2.5 6.7Z" fill="currentColor"/></svg></button></div>
-      <div class="cas-compose-toolbar"><button class="cas-link-button cas-target-toggle" type="button">대상 default · ClusterVersion/version</button><span class="cas-meta">추천 질문 5개 · Enter 전송</span></div>
-      <div class="cas-actions"><button class="cas-secondary" type="button">새 대화</button></div>
+      <div class="cas-suggestion-shell" data-visible="false"><div aria-label="추천 질문" class="cas-suggestion-list" data-test="cas-suggestion-list"><button class="cas-suggestion" data-active="true" type="button">ClusterVersion 상태를 한 문장으로 요약해줘.</button><button class="cas-suggestion" type="button">최근 Warning 이벤트 기준으로 장애 가능성이 높은 리소스를 알려줘.</button><button class="cas-suggestion" type="button">Pending 상태 Pod가 있다면 스케줄링 실패 원인을 분석해줘.</button><button class="cas-suggestion" type="button">Node NotReady 또는 pressure condition이 있는지 점검해줘.</button><button class="cas-suggestion" type="button">운영자가 지금 바로 봐야 할 Top 5 신호를 요약해줘.</button></div></div>
+      <div class="cas-input-wrap"><textarea aria-label="AI Sentinel question" placeholder="무엇을 확인할까요?"></textarea><div class="cas-input-tools"><button aria-label="자주 확인" class="cas-compose-icon-button cas-suggestion-button" data-test="cas-suggestion-toggle" type="button">+</button><div aria-label="질문 모드" class="cas-mode-selector" data-test="cas-mode-selector"><button aria-expanded="false" aria-haspopup="menu" class="cas-mode-button" data-open="false" data-test="cas-mode-current" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" role="img"><path d="M5 6.5h14v8.8H9.2L5 18.5v-12Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"></path></svg><span>Ask</span><svg aria-hidden="true" class="cas-mode-chevron" viewBox="0 0 24 24" role="img"><path d="m7 10 5 5 5-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg></button><div class="cas-mode-menu" data-open="false" role="menu"><button aria-checked="true" class="cas-mode-option" data-active="true" data-test="cas-mode-ask" role="menuitemradio" type="button"><strong>Ask</strong><span>명확한 설명과 운영 가이드</span></button><button aria-checked="false" class="cas-mode-option" data-active="false" data-test="cas-mode-troubleshooting" role="menuitemradio" type="button"><strong>Troubleshooting</strong><span>장애 진단과 해결 방향 탐색</span></button></div></div></div><button aria-label="질의 전송" class="cas-send-button" data-test="cas-send-question" type="submit"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4.5 19.5 20 12 4.5 4.5 7 11.2 14 12l-7 .8-2.5 6.7Z" fill="currentColor"/></svg></button></div>
     </form>
     </div>
   </div>
@@ -131,13 +136,20 @@ function runQa() {
   const body = document.querySelector(".cas-panel-body");
   const chatThread = document.querySelector(".cas-chat-thread");
   const chatThreadStyle = getComputedStyle(chatThread);
+  const targetPopover = document.querySelector(".cas-target-popover");
+  const targetRect = targetPopover.getBoundingClientRect();
+  const chatRect = chatThread.getBoundingClientRect();
   const suggestionShell = document.querySelector(".cas-suggestion-shell");
+  const suggestionShellStyle = getComputedStyle(suggestionShell);
+  const composer = document.querySelector(".cas-compose");
   const textarea = document.querySelector(".cas-compose textarea");
+  const inputTools = document.querySelector(".cas-input-tools").getBoundingClientRect();
+  const inputWrap = document.querySelector(".cas-input-wrap").getBoundingClientRect();
+  const modeMenuStyle = getComputedStyle(document.querySelector(".cas-mode-menu"));
   const expectedPanelHeight = Math.min(760, innerHeight - 112);
-  const isMobile = innerWidth <= 620;
-  const minSuggestionSlot = isMobile ? 96 : 110;
-  const minTextareaHeight = isMobile ? 58 : 70;
-  const maxTextareaHeight = isMobile ? 78 : 90;
+  const minTextareaHeight = innerWidth <= 620 ? 90 : 90;
+  const maxTextareaHeight = innerWidth <= 620 ? 98 : 98;
+  const maxComposerHeight = innerWidth <= 620 ? 112 : 116;
   const bad = [...document.querySelectorAll(".cas-panel *")].filter((el) => {
     const cs = getComputedStyle(el);
     return el.scrollWidth > el.clientWidth + 2 && cs.overflowX !== "auto" && cs.overflowX !== "scroll";
@@ -152,16 +164,21 @@ function runQa() {
     panelHeightStable: Math.abs(panel.height - expectedPanelHeight) <= 2,
     chatThreadOwnsScroll: chatThreadStyle.overflowY === "auto" || chatThreadStyle.overflowY === "scroll",
     chatThreadHasSpace: chatThread.clientHeight >= 160,
-    suggestionSlotHeight: suggestionShell.clientHeight,
-    minSuggestionSlot,
+    targetCardVisible: targetPopover.clientHeight > 80,
+    targetDoesNotOverlapThread: targetRect.bottom <= chatRect.top + 1,
+    suggestionHidden: suggestionShellStyle.display === "none",
+    modeInsideComposer: inputTools.left >= inputWrap.left - 1 && inputTools.right <= inputWrap.right + 1 && inputTools.bottom <= inputWrap.bottom + 1,
+    modeDropdownClosed: modeMenuStyle.display === "none",
+    composerHeight: composer.clientHeight,
+    maxComposerHeight,
     textareaHeight: textarea.clientHeight,
     minTextareaHeight,
     maxTextareaHeight,
-    suggestionSlotReserved: suggestionShell.clientHeight >= minSuggestionSlot,
+    compactComposer: composer.clientHeight <= maxComposerHeight,
     textareaFixedHeight: textarea.clientHeight >= minTextareaHeight && textarea.clientHeight <= maxTextareaHeight,
     horizontalOverflowItems: bad
   };
-  result.pass = !result.documentOverflowX && result.panelInViewport && result.panelHeightStable && result.chatThreadOwnsScroll && result.chatThreadHasSpace && result.suggestionSlotReserved && result.textareaFixedHeight && bad.length === 0;
+  result.pass = !result.documentOverflowX && result.panelInViewport && result.panelHeightStable && result.chatThreadOwnsScroll && result.chatThreadHasSpace && result.targetCardVisible && result.targetDoesNotOverlapThread && result.suggestionHidden && result.modeInsideComposer && result.modeDropdownClosed && result.compactComposer && result.textareaFixedHeight && bad.length === 0;
   document.body.setAttribute("data-qa-pass", String(result.pass));
   document.getElementById("qa-result").textContent = JSON.stringify(result, null, 2);
 }
@@ -220,7 +237,10 @@ if (chromePath) {
     );
     record(`visual:${viewport.id}:thread-scroll-contract`, result.chatThreadOwnsScroll, "chat thread owns vertical scrolling");
     record(`visual:${viewport.id}:thread-space`, result.chatThreadHasSpace, "chat thread keeps readable space");
-    record(`visual:${viewport.id}:suggestion-slot`, result.suggestionSlotReserved, "recommended question slot is reserved");
+    record(`visual:${viewport.id}:target-card`, result.targetCardVisible, "target settings card is visible and labeled");
+    record(`visual:${viewport.id}:target-no-overlap`, result.targetDoesNotOverlapThread, "target settings does not overlap the chat thread");
+    record(`visual:${viewport.id}:suggestion-hidden`, result.suggestionHidden, "recommended questions do not occupy composer space while hidden");
+    record(`visual:${viewport.id}:compact-composer`, result.compactComposer, `composerHeight=${result.composerHeight}`);
     record(`visual:${viewport.id}:textarea-height`, result.textareaFixedHeight, "composer textarea height is fixed");
     record(`visual:${viewport.id}:overflow-x`, !result.documentOverflowX, "no document horizontal overflow");
     record(

@@ -2,11 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { PRODUCT } from "../../../packages/contracts/src/index.js";
-import { createMockOomKilledRun, streamMockRun } from "./mockRca.mjs";
+import { createMockOomKilledRun } from "./mockRca.mjs";
 import { checkLightspeedReadiness, createLightspeedBackedRun, getBrainConfig } from "./lightspeedBrain.mjs";
 import { collectOpenShiftOverview, enrichInputWithOpenShiftEvidence, getEvidenceConfig } from "./openshiftEvidence.mjs";
 import { getMetricConfig } from "./metricAdapter.mjs";
 import { getRunbookConfig } from "./runbookAdapter.mjs";
+import { enrichInputWithSimulation, listSimulationScenarios } from "./simulationLab.mjs";
 
 const port = Number(process.env.PORT ?? 8080);
 const host = process.env.HOST ?? "0.0.0.0";
@@ -45,6 +46,39 @@ function sendJson(response, statusCode, payload) {
     "Cache-Control": "no-store"
   });
   response.end(JSON.stringify(payload));
+}
+
+function writeSseHeaders(response) {
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-store",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no"
+  });
+}
+
+function writeSseEvent(response, event, data) {
+  response.write(`event: ${event}\n`);
+  response.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function answerChunks(answer = "") {
+  const text = String(answer);
+  if (!text) return [];
+  const chunks = [];
+  for (let index = 0; index < text.length; index += 28) {
+    chunks.push(text.slice(index, index + 28));
+  }
+  return chunks;
+}
+
+function streamRun(response, run) {
+  writeSseEvent(response, "tool_plan", run.tool_plan ?? null);
+  writeSseEvent(response, "evidence", run.evidence_bundle ?? null);
+  for (const token of answerChunks(run.rca_result?.answer ?? "")) {
+    writeSseEvent(response, "token", { token });
+  }
+  writeSseEvent(response, "final_answer", run);
 }
 
 function routeMissing(response) {
@@ -111,10 +145,73 @@ const requestHandler = async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/aiops/simulations") {
+      sendJson(response, 200, {
+        product: PRODUCT.officialName,
+        mode: "simulation_catalog",
+        ...listSimulationScenarios()
+      });
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/aiops/query") {
       const body = await readJson(request);
+      const wantsStream =
+        body.stream === true ||
+        String(request.headers.accept ?? "").includes("text/event-stream") ||
+        url.searchParams.get("stream") === "true";
+
+      if (wantsStream) {
+        writeSseHeaders(response);
+        try {
+          writeSseEvent(response, "status", {
+            stage: "evidence",
+            message: body.locale === "en-US" ? "Checking data" : "자료 확인 중"
+          });
+          const enrichedBody =
+            body.simulation_id
+              ? await enrichInputWithSimulation(body, {
+                  authorization: request.headers.authorization
+                })
+              : evidenceConfig.provider === "none"
+              ? body
+              : await enrichInputWithOpenShiftEvidence(body, {
+                  authorization: request.headers.authorization,
+                  config: evidenceConfig,
+                  metricConfig,
+                  runbookConfig
+                });
+          if (enrichedBody.cas_evidence) {
+            writeSseEvent(response, "evidence", enrichedBody.cas_evidence);
+          }
+          writeSseEvent(response, "status", {
+            stage: "brain",
+            message: body.locale === "en-US" ? "Writing answer" : "답변 작성 중"
+          });
+          const run =
+            brainConfig.provider === "openshift-lightspeed"
+              ? await createLightspeedBackedRun(enrichedBody, {
+                  authorization: request.headers.authorization,
+                  config: brainConfig
+                })
+              : createMockOomKilledRun(enrichedBody);
+          streamRun(response, run);
+        } catch (error) {
+          writeSseEvent(response, "error", {
+            error: error instanceof Error ? error.message : "unknown stream error"
+          });
+        } finally {
+          response.end();
+        }
+        return;
+      }
+
       const enrichedBody =
-        evidenceConfig.provider === "none"
+        body.simulation_id
+          ? await enrichInputWithSimulation(body, {
+              authorization: request.headers.authorization
+            })
+          : evidenceConfig.provider === "none"
           ? body
           : await enrichInputWithOpenShiftEvidence(body, {
               authorization: request.headers.authorization,
@@ -129,14 +226,6 @@ const requestHandler = async (request, response) => {
               config: brainConfig
             })
           : createMockOomKilledRun(enrichedBody);
-      const wantsStream =
-        body.stream === true ||
-        String(request.headers.accept ?? "").includes("text/event-stream") ||
-        url.searchParams.get("stream") === "true";
-      if (wantsStream) {
-        streamMockRun(response, run);
-        return;
-      }
       sendJson(response, 200, run);
       return;
     }

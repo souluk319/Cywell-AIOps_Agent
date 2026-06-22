@@ -43,8 +43,8 @@ const metricConfig = {
 };
 const runbookConfig = {
   provider: "jsonl",
-  corpusPath: "apps/gateway/runbooks/komsco-ocp-mini.jsonl",
-  topK: 3
+  corpusPath: "apps/gateway/runbooks/komsco-ops-sim.jsonl",
+  topK: 5
 };
 
 const transport = async (url) => {
@@ -261,6 +261,7 @@ expect(
 const context = buildOpenShiftEvidenceContext(pod);
 expect("evidence:context", context.includes("Collected read-only OpenShift evidence"), "evidence context is generated for the brain prompt");
 expect("evidence:context-runbook", context.includes("runbook:"), "brain prompt includes runbook evidence context");
+expect("evidence:context-runbook-excerpt", context.includes("KOMSCO Synthetic"), "brain prompt includes synthetic customer runbook context");
 
 const missing = await collectOpenShiftEvidence(
   {
@@ -303,6 +304,8 @@ const runbook = await collectRunbookEvidence(
   { config: runbookConfig }
 );
 expect("runbook:hit", runbook.evidence.length >= 1, "runbook adapter returns at least one curated JSONL hit");
+expect("runbook:customer-corpus", runbook.evidence.some((item) => item.source.includes("komsco-ops-sim")), "runbook adapter reads the synthetic customer corpus");
+expect("runbook:excerpt", runbook.evidence.some((item) => item.summary.includes("memory limit")), "runbook evidence includes excerpt text");
 expect(
   "runbook:shape",
   runbook.evidence.every((item) => item.id.startsWith("runbook:") && item.type === "runbook" && item.source),
@@ -356,6 +359,9 @@ expect("overview:signals", overview.signals?.warning_events === 2 && overview.si
 expect("overview:risk-workloads", overview.risk_workloads?.length >= 2, "overview includes risky workloads");
 expect("overview:timeline", overview.evidence_timeline?.some((item) => item.summary.includes("FailedScheduling")), "overview includes evidence timeline");
 expect("overview:actions", overview.actions?.some((item) => item.type === "cas_query"), "overview includes a Run RCA action");
+expect("overview:events-link", overview.actions?.some((item) => item.type === "console_link" && item.href === "/events/ns/default"), "overview namespace events action uses the OpenShift Events route");
+expect("overview:no-runbook-404-link", !overview.actions?.some((item) => String(item.href ?? "").startsWith("/docs/")), "overview does not emit runbook links to missing in-console docs routes");
+expect("overview:runbook-query-action", overview.actions?.some((item) => item.type === "cas_query" && String(item.label ?? "").startsWith("Review runbook:")), "overview runbook actions are CAS guidance queries instead of broken links");
 expect("overview:metric-group", overview.evidence_groups?.metric?.length >= 1, "overview includes metric evidence group");
 expect("overview:runbook-group", overview.evidence_groups?.runbook?.length >= 1, "overview includes runbook evidence group");
 expect("overview:evidence-status", overview.evidence_status?.some((item) => item.type === "runbook" && item.status === "collected"), "overview exposes evidence_status");

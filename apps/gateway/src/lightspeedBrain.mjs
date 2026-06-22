@@ -32,11 +32,13 @@ function getTarget(input = {}) {
 function buildQuery(input = {}) {
   const question = String(input.question ?? "OpenShift cluster 상태를 요약해줘.");
   const target = getTarget(input);
+  const brainMode = lightspeedPayloadMode(input);
   const context = [
     "You are Cywell AI Sentinel, a read-only OpenShift operations assistant.",
     "Do not propose destructive actions. Prefer evidence, RCA hypotheses, and safe next checks.",
     "Answer directly first in the user's language, then add concise evidence and the safest next check.",
     "Avoid exposing internal evidence IDs unless they clarify the operational answer.",
+    `Lightspeed mode: ${brainMode}.`,
     `Target resource: ${target.namespace}/${target.kind}/${target.name}.`,
     `Locale: ${input.locale ?? "ko-KR"}.`
   ].join("\n");
@@ -44,12 +46,17 @@ function buildQuery(input = {}) {
   return `Context:\n${context}${evidenceContext}\n\nQuestion:\n${question}`;
 }
 
+function lightspeedPayloadMode(input = {}) {
+  const requested = input.brain_mode ?? input.chat_mode ?? input.ai_mode ?? input.mode;
+  return requested === "troubleshooting" ? "troubleshooting" : "ask";
+}
+
 export function buildLightspeedPayload(input = {}) {
   return {
     attachments: [],
     conversation_id: input.conversation_id,
     media_type: "application/json",
-    mode: input.mode === "troubleshooting" ? "troubleshooting" : "ask",
+    mode: lightspeedPayloadMode(input),
     query: buildQuery(input)
   };
 }
@@ -301,6 +308,7 @@ export function createLightspeedRun(input = {}, lightspeedResult = {}) {
       brain: {
         provider: "openshift-lightspeed",
         endpoint: "/v1/streaming_query",
+        mode: lightspeedResult.payloadMode ?? lightspeedPayloadMode(input),
         status: "ok",
         event_count: lightspeedResult.eventCount,
         tool_call_count: lightspeedResult.tools?.length ?? 0,

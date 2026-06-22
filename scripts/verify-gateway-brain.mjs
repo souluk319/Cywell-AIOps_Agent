@@ -53,6 +53,26 @@ expect("brain:payload-context", payload.query.includes("read-only OpenShift oper
 expect("brain:payload-evidence", payload.query.includes("openshift:clusterversion:version"), "payload carries CAS OpenShift evidence context");
 expect("brain:payload-cas-context", payload.query.includes("CAS evidence context"), "payload separates CAS evidence context from the user question");
 expect("brain:payload-direct-answer", payload.query.includes("Answer directly first"), "payload asks Lightspeed to answer directly first");
+expect("brain:payload-ask-context", payload.query.includes("Lightspeed mode: ask"), "payload records Ask mode in the prompt context");
+
+const troubleshootingPayload = buildLightspeedPayload({
+  question: "default namespace pod가 왜 재시작됐어?",
+  mode: "read_only",
+  brain_mode: "troubleshooting",
+  scope: { namespaces: ["default"] },
+  resourceRef: { kind: "Pod", name: "api-7c8d9" },
+  locale: "ko-KR"
+});
+expect(
+  "brain:payload-troubleshooting-mode",
+  troubleshootingPayload.mode === "troubleshooting",
+  "brain_mode=troubleshooting maps to Lightspeed troubleshooting mode"
+);
+expect(
+  "brain:payload-troubleshooting-keeps-readonly",
+  troubleshootingPayload.query.includes("read-only OpenShift operations assistant"),
+  "troubleshooting payload keeps CAS read-only safety context"
+);
 
 const run = await createLightspeedBackedRun(
   {
@@ -104,6 +124,7 @@ const run = await createLightspeedBackedRun(
 
 expect("brain:run-mode", run.mode === "lightspeed_read_only", "successful brain run is lightspeed_read_only");
 expect("brain:run-provider", run.audit?.answer_provider === "openshift-lightspeed", "audit marks openshift-lightspeed provider");
+expect("brain:run-payload-mode", run.audit?.brain?.mode === "ask", "audit preserves the Lightspeed payload mode");
 expect("brain:run-evidence", run.evidence_bundle?.evidence?.some((item) => item.id === "lightspeed:answer"), "Lightspeed answer evidence exists");
 expect(
   "brain:run-cause-from-answer",

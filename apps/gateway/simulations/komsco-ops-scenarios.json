@@ -1,0 +1,292 @@
+{
+  "schema": "cas_ops_simulation_v1",
+  "description": "Synthetic KOMSCO-like operations scenarios for CAS v0.1.1 RAG+Metric+Evidence simulation. No real customer data.",
+  "scenarios": [
+    {
+      "id": "issuance-api-oom",
+      "title": "issuance-api OOMKilled during report export",
+      "summary": "발급 API가 report-export 처리 중 memory limit을 초과해 재시작된 상황입니다.",
+      "risk": "high",
+      "question": "komsco-prod namespace의 issuance-api pod가 OOMKilled로 재시작된 원인을 근거 중심으로 분석해줘.",
+      "target": {
+        "namespace": "komsco-prod",
+        "kind": "Pod",
+        "name": "issuance-api-6f4476d6d9-w9hbk",
+        "container": "issuance-api"
+      },
+      "pod": {
+        "phase": "Running",
+        "nodeName": "worker-a",
+        "restartCount": 4,
+        "state": "running",
+        "lastReason": "OOMKilled"
+      },
+      "events": [
+        {
+          "type": "Warning",
+          "reason": "OOMKilled",
+          "message": "Container issuance-api was terminated because it exceeded memory limit during report-export",
+          "lastTimestamp": "2026-06-22T01:42:00Z"
+        },
+        {
+          "type": "Warning",
+          "reason": "BackOff",
+          "message": "Back-off restarting failed container issuance-api",
+          "lastTimestamp": "2026-06-22T01:43:00Z"
+        }
+      ],
+      "previousLog": "ERROR report-export pdf bundle allocation failed; java.lang.OutOfMemoryError: Java heap space; requestId=redacted",
+      "metrics": {
+        "pod_restart_increase": "4",
+        "pod_memory_working_set": "996147200",
+        "pod_memory_limit": "805306368"
+      },
+      "expectedRunbookIds": [
+        "runbook:komsco_ops_rca:issuance-api-oomkilled-memory-limit",
+        "runbook:komsco_ops_incidents:incident-oom-report-export"
+      ],
+      "expectedTerms": ["report-export", "memory limit", "read-only"],
+      "remediations": [
+        {
+          "id": "simulate-memory-baseline-review",
+          "label": "Memory baseline review simulation",
+          "description": "운영자가 previous log와 메모리 지표를 확인한 뒤 report-export 경로의 memory baseline을 재산정했다고 가정합니다.",
+          "question": "방금 memory baseline 검토 조치를 시뮬레이션했어. 현재 issuance-api 상태가 안정화됐는지 근거로 확인해줘.",
+          "resolution": {
+            "pod": {
+              "phase": "Running",
+              "restartCount": 4,
+              "state": "running"
+            },
+            "events": [
+              {
+                "type": "Normal",
+                "reason": "SimulationStabilized",
+                "message": "issuance-api memory pressure signal cleared after baseline review simulation",
+                "lastTimestamp": "2026-06-22T01:56:00Z"
+              }
+            ],
+            "metrics": {
+              "pod_restart_increase": "0",
+              "pod_memory_working_set": "469762048",
+              "pod_memory_limit": "1073741824"
+            },
+            "previousLog": "INFO report-export streaming mode enabled in simulation; memory allocation stabilized"
+          }
+        }
+      ]
+    },
+    {
+      "id": "settlement-worker-pending",
+      "title": "settlement-worker Pending during batch window",
+      "summary": "야간 정산 batch window에서 settlement-worker가 quota/capacity 제약으로 Pending에 머무는 상황입니다.",
+      "risk": "medium",
+      "question": "komsco-batch namespace의 settlement-worker pod가 Pending 상태인데 배치 운영 관점에서 원인을 분석해줘.",
+      "target": {
+        "namespace": "komsco-batch",
+        "kind": "Pod",
+        "name": "settlement-worker-28477112-qx4kp",
+        "container": "settlement-worker"
+      },
+      "pod": {
+        "phase": "Pending",
+        "nodeName": "",
+        "restartCount": 0,
+        "state": "waiting",
+        "waitingReason": "Pending"
+      },
+      "events": [
+        {
+          "type": "Warning",
+          "reason": "FailedScheduling",
+          "message": "0/3 nodes are available: 2 Insufficient memory, 1 namespace quota exceeded for requests.memory",
+          "lastTimestamp": "2026-06-22T02:10:00Z"
+        }
+      ],
+      "previousLog": "",
+      "metrics": {
+        "pod_restart_increase": "0",
+        "pod_memory_working_set": null,
+        "pod_memory_limit": "2147483648"
+      },
+      "expectedRunbookIds": [
+        "runbook:komsco_ops_rca:settlement-worker-failedscheduling-quota",
+        "runbook:komsco_ops_batch:batch-window-capacity-policy"
+      ],
+      "expectedTerms": ["ResourceQuota", "batch window", "FailedScheduling"],
+      "remediations": [
+        {
+          "id": "simulate-batch-window-reschedule",
+          "label": "Batch window reschedule simulation",
+          "description": "운영자가 배치 동시성 정책을 확인하고 정산 작업을 승인된 window 안에서 재예약했다고 가정합니다.",
+          "question": "배치 작업 재예약 조치를 시뮬레이션했어. settlement-worker Pending 위험이 해소됐는지 확인해줘.",
+          "resolution": {
+            "pod": {
+              "phase": "Running",
+              "nodeName": "worker-b",
+              "restartCount": 0,
+              "state": "running"
+            },
+            "events": [
+              {
+                "type": "Normal",
+                "reason": "Scheduled",
+                "message": "Successfully assigned komsco-batch/settlement-worker after batch window reschedule simulation",
+                "lastTimestamp": "2026-06-22T02:24:00Z"
+              }
+            ],
+            "metrics": {
+              "pod_restart_increase": "0",
+              "pod_memory_working_set": "536870912",
+              "pod_memory_limit": "2147483648"
+            },
+            "previousLog": "INFO settlement-worker started within approved batch window simulation"
+          }
+        }
+      ]
+    },
+    {
+      "id": "issuance-api-probe-timeout",
+      "title": "issuance-api readiness failures from dependency timeout",
+      "summary": "issuance-api readiness probe가 oracle-svc timeout과 함께 실패하는 상황입니다.",
+      "risk": "medium",
+      "question": "issuance-api의 readiness probe 실패와 oracle-svc timeout 로그를 연결해서 원인 후보를 알려줘.",
+      "target": {
+        "namespace": "komsco-prod",
+        "kind": "Pod",
+        "name": "issuance-api-6f4476d6d9-m2n7s",
+        "container": "issuance-api"
+      },
+      "pod": {
+        "phase": "Running",
+        "nodeName": "worker-b",
+        "restartCount": 1,
+        "state": "running",
+        "lastReason": "Error"
+      },
+      "events": [
+        {
+          "type": "Warning",
+          "reason": "Unhealthy",
+          "message": "Readiness probe failed: dependency oracle-svc timeout after 3s",
+          "lastTimestamp": "2026-06-22T03:05:00Z"
+        }
+      ],
+      "previousLog": "WARN readiness dependency check failed: oracle-svc timeout; redis-cache healthy; token=redacted",
+      "metrics": {
+        "pod_restart_increase": "1",
+        "pod_memory_working_set": "402653184",
+        "pod_memory_limit": "805306368"
+      },
+      "expectedRunbookIds": [
+        "runbook:komsco_ops_rca:probe-failure-dependency-timeout",
+        "runbook:komsco_ops_services:service-issuance-api-profile"
+      ],
+      "expectedTerms": ["oracle-svc", "readiness", "dependency"],
+      "remediations": [
+        {
+          "id": "simulate-dependency-health-check",
+          "label": "Dependency health check simulation",
+          "description": "운영자가 oracle-svc endpoint와 readiness dependency check를 확인해 일시적 timeout이 해소됐다고 가정합니다.",
+          "question": "oracle-svc dependency health check 조치를 시뮬레이션했어. readiness 실패가 사라졌는지 확인해줘.",
+          "resolution": {
+            "pod": {
+              "phase": "Running",
+              "restartCount": 1,
+              "state": "running"
+            },
+            "events": [
+              {
+                "type": "Normal",
+                "reason": "Ready",
+                "message": "Readiness probe passed after dependency health check simulation",
+                "lastTimestamp": "2026-06-22T03:17:00Z"
+              }
+            ],
+            "metrics": {
+              "pod_restart_increase": "0",
+              "pod_memory_working_set": "385875968",
+              "pod_memory_limit": "805306368"
+            },
+            "previousLog": "INFO readiness dependency check passed: oracle-svc latency back within threshold"
+          }
+        }
+      ]
+    },
+    {
+      "id": "registry-imagepull",
+      "title": "ImagePullBackOff from restricted registry access",
+      "summary": "보안 namespace의 audit-log-writer가 restricted registry pull secret 문제로 이미지를 당기지 못하는 상황입니다.",
+      "risk": "high",
+      "question": "komsco-secure namespace의 audit-log-writer가 ImagePullBackOff 상태야. registry와 pull secret 관점에서 확인해줘.",
+      "target": {
+        "namespace": "komsco-secure",
+        "kind": "Pod",
+        "name": "audit-log-writer-59dff8b949-hc2k8",
+        "container": "audit-log-writer"
+      },
+      "pod": {
+        "phase": "Pending",
+        "nodeName": "worker-c",
+        "restartCount": 0,
+        "state": "waiting",
+        "waitingReason": "ImagePullBackOff"
+      },
+      "events": [
+        {
+          "type": "Warning",
+          "reason": "Failed",
+          "message": "Failed to pull image registry.internal/secure/audit-log-writer:2026.06.22: unauthorized: pull secret not accepted",
+          "lastTimestamp": "2026-06-22T04:22:00Z"
+        },
+        {
+          "type": "Warning",
+          "reason": "ErrImagePull",
+          "message": "Error response from daemon: unauthorized",
+          "lastTimestamp": "2026-06-22T04:23:00Z"
+        }
+      ],
+      "previousLog": "",
+      "metrics": {
+        "pod_restart_increase": "0",
+        "pod_memory_working_set": null,
+        "pod_memory_limit": null
+      },
+      "expectedRunbookIds": [
+        "runbook:komsco_ops_rca:imagepullbackoff-internal-registry",
+        "runbook:komsco_ops_services:service-audit-log-writer-profile"
+      ],
+      "expectedTerms": ["pull secret", "registry", "authorization"],
+      "remediations": [
+        {
+          "id": "simulate-pull-secret-rotation-check",
+          "label": "Pull secret rotation check simulation",
+          "description": "운영자가 service account imagePullSecrets와 registry authorization 상태를 확인하고 승인된 secret rotation을 완료했다고 가정합니다.",
+          "question": "pull secret rotation 확인 조치를 시뮬레이션했어. audit-log-writer 이미지 pull 문제가 해소됐는지 근거로 확인해줘.",
+          "resolution": {
+            "pod": {
+              "phase": "Running",
+              "nodeName": "worker-c",
+              "restartCount": 0,
+              "state": "running"
+            },
+            "events": [
+              {
+                "type": "Normal",
+                "reason": "Pulled",
+                "message": "Successfully pulled image after approved pull secret rotation simulation",
+                "lastTimestamp": "2026-06-22T04:36:00Z"
+              }
+            ],
+            "metrics": {
+              "pod_restart_increase": "0",
+              "pod_memory_working_set": "201326592",
+              "pod_memory_limit": "536870912"
+            },
+            "previousLog": "INFO audit-log-writer container started after image pull simulation"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -305,16 +305,16 @@ function overviewActionQueue(namespace, topWorkload) {
   actions.push({
     label: "Open namespace events",
     type: "console_link",
-    href: `/k8s/ns/${namespace}/events`
+    href: `/events/ns/${namespace}`
   });
   return actions;
 }
 
 function runbookActions(runbookEvidence = []) {
   return runbookEvidence.slice(0, 3).map((item) => ({
-    label: `Open runbook: ${item.summary}`,
-    type: "console_link",
-    href: item.source
+    label: `Review runbook: ${item.summary}`,
+    type: "cas_query",
+    question: `Runbook 근거 ${item.id} (${item.summary})를 기준으로 현재 상황에서 안전한 확인 절차를 요약해줘.`
   }));
 }
 

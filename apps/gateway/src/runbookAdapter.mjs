@@ -26,10 +26,12 @@ function missingItem(type, reason) {
 function evidenceItem(section, score) {
   const bookSlug = section.book_slug ?? "runbook";
   const sectionId = section.section_id ?? section.anchor_id ?? section.anchor ?? "section";
+  const label = `${section.title ?? bookSlug} > ${section.section_path_label ?? section.heading ?? sectionId}`;
+  const excerpt = truncate(section.text ?? section.search_text ?? "", 220);
   return {
     id: `runbook:${bookSlug}:${sectionId}`,
     type: "runbook",
-    summary: truncate(`${section.title ?? bookSlug} > ${section.section_path_label ?? section.heading ?? sectionId}`),
+    summary: truncate(excerpt ? `${label}: ${excerpt}` : label),
     source: section.viewer_path ?? section.source_uri ?? "playbookstudio.jsonl",
     observed_at: new Date().toISOString(),
     score: Number(score.toFixed(3))
@@ -130,6 +132,17 @@ function tokenize(value) {
     .filter((token) => token.length >= 2);
 }
 
+function workloadNameHints(name) {
+  const raw = String(name ?? "").toLowerCase().trim();
+  if (!raw) return [];
+  const hints = new Set([raw]);
+  const parts = raw.split("-").filter(Boolean);
+  if (parts.length >= 4) {
+    hints.add(parts.slice(0, -2).join("-"));
+  }
+  return [...hints].filter((hint) => hint.length >= 2);
+}
+
 function queryText(input = {}) {
   const target = input.resourceRef ?? {};
   return [
@@ -138,6 +151,7 @@ function queryText(input = {}) {
     input.scope?.namespaces?.join(" "),
     target.kind,
     target.name,
+    workloadNameHints(target.name).join(" "),
     input.cas_evidence?.evidence?.map((item) => `${item.id} ${item.summary}`).join(" ")
   ].join(" ");
 }
@@ -146,7 +160,12 @@ function scoreSection(section, tokens) {
   const haystack = String(section.search_text ?? "").toLowerCase();
   let score = 0;
   for (const token of tokens) {
-    if (haystack.includes(token)) score += token.length > 5 ? 2 : 1;
+    if (haystack.includes(token)) {
+      if (token.includes("-") && token.length > 6) score += 6;
+      else if (token.length > 10) score += 3;
+      else if (token.length > 5) score += 2;
+      else score += 1;
+    }
   }
   if (section.heading && tokens.some((token) => String(section.heading).toLowerCase().includes(token))) score += 3;
   return score;

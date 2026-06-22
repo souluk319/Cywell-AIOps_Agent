@@ -77,6 +77,12 @@ expectText(
   "launcher loads the CAS overview cockpit endpoint"
 );
 expectText(
+  "console-simulation:catalog",
+  launcherSource,
+  "/api/aiops/simulations",
+  "launcher loads the CAS Simulation Lab catalog endpoint"
+);
+expectText(
   "console-chat:conversation",
   launcherSource,
   "conversation_id",
@@ -119,10 +125,101 @@ expectText(
   "launcher renders a compact pending indicator instead of a long loading paragraph"
 );
 expectText(
-  "console-chat:suggestion-slot",
+  "console-chat:suggestion-popover",
   launcherSource,
   "className=\"cas-suggestion-shell\"",
-  "recommended questions live in a reserved slot so focusing/submitting does not move the input"
+  "recommended questions live in a popover instead of a fixed composer block"
+);
+expectText(
+  "console-chat:suggestion-toggle",
+  launcherSource,
+  "data-test=\"cas-suggestion-toggle\"",
+  "composer exposes a compact plus button for frequent checks"
+);
+expectText(
+  "console-chat:no-fixed-suggestion-space",
+  launcherSource,
+  ".cas-suggestion-shell[data-visible=\"false\"] {\n  display: none;",
+  "hidden recommendations do not reserve vertical space while reading answers"
+);
+expectText(
+  "console-chat:sse-reader",
+  launcherSource,
+  "readSseStream",
+  "launcher consumes streaming Gateway events"
+);
+expectText(
+  "console-chat:stream-request",
+  launcherSource,
+  "stream: true",
+  "launcher requests streamed answers from the Gateway"
+);
+expectText(
+  "console-chat:stream-token",
+  launcherSource,
+  "event === \"token\"",
+  "launcher appends streamed answer tokens"
+);
+expectText(
+  "console-chat:mode-selector",
+  launcherSource,
+  "data-test=\"cas-mode-selector\"",
+  "launcher exposes Ask/Troubleshooting mode selection"
+);
+expectText(
+  "console-chat:mode-inside-input",
+  launcherSource,
+  "className=\"cas-input-tools\"",
+  "launcher keeps Ask/Troubleshooting as a compact input tool instead of a separate composer row"
+);
+expectOrder(
+  "console-chat:plus-before-mode",
+  launcherSource,
+  ["data-test=\"cas-suggestion-toggle\"", "data-test=\"cas-mode-selector\""],
+  "frequent-check plus button sits immediately to the left of Ask/Troubleshooting mode",
+  "plus/frequent checks should be attached to the composer mode controls"
+);
+expectText(
+  "console-chat:mode-current-only",
+  launcherSource,
+  "data-test=\"cas-mode-current\"",
+  "launcher shows only the currently selected Ask/Troubleshooting mode while the dropdown is closed"
+);
+expectText(
+  "console-chat:mode-dropdown",
+  launcherSource,
+  "className=\"cas-mode-menu\"",
+  "launcher renders alternate modes in a dropdown menu instead of listing all choices in the composer"
+);
+expectText(
+  "console-chat:mode-ask",
+  launcherSource,
+  "data-test={`cas-mode-${mode}`}",
+  "launcher renders mode buttons with addressable test ids"
+);
+expectText(
+  "console-chat:mode-request",
+  launcherSource,
+  "brain_mode: chatMode",
+  "launcher sends the selected mode to the Gateway brain contract"
+);
+expectText(
+  "console-chat:mode-readonly-split",
+  launcherSource,
+  "mode: \"read_only\"",
+  "launcher keeps CAS safety mode separate from the Lightspeed mode"
+);
+expectText(
+  "console-chat:scroll-lock",
+  launcherSource,
+  "autoScrollRef.current = nearBottom",
+  "chat autoscroll unlocks when the operator scrolls away from the bottom"
+);
+expectText(
+  "console-chat:scroll-bottom-button",
+  launcherSource,
+  "data-test=\"cas-scroll-bottom\"",
+  "launcher shows a bottom-jump button when autoscroll is unlocked"
 );
 expectText(
   "console-chat:auto-scroll-no-animation-jank",
@@ -141,6 +238,13 @@ expectText(
   launcherSource,
   "data-test=\"cas-view-switcher\"",
   "launcher exposes header icon view switching"
+);
+expectOrder(
+  "console-chat:new-chat-adjacent-to-chat",
+  launcherSource,
+  ["data-test={`cas-view-${view}`}", "view === \"chat\" &&", "data-test=\"cas-new-chat\""],
+  "new chat action is rendered immediately after the chat icon",
+  "new chat must sit next to chat, not after unrelated dashboard views"
 );
 expectText(
   "console-chat:language-toggle",
@@ -184,6 +288,12 @@ expectText(
   launcherSource,
   "다음 행동",
   "launcher includes Korean Next Actions label for header view functions"
+);
+expectText(
+  "console-simulation:korean-label",
+  launcherSource,
+  "시뮬레이션",
+  "launcher includes Korean Simulation label for the Simulation Lab"
 );
 rejectText(
   "console-chat:no-old-control-label",
@@ -264,10 +374,16 @@ expectText(
   "launcher header copy brands the customer edition as KOMSCO AI AGENT"
 );
 expectText(
-  "console-chat:usertoken-copy",
+  "console-chat:status-light",
+  launcherSource,
+  "cas-status-light",
+  "launcher uses a compact signal-light status instead of debug badges"
+);
+rejectText(
+  "console-chat:no-usertoken-debug-copy",
   launcherSource,
   "UserToken proxy",
-  "launcher marks UserToken proxy integration"
+  "launcher does not render UserToken proxy debug copy in the chat shell"
 );
 expectText(
   "console-chat:suggestion-list",
@@ -298,10 +414,16 @@ if (questionBankSize(launcherSource, "OCP_AIOPS_QUESTION_BANK_EN") >= 50) {
   fail("console-chat:question-bank-en", `expected at least 50 English questions, got ${questionBankSize(launcherSource, "OCP_AIOPS_QUESTION_BANK_EN")}`);
 }
 expectText(
-  "console-chat:empty-submit-uses-suggestion",
+  "console-chat:empty-submit-opens-suggestions",
   launcherSource,
-  "normalizeQuestion(question, activeSuggestion)",
-  "empty input submits the currently visible recommended question"
+  "setShowSuggestions(true)",
+  "empty input opens recommended questions instead of silently sending a hidden random suggestion"
+);
+expectText(
+  "console-chat:visible-suggestion-submit",
+  launcherSource,
+  "if (showSuggestions) {\n          await submitQuestion(activeSuggestion);",
+  "visible recommended question can be submitted after the suggestion menu is open"
 );
 expectText(
   "console-chat:focus-hides-suggestions",
@@ -316,10 +438,94 @@ expectText(
   "query action is an icon button inside the composer"
 );
 expectText(
-  "console-chat:target-fields-collapsed",
+  "console-actions:open-button-nowrap",
+  launcherSource,
+  "white-space: nowrap",
+  "Next Actions open/run buttons do not wrap into vertical letters"
+);
+expectText(
+  "console-actions:long-label-clamp",
+  launcherSource,
+  "-webkit-line-clamp: 2",
+  "long Next Actions labels are clamped instead of stretching cards"
+);
+expectText(
+  "console-actions:safe-console-href",
+  launcherSource,
+  "isOpenShiftConsoleHref(action.href)",
+  "Next Actions only open known OpenShift console hrefs"
+);
+expectText(
+  "console-actions:fallback-question",
+  launcherSource,
+  "fallbackQuestion",
+  "unknown action hrefs become CAS guidance questions instead of broken links"
+);
+expectText(
+  "console-chat:target-fields-header",
   launcherSource,
   "data-test=\"cas-target-fields\"",
-  "target namespace/resource controls are collapsed behind a toolbar"
+  "target namespace/resource controls are hidden behind a header icon"
+);
+expectText(
+  "console-chat:target-layout-row",
+  launcherSource,
+  "data-target-open={showTargetControls ? \"true\" : \"false\"}",
+  "panel body switches layout when target settings are open"
+);
+expectText(
+  "console-chat:target-title",
+  launcherSource,
+  "copy.targetTitle",
+  "target settings renders a clear Analysis Target title"
+);
+expectText(
+  "console-chat:target-current",
+  launcherSource,
+  "copy.targetCurrent",
+  "target settings shows the currently applied target"
+);
+expectText(
+  "console-chat:target-apply",
+  launcherSource,
+  "copy.targetApply",
+  "target settings has an explicit apply action"
+);
+expectText(
+  "console-chat:new-chat-header",
+  launcherSource,
+  "data-test=\"cas-new-chat\"",
+  "new chat is a header icon instead of a full-width footer control"
+);
+rejectText(
+  "console-chat:no-footer-toolbar",
+  launcherSource,
+  "className=\"cas-compose-toolbar\"",
+  "composer no longer renders target/recommendation metadata under the input"
+);
+rejectText(
+  "console-chat:no-footer-actions",
+  launcherSource,
+  "className=\"cas-actions\"",
+  "composer no longer renders a footer action row"
+);
+rejectText(
+  "console-chat:no-system-ready-message",
+  launcherSource,
+  "id: \"system-ready\"",
+  "chat no longer starts with an internal explanatory system message"
+);
+rejectText(
+  "console-chat:no-visible-provider-meta",
+  launcherSource,
+  "className=\"cas-result-meta\"",
+  "chat answers no longer render provider/debug metadata as visible answer text"
+);
+rejectText(
+  "console-chat:no-lightspeed-answer-label",
+  launcherSource,
+  "Lightspeed real answer",
+  "chat answers do not expose internal provider labels"
 );
 expectText(
   "console-proxy:csrf-cookie",
@@ -417,6 +623,30 @@ expectText(
   "data-test=\"cas-risk-workloads\"",
   "launcher renders risk workloads"
 );
+expectText(
+  "console-simulation:lab",
+  launcherSource,
+  "data-test=\"cas-simulation-lab\"",
+  "launcher renders the Simulation Lab surface"
+);
+expectText(
+  "console-simulation:cards",
+  launcherSource,
+  "data-test=\"cas-simulation-card\"",
+  "launcher renders data-driven simulation scenario cards"
+);
+expectText(
+  "console-simulation:query-contract",
+  launcherSource,
+  "simulation_id: simulationId",
+  "launcher sends simulation_id through the Gateway query contract"
+);
+expectText(
+  "console-simulation:action-contract",
+  launcherSource,
+  "simulation_action_id: simulationActionId",
+  "launcher sends simulation_action_id for remediation simulation"
+);
 rejectText(
   "console-chat:no-route-ui",
   manifest,
@@ -470,6 +700,12 @@ expectText(
   launcherBundle,
   "/api/aiops/overview",
   "built launcher bundle contains overview integration"
+);
+expectText(
+  "console-simulation:bundle-catalog",
+  launcherBundle,
+  "/api/aiops/simulations",
+  "built launcher bundle contains Simulation Lab catalog integration"
 );
 expectText(
   "console-chat:bundle-fallback",
@@ -538,6 +774,42 @@ expectText(
   "built launcher bundle contains the composer send icon button"
 );
 expectText(
+  "console-chat:bundle-mode-selector",
+  launcherBundle,
+  "cas-mode-selector",
+  "built launcher bundle contains Ask/Troubleshooting mode selector"
+);
+expectText(
+  "console-chat:bundle-brain-mode",
+  launcherBundle,
+  "brain_mode",
+  "built launcher bundle sends selected Lightspeed mode"
+);
+expectText(
+  "console-chat:bundle-suggestion-toggle",
+  launcherBundle,
+  "cas-suggestion-toggle",
+  "built launcher bundle contains the frequent-check plus button"
+);
+expectText(
+  "console-chat:bundle-scroll-bottom",
+  launcherBundle,
+  "cas-scroll-bottom",
+  "built launcher bundle contains bottom-jump control for unlocked scroll"
+);
+expectText(
+  "console-chat:bundle-stream-reader",
+  launcherBundle,
+  "text/event-stream",
+  "built launcher bundle contains streaming response reader"
+);
+expectText(
+  "console-chat:bundle-new-chat",
+  launcherBundle,
+  "cas-new-chat",
+  "built launcher bundle contains header new-chat action"
+);
+expectText(
   "console-chat:bundle-target-fields",
   launcherBundle,
   "cas-target-fields",
@@ -584,6 +856,12 @@ expectText(
   launcherBundle,
   "cas-evidence-groups",
   "built launcher bundle contains evidence groups surface"
+);
+expectText(
+  "console-simulation:bundle-lab",
+  launcherBundle,
+  "cas-simulation-lab",
+  "built launcher bundle contains Simulation Lab surface"
 );
 
 const failures = checks.filter((check) => check.status === "FAIL");
