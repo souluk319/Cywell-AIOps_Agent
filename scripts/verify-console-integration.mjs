@@ -26,6 +26,23 @@ function rejectText(id, text, needle, passDetail, failDetail = passDetail) {
   else fail(id, failDetail);
 }
 
+function expectOrder(id, text, needles, passDetail, failDetail = passDetail) {
+  let cursor = -1;
+  for (const needle of needles) {
+    const index = text.indexOf(needle, cursor + 1);
+    if (index < 0) {
+      fail(id, `${failDetail}: missing ${needle}`);
+      return;
+    }
+    if (index < cursor) {
+      fail(id, `${failDetail}: wrong order at ${needle}`);
+      return;
+    }
+    cursor = index;
+  }
+  pass(id, passDetail);
+}
+
 function questionBankSize(text, name) {
   const start = text.indexOf(`const ${name} = [`);
   if (start < 0) return 0;
@@ -89,11 +106,30 @@ expectText(
   "data-test=\"cas-language-toggle\"",
   "launcher exposes a header globe language toggle"
 );
+expectOrder(
+  "console-chat:language-toggle-right",
+  launcherSource,
+  ["data-test=\"cas-view-switcher\"", "className=\"cas-close\"", "data-test=\"cas-language-toggle\""],
+  "launcher places the language toggle at the far right of the header tools",
+  "language toggle should render after the view switcher and close action"
+);
 expectText(
   "console-chat:language-icon",
   launcherSource,
   "function GlobeIcon",
   "launcher renders a globe icon for Korean/English language switching"
+);
+expectText(
+  "console-chat:localized-view-labels",
+  launcherSource,
+  "viewLabels",
+  "launcher localizes header view labels and view titles"
+);
+expectText(
+  "console-chat:korean-view-label",
+  launcherSource,
+  "관제",
+  "launcher includes Korean labels for header view functions"
 );
 expectText(
   "console-chat:locale-map",

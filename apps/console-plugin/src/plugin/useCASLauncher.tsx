@@ -256,8 +256,48 @@ const languageCopy: Record<
     emptyAnswer: string;
     systemReady: string;
     systemReset: string;
+    subtitle: string;
     targetPrefix: string;
     languageTitle: string;
+    viewLabels: Record<ActiveView, string>;
+    viewsNavLabel: string;
+    closeLabel: string;
+    refresh: string;
+    refreshing: string;
+    health: string;
+    warningEvents: string;
+    recentScope: string;
+    restartSpikes: string;
+    podRestart: string;
+    riskWorkloads: string;
+    topTargets: string;
+    top: string;
+    restarts: string;
+    rcaCandidate: string;
+    overviewLoading: string;
+    confidence: string;
+    evidence: string;
+    none: string;
+    pendingEvidence: string;
+    noRiskWorkloads: string;
+    eventReasons: string;
+    warning: string;
+    noWarningEventReasons: string;
+    missingEvidence: string;
+    noMissingEvidence: string;
+    evidenceTimeline: string;
+    signals: string;
+    noTimelineEvidence: string;
+    actionQueue: string;
+    actionCount: string;
+    run: string;
+    open: string;
+    noActions: string;
+    runRcaTargets: string;
+    noRcaTargets: string;
+    evidenceSummary: (evidence: number, causes: number, missing: number) => string;
+    evidenceSection: string;
+    missingSection: string;
   }
 > = {
   ko: {
@@ -267,15 +307,60 @@ const languageCopy: Record<
     stopLabel: "분석 중지",
     newChat: "새 대화",
     recommendationMeta: "추천 질문 5개 · Enter 전송",
-    openCockpit: "Open Cockpit",
+    openCockpit: "관제 열기",
     pending: "분석 중입니다. Gateway를 통해 Lightspeed brain에 질의하고 있습니다.",
     abort: "요청을 중지했습니다.",
     failure: "분석 요청에 실패했습니다.",
     emptyAnswer: "Gateway 응답은 도착했지만 answer 필드가 비어 있습니다.",
     systemReady: "CAS가 OpenShift Lightspeed 기능을 내부 뇌로 사용해 읽기 전용 분석을 수행합니다.",
     systemReset: "새 대화를 시작했습니다. CAS는 읽기 전용 분석만 수행합니다.",
-    targetPrefix: "Target",
-    languageTitle: "언어: 한국어. 영어로 전환"
+    subtitle: "OpenShift RCA 에이전트 · Lightspeed 대체 도구",
+    targetPrefix: "대상",
+    languageTitle: "언어: 한국어. 영어로 전환",
+    viewLabels: {
+      chat: "채팅",
+      cockpit: "관제",
+      evidence: "증적",
+      actions: "조치"
+    },
+    viewsNavLabel: "AI Sentinel 화면",
+    closeLabel: "AI Sentinel 닫기",
+    refresh: "새로고침",
+    refreshing: "새로고침 중",
+    health: "상태 점수",
+    warningEvents: "경고 이벤트",
+    recentScope: "최근 범위",
+    restartSpikes: "재시작 급증",
+    podRestart: "Pod 재시작",
+    riskWorkloads: "위험 워크로드",
+    topTargets: "상위 대상",
+    top: "상위",
+    restarts: "재시작",
+    rcaCandidate: "RCA 후보",
+    overviewLoading: "Overview를 불러오는 중입니다.",
+    confidence: "신뢰도",
+    evidence: "증적",
+    none: "없음",
+    pendingEvidence: "대기 중",
+    noRiskWorkloads: "현재 범위에서 위험 워크로드가 없습니다.",
+    eventReasons: "이벤트 원인",
+    warning: "경고",
+    noWarningEventReasons: "경고 이벤트 원인이 없습니다.",
+    missingEvidence: "부족한 증적",
+    noMissingEvidence: "부족한 증적이 없습니다.",
+    evidenceTimeline: "증적 타임라인",
+    signals: "신호",
+    noTimelineEvidence: "아직 타임라인 증적이 없습니다.",
+    actionQueue: "조치 큐",
+    actionCount: "개 조치",
+    run: "실행",
+    open: "열기",
+    noActions: "아직 추천 행동이 없습니다.",
+    runRcaTargets: "RCA 실행 대상",
+    noRcaTargets: "현재 실행 가능한 RCA 대상이 없습니다.",
+    evidenceSummary: (evidence, causes, missing) => `근거 ${evidence}개 · RCA 후보 ${causes}개 · 부족한 증적 ${missing}개`,
+    evidenceSection: "증적",
+    missingSection: "부족한 증적"
   },
   en: {
     suggestionLabel: "Recommended questions",
@@ -291,8 +376,53 @@ const languageCopy: Record<
     emptyAnswer: "The Gateway responded, but the answer field is empty.",
     systemReady: "CAS uses OpenShift Lightspeed as its internal brain for read-only analysis.",
     systemReset: "Started a new chat. CAS only performs read-only analysis.",
+    subtitle: "OpenShift RCA Agent · Lightspeed replacement",
     targetPrefix: "Target",
-    languageTitle: "Language: English. Switch to Korean"
+    languageTitle: "Language: English. Switch to Korean",
+    viewLabels: {
+      chat: "Chat",
+      cockpit: "Cockpit",
+      evidence: "Evidence",
+      actions: "Actions"
+    },
+    viewsNavLabel: "AI Sentinel views",
+    closeLabel: "Close AI Sentinel",
+    refresh: "Refresh",
+    refreshing: "Refreshing",
+    health: "Health",
+    warningEvents: "Warning Events",
+    recentScope: "Recent scope",
+    restartSpikes: "Restart Spikes",
+    podRestart: "Pod restart",
+    riskWorkloads: "Risk Workloads",
+    topTargets: "Top targets",
+    top: "Top",
+    restarts: "restarts",
+    rcaCandidate: "RCA Candidate",
+    overviewLoading: "Loading overview.",
+    confidence: "confidence",
+    evidence: "evidence",
+    none: "none",
+    pendingEvidence: "pending",
+    noRiskWorkloads: "No risky workloads in the current scope.",
+    eventReasons: "Event Reasons",
+    warning: "warning",
+    noWarningEventReasons: "No Warning event reasons.",
+    missingEvidence: "Missing Evidence",
+    noMissingEvidence: "No missing evidence.",
+    evidenceTimeline: "Evidence Timeline",
+    signals: "signals",
+    noTimelineEvidence: "No timeline evidence yet.",
+    actionQueue: "Action Queue",
+    actionCount: "actions",
+    run: "Run",
+    open: "Open",
+    noActions: "No recommended actions yet.",
+    runRcaTargets: "Run RCA Targets",
+    noRcaTargets: "No RCA targets are available.",
+    evidenceSummary: (evidence, causes, missing) => `${evidence} evidence · ${causes} RCA candidates · ${missing} missing evidence`,
+    evidenceSection: "Evidence",
+    missingSection: "Missing Evidence"
   }
 };
 
@@ -1144,13 +1274,6 @@ function GlobeIcon() {
   );
 }
 
-function viewLabel(view: ActiveView) {
-  if (view === "chat") return "Chat";
-  if (view === "cockpit") return "Cockpit";
-  if (view === "evidence") return "Evidence";
-  return "Actions";
-}
-
 function createMessageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -1346,6 +1469,7 @@ function OverviewCockpit({
   overview,
   status,
   activeView,
+  copy,
   onRefresh,
   onRunQuestion,
   onSelectWorkload,
@@ -1354,6 +1478,7 @@ function OverviewCockpit({
   overview: OverviewResult | null;
   status: "idle" | "loading" | "ready" | "degraded";
   activeView: Exclude<ActiveView, "chat">;
+  copy: (typeof languageCopy)[Language];
   onRefresh: () => void;
   onRunQuestion: (question: string, resourceName?: string) => void;
   onSelectWorkload: (workload: RiskWorkload) => void;
@@ -1370,9 +1495,9 @@ function OverviewCockpit({
   return (
     <section className="cas-cockpit" data-test="cas-overview-cockpit">
       <div className="cas-panel-heading">
-        <strong>{viewLabel(activeView)}</strong>
+        <strong>{copy.viewLabels[activeView]}</strong>
         <button className="cas-link-button" onClick={onRefresh} type="button">
-          {status === "loading" ? "Refreshing" : "Refresh"}
+          {status === "loading" ? copy.refreshing : copy.refresh}
         </button>
       </div>
 
@@ -1380,46 +1505,49 @@ function OverviewCockpit({
         <>
           <div className="cas-health-strip" data-test="cas-health-strip">
             <div className="cas-signal-card">
-              <span>Health</span>
+              <span>{copy.health}</span>
               <strong>{scoreLabel(overview?.health?.score)}</strong>
               <div className="cas-meta">{overview?.health?.risk ?? status}</div>
             </div>
             <div className="cas-signal-card">
-              <span>Warning Events</span>
+              <span>{copy.warningEvents}</span>
               <strong>{signals.warning_events ?? 0}</strong>
-              <div className="cas-meta">최근 scope</div>
+              <div className="cas-meta">{copy.recentScope}</div>
             </div>
             <div className="cas-signal-card">
-              <span>Restart Spikes</span>
+              <span>{copy.restartSpikes}</span>
               <strong>{signals.restart_spikes ?? 0}</strong>
-              <div className="cas-meta">pod restart</div>
+              <div className="cas-meta">{copy.podRestart}</div>
             </div>
             <div className="cas-signal-card">
-              <span>Risk Workloads</span>
+              <span>{copy.riskWorkloads}</span>
               <strong>{signals.risky_workloads ?? 0}</strong>
-              <div className="cas-meta">top targets</div>
+              <div className="cas-meta">{copy.topTargets}</div>
             </div>
           </div>
 
           <div className="cas-cockpit-grid">
             <article className="cas-cockpit-panel" data-test="cas-rca-candidate">
               <div className="cas-panel-heading">
-                <strong>RCA Candidate</strong>
+                <strong>{copy.rcaCandidate}</strong>
                 <span className="cas-risk-pill" data-risk={overview?.health?.risk ?? "low"}>
                   {overview?.health?.risk ?? "unknown"}
                 </span>
               </div>
-              <div>{candidate?.cause ?? overview?.health?.summary ?? "Overview를 불러오는 중입니다."}</div>
+              <div>{candidate?.cause ?? overview?.health?.summary ?? copy.overviewLoading}</div>
               <div className="cas-meta">
-                confidence {confidenceLabel(candidate?.confidence)} · evidence {(candidate?.evidence_refs ?? []).join(", ") || "pending"}
+                {copy.confidence} {confidenceLabel(candidate?.confidence)} · {copy.evidence}{" "}
+                {(candidate?.evidence_refs ?? []).join(", ") || copy.pendingEvidence}
               </div>
               {overview?.health?.summary && <div className="cas-meta">{overview.health.summary}</div>}
             </article>
 
             <article className="cas-cockpit-panel" data-test="cas-risk-workloads">
               <div className="cas-panel-heading">
-                <strong>Risk Workloads</strong>
-                <span className="cas-meta">Top {riskWorkloads.length}</span>
+                <strong>{copy.riskWorkloads}</strong>
+                <span className="cas-meta">
+                  {copy.top} {riskWorkloads.length}
+                </span>
               </div>
               <div className="cas-risk-list">
                 {riskWorkloads.slice(0, 5).map((workload) => (
@@ -1437,12 +1565,13 @@ function OverviewCockpit({
                       </span>
                     </div>
                     <div className="cas-meta">
-                      {workload.namespace} · {workload.kind} · {workload.status} · restarts {workload.restarts ?? 0}
+                      {workload.namespace} · {workload.kind} · {workload.status} · {copy.restarts}{" "}
+                      {workload.restarts ?? 0}
                     </div>
                     <div className="cas-meta">{workload.reason}</div>
                   </button>
                 ))}
-                {riskWorkloads.length === 0 && <div className="cas-meta">현재 scope에서 위험 workload가 없습니다.</div>}
+                {riskWorkloads.length === 0 && <div className="cas-meta">{copy.noRiskWorkloads}</div>}
               </div>
             </article>
           </div>
@@ -1453,8 +1582,8 @@ function OverviewCockpit({
         <div className="cas-cockpit-grid">
           <article className="cas-cockpit-panel" data-test="cas-event-reasons">
             <div className="cas-panel-heading">
-              <strong>Event Reasons</strong>
-              <span className="cas-meta">warning</span>
+              <strong>{copy.eventReasons}</strong>
+              <span className="cas-meta">{copy.warning}</span>
             </div>
             <div className="cas-reason-list">
               {eventReasons.map((item) => (
@@ -1465,13 +1594,13 @@ function OverviewCockpit({
                   </div>
                 </div>
               ))}
-              {eventReasons.length === 0 && <div className="cas-meta">Warning event reason이 없습니다.</div>}
+              {eventReasons.length === 0 && <div className="cas-meta">{copy.noWarningEventReasons}</div>}
             </div>
           </article>
 
           <article className="cas-cockpit-panel" data-test="cas-overview-missing">
             <div className="cas-panel-heading">
-              <strong>Missing Evidence</strong>
+              <strong>{copy.missingEvidence}</strong>
               <span className="cas-meta">{missing.length}</span>
             </div>
             <div className="cas-missing-list">
@@ -1481,14 +1610,16 @@ function OverviewCockpit({
                   <div className="cas-meta">{item.reason}</div>
                 </div>
               ))}
-              {missing.length === 0 && <div className="cas-meta">부족한 증적이 없습니다.</div>}
+              {missing.length === 0 && <div className="cas-meta">{copy.noMissingEvidence}</div>}
             </div>
           </article>
 
           <article className="cas-cockpit-panel" data-wide="true" data-test="cas-evidence-timeline">
             <div className="cas-panel-heading">
-              <strong>Evidence Timeline</strong>
-              <span className="cas-meta">{timeline.length} signals</span>
+              <strong>{copy.evidenceTimeline}</strong>
+              <span className="cas-meta">
+                {timeline.length} {copy.signals}
+              </span>
             </div>
             <div className="cas-timeline-list">
               {timeline.slice(0, 8).map((item, index) => (
@@ -1500,7 +1631,7 @@ function OverviewCockpit({
                   <div className="cas-meta">{item.source}</div>
                 </div>
               ))}
-              {timeline.length === 0 && <div className="cas-meta">아직 timeline evidence가 없습니다.</div>}
+              {timeline.length === 0 && <div className="cas-meta">{copy.noTimelineEvidence}</div>}
             </div>
           </article>
         </div>
@@ -1510,8 +1641,10 @@ function OverviewCockpit({
         <div className="cas-cockpit-grid">
           <article className="cas-cockpit-panel" data-test="cas-action-queue">
             <div className="cas-panel-heading">
-              <strong>Action Queue</strong>
-              <span className="cas-meta">{actions.length} actions</span>
+              <strong>{copy.actionQueue}</strong>
+              <span className="cas-meta">
+                {actions.length} {copy.actionCount}
+              </span>
             </div>
             <div className="cas-action-list">
               {actions.slice(0, 6).map((action) => (
@@ -1519,23 +1652,25 @@ function OverviewCockpit({
                   <span>{action.label}</span>
                   {action.type === "cas_query" && action.question ? (
                     <button className="cas-link-button" disabled={isRunning} onClick={() => onRunQuestion(action.question ?? "")} type="button">
-                      Run
+                      {copy.run}
                     </button>
                   ) : (
                     <a className="cas-link-button" href={action.href ?? "/"} rel="noreferrer">
-                      Open
+                      {copy.open}
                     </a>
                   )}
                 </div>
               ))}
-              {actions.length === 0 && <div className="cas-meta">아직 추천 행동이 없습니다.</div>}
+              {actions.length === 0 && <div className="cas-meta">{copy.noActions}</div>}
             </div>
           </article>
 
           <article className="cas-cockpit-panel" data-test="cas-risk-workloads">
             <div className="cas-panel-heading">
-              <strong>Run RCA Targets</strong>
-              <span className="cas-meta">Top {riskWorkloads.length}</span>
+              <strong>{copy.runRcaTargets}</strong>
+              <span className="cas-meta">
+                {copy.top} {riskWorkloads.length}
+              </span>
             </div>
             <div className="cas-risk-list">
               {riskWorkloads.slice(0, 5).map((workload) => (
@@ -1557,7 +1692,7 @@ function OverviewCockpit({
                   </div>
                 </button>
               ))}
-              {riskWorkloads.length === 0 && <div className="cas-meta">현재 실행 가능한 RCA target이 없습니다.</div>}
+              {riskWorkloads.length === 0 && <div className="cas-meta">{copy.noRcaTargets}</div>}
             </div>
           </article>
         </div>
@@ -1566,7 +1701,7 @@ function OverviewCockpit({
   );
 }
 
-function EvidenceSummary({ result }: { result: RCAResult }) {
+function EvidenceSummary({ result, copy }: { result: RCAResult; copy: (typeof languageCopy)[Language] }) {
   const causes = result.rca_result?.cause_candidates ?? [];
   const evidence = result.evidence_bundle?.evidence ?? [];
   const missing = result.evidence_bundle?.missing ?? [];
@@ -1576,48 +1711,46 @@ function EvidenceSummary({ result }: { result: RCAResult }) {
 
   return (
     <details className="cas-result-details" data-test="cas-evidence-panel">
-      <summary>
-        근거 {evidence.length}개 · RCA 후보 {causes.length}개 · 부족한 증적 {missing.length}개
-      </summary>
+      <summary>{copy.evidenceSummary(evidence.length, causes.length, missing.length)}</summary>
       <div className="cas-result-details-body">
-      {causes.length > 0 && (
-        <div className="cas-cause-list" data-test="cas-cause-list">
-          {causes.map((cause) => (
-            <div className="cas-cause" key={`${cause.cause}-${cause.confidence}`}>
-              <strong>{cause.cause}</strong>
-              <div className="cas-meta">
-                confidence {Math.round(Number(cause.confidence || 0) * 100)}% · evidence{" "}
-                {(cause.evidence_refs ?? []).join(", ") || "none"}
+        {causes.length > 0 && (
+          <div className="cas-cause-list" data-test="cas-cause-list">
+            {causes.map((cause) => (
+              <div className="cas-cause" key={`${cause.cause}-${cause.confidence}`}>
+                <strong>{cause.cause}</strong>
+                <div className="cas-meta">
+                  {copy.confidence} {Math.round(Number(cause.confidence || 0) * 100)}% · {copy.evidence}{" "}
+                  {(cause.evidence_refs ?? []).join(", ") || copy.none}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
 
-      {evidence.length > 0 && (
-        <div className="cas-evidence-list">
-          <strong className="cas-section-title">증적</strong>
-          {evidence.map((item) => (
-            <div className="cas-evidence-item" key={item.id}>
-              <strong>{item.id}</strong>
-              <div>{item.summary}</div>
-              <span>{item.source}</span>
-            </div>
-          ))}
-        </div>
-      )}
+        {evidence.length > 0 && (
+          <div className="cas-evidence-list">
+            <strong className="cas-section-title">{copy.evidenceSection}</strong>
+            {evidence.map((item) => (
+              <div className="cas-evidence-item" key={item.id}>
+                <strong>{item.id}</strong>
+                <div>{item.summary}</div>
+                <span>{item.source}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
-      {missing.length > 0 && (
-        <div className="cas-missing-list" data-test="cas-missing-evidence">
-          <strong className="cas-section-title">부족한 증적</strong>
-          {missing.map((item) => (
-            <div className="cas-missing-item" key={`${item.type}-${item.reason}`}>
-              <strong>{item.type}</strong>
-              <div className="cas-meta">{item.reason}</div>
-            </div>
-          ))}
-        </div>
-      )}
+        {missing.length > 0 && (
+          <div className="cas-missing-list" data-test="cas-missing-evidence">
+            <strong className="cas-section-title">{copy.missingSection}</strong>
+            {missing.map((item) => (
+              <div className="cas-missing-item" key={`${item.type}-${item.reason}`}>
+                <strong>{item.type}</strong>
+                <div className="cas-meta">{item.reason}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </details>
   );
@@ -1953,9 +2086,28 @@ export function CASLauncher() {
             <SentinelIcon />
             <div className="cas-panel-title">
               <strong>Cywell AI Sentinel</strong>
-              <span>OpenShift RCA Agent · Lightspeed replacement</span>
+              <span>{copy.subtitle}</span>
             </div>
             <div className="cas-header-tools">
+              <nav aria-label={copy.viewsNavLabel} className="cas-view-switcher" data-test="cas-view-switcher">
+                {(["chat", "cockpit", "evidence", "actions"] as ActiveView[]).map((view) => (
+                  <button
+                    aria-label={copy.viewLabels[view]}
+                    className="cas-view-button"
+                    data-active={activeView === view}
+                    data-test={`cas-view-${view}`}
+                    key={view}
+                    onClick={() => openView(view)}
+                    title={copy.viewLabels[view]}
+                    type="button"
+                  >
+                    <ViewIcon view={view} />
+                  </button>
+                ))}
+              </nav>
+              <button aria-label={copy.closeLabel} className="cas-close" onClick={() => setIsOpen(false)} type="button">
+                x
+              </button>
               <button
                 aria-label={copy.languageTitle}
                 className="cas-view-button cas-language-toggle"
@@ -1967,25 +2119,6 @@ export function CASLauncher() {
               >
                 <GlobeIcon />
                 <span>{language === "ko" ? "한" : "EN"}</span>
-              </button>
-              <nav aria-label="AI Sentinel views" className="cas-view-switcher" data-test="cas-view-switcher">
-                {(["chat", "cockpit", "evidence", "actions"] as ActiveView[]).map((view) => (
-                  <button
-                    aria-label={viewLabel(view)}
-                    className="cas-view-button"
-                    data-active={activeView === view}
-                    data-test={`cas-view-${view}`}
-                    key={view}
-                    onClick={() => openView(view)}
-                    title={viewLabel(view)}
-                    type="button"
-                  >
-                    <ViewIcon view={view} />
-                  </button>
-                ))}
-              </nav>
-              <button aria-label="Close AI Sentinel" className="cas-close" onClick={() => setIsOpen(false)} type="button">
-                x
               </button>
             </div>
           </header>
@@ -2011,7 +2144,7 @@ export function CASLauncher() {
               <div className="cas-chat-surface" data-test="cas-chat-default-view">
                 <div className="cas-chat-topline">
                   <span className="cas-badge" data-state={overviewStatus === "ready" ? "ready" : "degraded"}>
-                    Health {scoreLabel(overview?.health?.score)} · {overview?.health?.risk ?? overviewStatus}
+                    {copy.health} {scoreLabel(overview?.health?.score)} · {overview?.health?.risk ?? overviewStatus}
                   </span>
                   <button className="cas-link-button" onClick={() => openView("cockpit")} type="button">
                     {copy.openCockpit}
@@ -2046,7 +2179,7 @@ export function CASLauncher() {
                                 fallback active
                               </div>
                             )}
-                            <EvidenceSummary result={message.result} />
+                            <EvidenceSummary copy={copy} result={message.result} />
                           </>
                         )}
                         {message.role === "assistant" && (
@@ -2171,6 +2304,7 @@ export function CASLauncher() {
             ) : (
               <OverviewCockpit
                 activeView={activeView}
+                copy={copy}
                 overview={overview}
                 status={overviewStatus}
                 onRefresh={refreshOverview}

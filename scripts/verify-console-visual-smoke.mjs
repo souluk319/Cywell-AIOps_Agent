@@ -85,12 +85,12 @@ ${styles}
 </div>
 <div class="cas-launcher-root" data-test="cas-launcher-root">
 <section aria-label="Cywell AI Sentinel" class="cas-panel" data-test="cas-launcher-panel" role="dialog">
-  <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>OpenShift RCA Agent · Lightspeed replacement</span></div><div class="cas-header-tools"><button aria-label="언어: 한국어. 영어로 전환" class="cas-view-button cas-language-toggle" data-language="ko" data-test="cas-language-toggle" type="button">${globe}<span>한</span></button><button aria-label="Close AI Sentinel" class="cas-close" type="button">x</button></div></header>
+  <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>OpenShift RCA 에이전트 · Lightspeed 대체 도구</span></div><div class="cas-header-tools"><nav aria-label="AI Sentinel 화면" class="cas-view-switcher" data-test="cas-view-switcher"><button aria-label="채팅" class="cas-view-button" data-active="true" type="button">C</button><button aria-label="관제" class="cas-view-button" type="button">O</button><button aria-label="증적" class="cas-view-button" type="button">E</button><button aria-label="조치" class="cas-view-button" type="button">A</button></nav><button aria-label="AI Sentinel 닫기" class="cas-close" type="button">x</button><button aria-label="언어: 한국어. 영어로 전환" class="cas-view-button cas-language-toggle" data-language="ko" data-test="cas-language-toggle" type="button">${globe}<span>한</span></button></div></header>
   <div class="cas-panel-body">
     <div class="cas-status-row"><span class="cas-badge" data-state="ready" data-test="cas-brain-status">ready · openshift-lightspeed</span><span class="cas-badge" data-test="cas-provider-badge">UserToken proxy</span><span class="cas-conversation" data-test="cas-conversation-id">conversation smoke-test</span></div>
     <div class="cas-meta">OpenShift Lightspeed readiness 확인됨</div>
     <div class="cas-chat-surface" data-test="cas-chat-default-view">
-    <div class="cas-chat-topline"><span class="cas-badge" data-state="ready">Health 82 · medium</span><button class="cas-link-button" type="button">Open Cockpit</button></div>
+    <div class="cas-chat-topline"><span class="cas-badge" data-state="ready">상태 점수 82 · medium</span><button class="cas-link-button" type="button">관제 열기</button></div>
     <div class="cas-chat-thread" data-test="cas-chat-thread">
       <article class="cas-message" data-role="assistant">
         <strong class="cas-message-role">AI Sentinel</strong>
@@ -108,7 +108,7 @@ ${styles}
     <form class="cas-compose">
       <div aria-label="추천 질문" class="cas-suggestion-list" data-test="cas-suggestion-list"><button class="cas-suggestion" data-active="true" type="button">ClusterVersion 상태를 한 문장으로 요약해줘.</button><button class="cas-suggestion" type="button">최근 Warning 이벤트 기준으로 장애 가능성이 높은 리소스를 알려줘.</button><button class="cas-suggestion" type="button">Pending 상태 Pod가 있다면 스케줄링 실패 원인을 분석해줘.</button><button class="cas-suggestion" type="button">Node NotReady 또는 pressure condition이 있는지 점검해줘.</button><button class="cas-suggestion" type="button">운영자가 지금 바로 봐야 할 Top 5 신호를 요약해줘.</button></div>
       <div class="cas-input-wrap"><textarea aria-label="AI Sentinel question" placeholder="OpenShift 운영 질문을 입력하세요. Enter 전송, Shift+Enter 줄바꿈"></textarea><button aria-label="질의 전송" class="cas-send-button" data-test="cas-send-question" type="submit"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4.5 19.5 20 12 4.5 4.5 7 11.2 14 12l-7 .8-2.5 6.7Z" fill="currentColor"/></svg></button></div>
-      <div class="cas-compose-toolbar"><button class="cas-link-button cas-target-toggle" type="button">Target default · ClusterVersion/version</button><span class="cas-meta">추천 질문 5개 · Enter 전송</span></div>
+      <div class="cas-compose-toolbar"><button class="cas-link-button cas-target-toggle" type="button">대상 default · ClusterVersion/version</button><span class="cas-meta">추천 질문 5개 · Enter 전송</span></div>
       <div class="cas-actions"><button class="cas-secondary" type="button">새 대화</button></div>
     </form>
     </div>
