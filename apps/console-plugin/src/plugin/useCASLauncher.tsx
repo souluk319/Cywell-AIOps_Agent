@@ -1,5 +1,4 @@
 import * as React from "react";
-import { useModal } from "@openshift-console/dynamic-plugin-sdk";
 
 const API_BASE = "/api/proxy/plugin/cywell-ai-sentinel/cas-api";
 
@@ -48,10 +47,14 @@ type BrainStatus = {
   detail: string;
 };
 
+type ActiveView = "chat" | "cockpit" | "evidence" | "actions";
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  question?: string;
+  isPending?: boolean;
   result?: RCAResult;
 };
 
@@ -192,6 +195,47 @@ const styles = `
   display: flex;
   gap: 12px;
   padding: 14px 16px;
+}
+
+.cas-header-tools {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.cas-view-switcher {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.cas-view-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--cas-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  width: 32px;
+}
+
+.cas-view-button:hover,
+.cas-view-button:focus,
+.cas-view-button[data-active="true"] {
+  background: var(--cas-soft-strong);
+  border-color: rgba(8, 127, 140, 0.24);
+  color: var(--cas-accent-strong);
+  outline: 0;
+}
+
+.cas-view-button svg {
+  height: 18px;
+  width: 18px;
 }
 
 .cas-panel-title {
@@ -432,6 +476,20 @@ const styles = `
 .cas-chat-thread {
   display: grid;
   gap: 10px;
+  min-height: 220px;
+}
+
+.cas-chat-surface {
+  display: grid;
+  gap: 12px;
+}
+
+.cas-chat-topline {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
 }
 
 .cas-message {
@@ -459,6 +517,14 @@ const styles = `
 .cas-answer {
   margin: 0;
   white-space: pre-wrap;
+}
+
+.cas-message-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .cas-cause-list,
@@ -556,6 +622,15 @@ const styles = `
     right: 12px;
   }
 
+  .cas-panel-header {
+    align-items: flex-start;
+  }
+
+  .cas-header-tools {
+    align-items: flex-end;
+    flex-direction: column-reverse;
+  }
+
   .cas-fields,
   .cas-actions {
     grid-template-columns: 1fr;
@@ -597,6 +672,46 @@ function SentinelIcon() {
   );
 }
 
+function ViewIcon({ view }: { view: ActiveView }) {
+  if (view === "chat") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+        <path d="M5 6.5h14v8.8H9.2L5 18.5v-12Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="2" />
+        <path d="M8 10h8M8 13h5" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+      </svg>
+    );
+  }
+  if (view === "cockpit") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+        <path d="M4 13a8 8 0 1 1 16 0" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+        <path d="M12 13 16 9M7 17h10" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+      </svg>
+    );
+  }
+  if (view === "evidence") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+        <path d="M7 4h10v16H7z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="2" />
+        <path d="M9.5 8h5M9.5 12h5M9.5 16h3" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+      </svg>
+    );
+  }
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+      <path d="M5 12h12M13 8l4 4-4 4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+      <path d="M5 5h14v14H5z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="2" opacity="0.35" />
+    </svg>
+  );
+}
+
+function viewLabel(view: ActiveView) {
+  if (view === "chat") return "Chat";
+  if (view === "cockpit") return "Cockpit";
+  if (view === "evidence") return "Evidence";
+  return "Actions";
+}
+
 function createMessageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -634,6 +749,7 @@ function formatTimelineTime(value?: string) {
 function OverviewCockpit({
   overview,
   status,
+  activeView,
   onRefresh,
   onRunQuestion,
   onSelectWorkload,
@@ -641,6 +757,7 @@ function OverviewCockpit({
 }: {
   overview: OverviewResult | null;
   status: "idle" | "loading" | "ready" | "degraded";
+  activeView: Exclude<ActiveView, "chat">;
   onRefresh: () => void;
   onRunQuestion: (question: string, resourceName?: string) => void;
   onSelectWorkload: (workload: RiskWorkload) => void;
@@ -657,148 +774,196 @@ function OverviewCockpit({
   return (
     <section className="cas-cockpit" data-test="cas-overview-cockpit">
       <div className="cas-panel-heading">
-        <strong>RCA Cockpit</strong>
+        <strong>{viewLabel(activeView)}</strong>
         <button className="cas-link-button" onClick={onRefresh} type="button">
           {status === "loading" ? "Refreshing" : "Refresh"}
         </button>
       </div>
 
-      <div className="cas-health-strip" data-test="cas-health-strip">
-        <div className="cas-signal-card">
-          <span>Health</span>
-          <strong>{scoreLabel(overview?.health?.score)}</strong>
-          <div className="cas-meta">{overview?.health?.risk ?? status}</div>
-        </div>
-        <div className="cas-signal-card">
-          <span>Warning Events</span>
-          <strong>{signals.warning_events ?? 0}</strong>
-          <div className="cas-meta">최근 scope</div>
-        </div>
-        <div className="cas-signal-card">
-          <span>Restart Spikes</span>
-          <strong>{signals.restart_spikes ?? 0}</strong>
-          <div className="cas-meta">pod restart</div>
-        </div>
-        <div className="cas-signal-card">
-          <span>Risk Workloads</span>
-          <strong>{signals.risky_workloads ?? 0}</strong>
-          <div className="cas-meta">top targets</div>
-        </div>
-      </div>
-
-      <div className="cas-cockpit-grid">
-        <article className="cas-cockpit-panel" data-test="cas-rca-candidate">
-          <div className="cas-panel-heading">
-            <strong>RCA Candidate</strong>
-            <span className="cas-risk-pill" data-risk={overview?.health?.risk ?? "low"}>
-              {overview?.health?.risk ?? "unknown"}
-            </span>
-          </div>
-          <div>{candidate?.cause ?? overview?.health?.summary ?? "Overview를 불러오는 중입니다."}</div>
-          <div className="cas-meta">
-            confidence {confidenceLabel(candidate?.confidence)} · evidence {(candidate?.evidence_refs ?? []).join(", ") || "pending"}
-          </div>
-          {overview?.health?.summary && <div className="cas-meta">{overview.health.summary}</div>}
-        </article>
-
-        <article className="cas-cockpit-panel" data-test="cas-action-queue">
-          <div className="cas-panel-heading">
-            <strong>Action Queue</strong>
-            <span className="cas-meta">{actions.length} actions</span>
-          </div>
-          <div className="cas-action-list">
-            {actions.slice(0, 4).map((action) => (
-              <div className="cas-action-row" key={`${action.type}-${action.label}`}>
-                <span>{action.label}</span>
-                {action.type === "cas_query" && action.question ? (
-                  <button className="cas-link-button" disabled={isRunning} onClick={() => onRunQuestion(action.question ?? "")} type="button">
-                    Run
-                  </button>
-                ) : (
-                  <a className="cas-link-button" href={action.href ?? "/"} rel="noreferrer">
-                    Open
-                  </a>
-                )}
-              </div>
-            ))}
-            {actions.length === 0 && <div className="cas-meta">아직 추천 행동이 없습니다.</div>}
-          </div>
-        </article>
-
-        <article className="cas-cockpit-panel" data-test="cas-risk-workloads">
-          <div className="cas-panel-heading">
-            <strong>Risk Workloads</strong>
-            <span className="cas-meta">Top {riskWorkloads.length}</span>
-          </div>
-          <div className="cas-risk-list">
-            {riskWorkloads.slice(0, 5).map((workload) => (
-              <button
-                className="cas-risk-row"
-                disabled={isRunning}
-                key={`${workload.namespace}-${workload.kind}-${workload.name}`}
-                onClick={() => onSelectWorkload(workload)}
-                type="button"
-              >
-                <div className="cas-row-main">
-                  <strong>{workload.name}</strong>
-                  <span className="cas-risk-pill" data-risk={workload.risk}>
-                    {workload.risk}
-                  </span>
-                </div>
-                <div className="cas-meta">
-                  {workload.namespace} · {workload.kind} · {workload.status} · restarts {workload.restarts ?? 0}
-                </div>
-                <div className="cas-meta">{workload.reason}</div>
-              </button>
-            ))}
-            {riskWorkloads.length === 0 && <div className="cas-meta">현재 scope에서 위험 workload가 없습니다.</div>}
-          </div>
-        </article>
-
-        <article className="cas-cockpit-panel" data-test="cas-event-reasons">
-          <div className="cas-panel-heading">
-            <strong>Event Reasons</strong>
-            <span className="cas-meta">warning</span>
-          </div>
-          <div className="cas-reason-list">
-            {eventReasons.map((item) => (
-              <div className="cas-reason-row" key={item.reason}>
-                <div className="cas-row-main">
-                  <strong>{item.reason}</strong>
-                  <span className="cas-meta">{item.count}</span>
-                </div>
-              </div>
-            ))}
-            {eventReasons.length === 0 && <div className="cas-meta">Warning event reason이 없습니다.</div>}
-          </div>
-        </article>
-
-        <article className="cas-cockpit-panel" data-wide="true" data-test="cas-evidence-timeline">
-          <div className="cas-panel-heading">
-            <strong>Evidence Timeline</strong>
-            <span className="cas-meta">{timeline.length} signals</span>
-          </div>
-          <div className="cas-timeline-list">
-            {timeline.slice(0, 6).map((item, index) => (
-              <div className="cas-timeline-row" key={`${item.ts}-${item.summary}-${index}`}>
-                <strong>{formatTimelineTime(item.ts)} · {item.type}</strong>
-                <div>{item.summary}</div>
-                <div className="cas-meta">{item.source}</div>
-              </div>
-            ))}
-            {timeline.length === 0 && <div className="cas-meta">아직 timeline evidence가 없습니다.</div>}
-          </div>
-        </article>
-      </div>
-
-      {missing.length > 0 && (
-        <div className="cas-missing-list" data-test="cas-overview-missing">
-          {missing.slice(0, 3).map((item) => (
-            <div className="cas-missing-item" key={`${item.type}-${item.reason}`}>
-              <strong>{item.type}</strong>
-              <div className="cas-meta">{item.reason}</div>
+      {activeView === "cockpit" && (
+        <>
+          <div className="cas-health-strip" data-test="cas-health-strip">
+            <div className="cas-signal-card">
+              <span>Health</span>
+              <strong>{scoreLabel(overview?.health?.score)}</strong>
+              <div className="cas-meta">{overview?.health?.risk ?? status}</div>
             </div>
-          ))}
+            <div className="cas-signal-card">
+              <span>Warning Events</span>
+              <strong>{signals.warning_events ?? 0}</strong>
+              <div className="cas-meta">최근 scope</div>
+            </div>
+            <div className="cas-signal-card">
+              <span>Restart Spikes</span>
+              <strong>{signals.restart_spikes ?? 0}</strong>
+              <div className="cas-meta">pod restart</div>
+            </div>
+            <div className="cas-signal-card">
+              <span>Risk Workloads</span>
+              <strong>{signals.risky_workloads ?? 0}</strong>
+              <div className="cas-meta">top targets</div>
+            </div>
+          </div>
+
+          <div className="cas-cockpit-grid">
+            <article className="cas-cockpit-panel" data-test="cas-rca-candidate">
+              <div className="cas-panel-heading">
+                <strong>RCA Candidate</strong>
+                <span className="cas-risk-pill" data-risk={overview?.health?.risk ?? "low"}>
+                  {overview?.health?.risk ?? "unknown"}
+                </span>
+              </div>
+              <div>{candidate?.cause ?? overview?.health?.summary ?? "Overview를 불러오는 중입니다."}</div>
+              <div className="cas-meta">
+                confidence {confidenceLabel(candidate?.confidence)} · evidence {(candidate?.evidence_refs ?? []).join(", ") || "pending"}
+              </div>
+              {overview?.health?.summary && <div className="cas-meta">{overview.health.summary}</div>}
+            </article>
+
+            <article className="cas-cockpit-panel" data-test="cas-risk-workloads">
+              <div className="cas-panel-heading">
+                <strong>Risk Workloads</strong>
+                <span className="cas-meta">Top {riskWorkloads.length}</span>
+              </div>
+              <div className="cas-risk-list">
+                {riskWorkloads.slice(0, 5).map((workload) => (
+                  <button
+                    className="cas-risk-row"
+                    disabled={isRunning}
+                    key={`${workload.namespace}-${workload.kind}-${workload.name}`}
+                    onClick={() => onSelectWorkload(workload)}
+                    type="button"
+                  >
+                    <div className="cas-row-main">
+                      <strong>{workload.name}</strong>
+                      <span className="cas-risk-pill" data-risk={workload.risk}>
+                        {workload.risk}
+                      </span>
+                    </div>
+                    <div className="cas-meta">
+                      {workload.namespace} · {workload.kind} · {workload.status} · restarts {workload.restarts ?? 0}
+                    </div>
+                    <div className="cas-meta">{workload.reason}</div>
+                  </button>
+                ))}
+                {riskWorkloads.length === 0 && <div className="cas-meta">현재 scope에서 위험 workload가 없습니다.</div>}
+              </div>
+            </article>
+          </div>
+        </>
+      )}
+
+      {activeView === "evidence" && (
+        <div className="cas-cockpit-grid">
+          <article className="cas-cockpit-panel" data-test="cas-event-reasons">
+            <div className="cas-panel-heading">
+              <strong>Event Reasons</strong>
+              <span className="cas-meta">warning</span>
+            </div>
+            <div className="cas-reason-list">
+              {eventReasons.map((item) => (
+                <div className="cas-reason-row" key={item.reason}>
+                  <div className="cas-row-main">
+                    <strong>{item.reason}</strong>
+                    <span className="cas-meta">{item.count}</span>
+                  </div>
+                </div>
+              ))}
+              {eventReasons.length === 0 && <div className="cas-meta">Warning event reason이 없습니다.</div>}
+            </div>
+          </article>
+
+          <article className="cas-cockpit-panel" data-test="cas-overview-missing">
+            <div className="cas-panel-heading">
+              <strong>Missing Evidence</strong>
+              <span className="cas-meta">{missing.length}</span>
+            </div>
+            <div className="cas-missing-list">
+              {missing.slice(0, 4).map((item) => (
+                <div className="cas-missing-item" key={`${item.type}-${item.reason}`}>
+                  <strong>{item.type}</strong>
+                  <div className="cas-meta">{item.reason}</div>
+                </div>
+              ))}
+              {missing.length === 0 && <div className="cas-meta">부족한 증적이 없습니다.</div>}
+            </div>
+          </article>
+
+          <article className="cas-cockpit-panel" data-wide="true" data-test="cas-evidence-timeline">
+            <div className="cas-panel-heading">
+              <strong>Evidence Timeline</strong>
+              <span className="cas-meta">{timeline.length} signals</span>
+            </div>
+            <div className="cas-timeline-list">
+              {timeline.slice(0, 8).map((item, index) => (
+                <div className="cas-timeline-row" key={`${item.ts}-${item.summary}-${index}`}>
+                  <strong>
+                    {formatTimelineTime(item.ts)} · {item.type}
+                  </strong>
+                  <div>{item.summary}</div>
+                  <div className="cas-meta">{item.source}</div>
+                </div>
+              ))}
+              {timeline.length === 0 && <div className="cas-meta">아직 timeline evidence가 없습니다.</div>}
+            </div>
+          </article>
+        </div>
+      )}
+
+      {activeView === "actions" && (
+        <div className="cas-cockpit-grid">
+          <article className="cas-cockpit-panel" data-test="cas-action-queue">
+            <div className="cas-panel-heading">
+              <strong>Action Queue</strong>
+              <span className="cas-meta">{actions.length} actions</span>
+            </div>
+            <div className="cas-action-list">
+              {actions.slice(0, 6).map((action) => (
+                <div className="cas-action-row" key={`${action.type}-${action.label}`}>
+                  <span>{action.label}</span>
+                  {action.type === "cas_query" && action.question ? (
+                    <button className="cas-link-button" disabled={isRunning} onClick={() => onRunQuestion(action.question ?? "")} type="button">
+                      Run
+                    </button>
+                  ) : (
+                    <a className="cas-link-button" href={action.href ?? "/"} rel="noreferrer">
+                      Open
+                    </a>
+                  )}
+                </div>
+              ))}
+              {actions.length === 0 && <div className="cas-meta">아직 추천 행동이 없습니다.</div>}
+            </div>
+          </article>
+
+          <article className="cas-cockpit-panel" data-test="cas-risk-workloads">
+            <div className="cas-panel-heading">
+              <strong>Run RCA Targets</strong>
+              <span className="cas-meta">Top {riskWorkloads.length}</span>
+            </div>
+            <div className="cas-risk-list">
+              {riskWorkloads.slice(0, 5).map((workload) => (
+                <button
+                  className="cas-risk-row"
+                  disabled={isRunning}
+                  key={`${workload.namespace}-${workload.kind}-${workload.name}`}
+                  onClick={() => onSelectWorkload(workload)}
+                  type="button"
+                >
+                  <div className="cas-row-main">
+                    <strong>{workload.name}</strong>
+                    <span className="cas-risk-pill" data-risk={workload.risk}>
+                      {workload.risk}
+                    </span>
+                  </div>
+                  <div className="cas-meta">
+                    {workload.namespace} · {workload.kind} · {workload.status}
+                  </div>
+                </button>
+              ))}
+              {riskWorkloads.length === 0 && <div className="cas-meta">현재 실행 가능한 RCA target이 없습니다.</div>}
+            </div>
+          </article>
         </div>
       )}
     </section>
@@ -854,14 +1019,16 @@ function EvidenceSummary({ result }: { result: RCAResult }) {
   );
 }
 
-function CASLauncher() {
+export function CASLauncher() {
   const [isOpen, setIsOpen] = React.useState(false);
+  const [activeView, setActiveView] = React.useState<ActiveView>("chat");
   const [question, setQuestion] = React.useState(initialQuestion);
   const [namespace, setNamespace] = React.useState("default");
   const [resourceName, setResourceName] = React.useState("version");
   const [resourceKind, setResourceKind] = React.useState("ClusterVersion");
   const [conversationId, setConversationId] = React.useState<string | null>(null);
   const [isRunning, setIsRunning] = React.useState(false);
+  const [copiedMessageId, setCopiedMessageId] = React.useState<string | null>(null);
   const [overviewStatus, setOverviewStatus] = React.useState<"idle" | "loading" | "ready" | "degraded">("idle");
   const [overview, setOverview] = React.useState<OverviewResult | null>(null);
   const [brainStatus, setBrainStatus] = React.useState<BrainStatus>({
@@ -876,6 +1043,8 @@ function CASLauncher() {
       content: "CAS가 OpenShift Lightspeed 기능을 내부 뇌로 사용해 읽기 전용 분석을 수행합니다."
     }
   ]);
+  const chatThreadRef = React.useRef<HTMLDivElement | null>(null);
+  const abortControllerRef = React.useRef<AbortController | null>(null);
 
   const refreshBrainStatus = React.useCallback(async () => {
     setBrainStatus((current) => ({ ...current, state: "checking", detail: "연결 확인 중" }));
@@ -930,12 +1099,44 @@ function CASLauncher() {
     if (isOpen) void refreshOverview();
   }, [isOpen]);
 
+  React.useEffect(() => {
+    if (isOpen && activeView === "chat") {
+      chatThreadRef.current?.scrollTo({
+        top: chatThreadRef.current.scrollHeight,
+        behavior: "smooth"
+      });
+    }
+  }, [activeView, isOpen, messages]);
+
+  const openView = React.useCallback(
+    (view: ActiveView) => {
+      setActiveView(view);
+      if (view !== "chat" && overviewStatus === "idle") {
+        void refreshOverview();
+      }
+    },
+    [overviewStatus, refreshOverview]
+  );
+
+  const copyMessage = React.useCallback(async (message: ChatMessage) => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopiedMessageId(message.id);
+      window.setTimeout(() => setCopiedMessageId((current) => (current === message.id ? null : current)), 1200);
+    } catch {
+      setCopiedMessageId(null);
+    }
+  }, []);
+
   const submitQuestion = React.useCallback(
     async (questionText: string, nextResourceName?: string, nextNamespace?: string, nextResourceKind?: string) => {
+      if (isRunning) return;
       const submittedQuestion = normalizeQuestion(questionText);
       const targetResourceName = nextResourceName ?? resourceName;
       const targetNamespace = nextNamespace ?? namespace;
       const targetResourceKind = nextResourceKind ?? resourceKind;
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
       const userMessage: ChatMessage = {
         id: createMessageId("user"),
         role: "user",
@@ -948,14 +1149,18 @@ function CASLauncher() {
         {
           id: pendingMessageId,
           role: "assistant",
-          content: "분석 중입니다. Gateway를 통해 Lightspeed brain에 질의하고 있습니다."
+          content: "분석 중입니다. Gateway를 통해 Lightspeed brain에 질의하고 있습니다.",
+          question: submittedQuestion,
+          isPending: true
         }
       ]);
       setIsRunning(true);
+      setActiveView("chat");
 
       try {
         const response = await fetch(`${API_BASE}/api/aiops/query`, {
           method: "POST",
+          signal: abortController.signal,
           headers: {
             "content-type": "application/json",
             accept: "application/json"
@@ -989,27 +1194,33 @@ function CASLauncher() {
               ? {
                   ...message,
                   content: body.rca_result?.answer ?? "Gateway 응답은 도착했지만 answer 필드가 비어 있습니다.",
+                  isPending: false,
                   result: body
                 }
               : message
           )
         );
       } catch (queryError) {
+        const isAbort = queryError instanceof DOMException && queryError.name === "AbortError";
         setMessages((current) =>
           current.map((message) =>
             message.id === pendingMessageId
               ? {
                   ...message,
-                  content: queryError instanceof Error ? queryError.message : "분석 요청에 실패했습니다."
+                  content: isAbort ? "요청을 중지했습니다." : queryError instanceof Error ? queryError.message : "분석 요청에 실패했습니다.",
+                  isPending: false
                 }
               : message
           )
         );
       } finally {
-        setIsRunning(false);
+        if (abortControllerRef.current === abortController) {
+          abortControllerRef.current = null;
+          setIsRunning(false);
+        }
       }
     },
-    [conversationId, namespace, resourceKind, resourceName]
+    [conversationId, isRunning, namespace, resourceKind, resourceName]
   );
 
   const runQuery = React.useCallback(
@@ -1020,12 +1231,38 @@ function CASLauncher() {
     [question, submitQuestion]
   );
 
+  const stopQuery = React.useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
+
+  const retryMessage = React.useCallback(
+    (message: ChatMessage) => {
+      if (message.question) {
+        void submitQuestion(message.question);
+      }
+    },
+    [submitQuestion]
+  );
+
+  const handleQuestionKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+        event.preventDefault();
+        if (!isRunning) {
+          void submitQuestion(question);
+        }
+      }
+    },
+    [isRunning, question, submitQuestion]
+  );
+
   const runOverviewQuestion = React.useCallback(
     (nextQuestion: string, nextResourceName?: string, nextNamespace?: string, nextResourceKind?: string) => {
       setQuestion(nextQuestion);
       if (nextResourceName) setResourceName(nextResourceName);
       if (nextNamespace) setNamespace(nextNamespace);
       if (nextResourceKind) setResourceKind(nextResourceKind);
+      setActiveView("chat");
       void submitQuestion(nextQuestion, nextResourceName, nextNamespace, nextResourceKind);
     },
     [submitQuestion]
@@ -1040,7 +1277,11 @@ function CASLauncher() {
   );
 
   const resetConversation = React.useCallback(() => {
+    abortControllerRef.current?.abort();
     setConversationId(null);
+    setIsRunning(false);
+    setCopiedMessageId(null);
+    setActiveView("chat");
     setMessages([
       {
         id: "system-ready",
@@ -1061,9 +1302,27 @@ function CASLauncher() {
               <strong>Cywell AI Sentinel</strong>
               <span>OpenShift RCA Agent · Lightspeed replacement</span>
             </div>
-            <button aria-label="Close AI Sentinel" className="cas-close" onClick={() => setIsOpen(false)} type="button">
-              x
-            </button>
+            <div className="cas-header-tools">
+              <nav aria-label="AI Sentinel views" className="cas-view-switcher" data-test="cas-view-switcher">
+                {(["chat", "cockpit", "evidence", "actions"] as ActiveView[]).map((view) => (
+                  <button
+                    aria-label={viewLabel(view)}
+                    className="cas-view-button"
+                    data-active={activeView === view}
+                    data-test={`cas-view-${view}`}
+                    key={view}
+                    onClick={() => openView(view)}
+                    title={viewLabel(view)}
+                    type="button"
+                  >
+                    <ViewIcon view={view} />
+                  </button>
+                ))}
+              </nav>
+              <button aria-label="Close AI Sentinel" className="cas-close" onClick={() => setIsOpen(false)} type="button">
+                x
+              </button>
+            </div>
           </header>
 
           <div className="cas-panel-body">
@@ -1083,81 +1342,121 @@ function CASLauncher() {
 
             <div className="cas-meta">{brainStatus.detail}</div>
 
-            <OverviewCockpit
-              overview={overview}
-              status={overviewStatus}
-              onRefresh={refreshOverview}
-              onRunQuestion={runOverviewQuestion}
-              onSelectWorkload={selectWorkload}
-              isRunning={isRunning}
-            />
+            {activeView === "chat" ? (
+              <div className="cas-chat-surface" data-test="cas-chat-default-view">
+                <div className="cas-chat-topline">
+                  <span className="cas-badge" data-state={overviewStatus === "ready" ? "ready" : "degraded"}>
+                    Health {scoreLabel(overview?.health?.score)} · {overview?.health?.risk ?? overviewStatus}
+                  </span>
+                  <button className="cas-link-button" onClick={() => openView("cockpit")} type="button">
+                    Open Cockpit
+                  </button>
+                </div>
 
-            <div className="cas-chat-thread" data-test="cas-chat-thread">
-              {messages.map((message) => {
-                const isFallback = message.result?.mode === "lightspeed_fallback_mock";
-                return (
-                  <article
-                    className="cas-message"
-                    data-role={message.role}
-                    data-test={`cas-message-${message.role}`}
-                    key={message.id}
-                  >
-                    <strong>{message.role === "user" ? "운영자" : message.role === "assistant" ? "AI Sentinel" : "시스템"}</strong>
-                    <p className="cas-answer">{message.content}</p>
-                    {message.result && (
-                      <>
-                        <div className="cas-meta">
-                          {modeLabel(message.result.mode)} · provider {resultProvider(message.result)}
-                          {message.result.run_id ? ` · ${message.result.run_id}` : ""}
-                        </div>
-                        {isFallback && (
-                          <div className="cas-badge" data-state="degraded" data-test="cas-fallback-notice">
-                            fallback active
+                <div className="cas-chat-thread" data-test="cas-chat-thread" ref={chatThreadRef}>
+                  {messages.map((message) => {
+                    const isFallback = message.result?.mode === "lightspeed_fallback_mock";
+                    return (
+                      <article
+                        className="cas-message"
+                        data-pending={message.isPending ? "true" : "false"}
+                        data-role={message.role}
+                        data-test={`cas-message-${message.role}`}
+                        key={message.id}
+                      >
+                        <strong>{message.role === "user" ? "운영자" : message.role === "assistant" ? "AI Sentinel" : "시스템"}</strong>
+                        <p className="cas-answer">{message.content}</p>
+                        {message.result && (
+                          <>
+                            <div className="cas-meta">
+                              {modeLabel(message.result.mode)} · provider {resultProvider(message.result)}
+                              {message.result.run_id ? ` · ${message.result.run_id}` : ""}
+                            </div>
+                            {isFallback && (
+                              <div className="cas-badge" data-state="degraded" data-test="cas-fallback-notice">
+                                fallback active
+                              </div>
+                            )}
+                            <EvidenceSummary result={message.result} />
+                          </>
+                        )}
+                        {message.role === "assistant" && (
+                          <div className="cas-message-tools">
+                            <button className="cas-link-button" onClick={() => void copyMessage(message)} type="button">
+                              {copiedMessageId === message.id ? "Copied" : "Copy"}
+                            </button>
+                            {message.question && (
+                              <button
+                                className="cas-link-button"
+                                disabled={isRunning || message.isPending}
+                                onClick={() => retryMessage(message)}
+                                type="button"
+                              >
+                                Retry
+                              </button>
+                            )}
                           </div>
                         )}
-                        <EvidenceSummary result={message.result} />
-                      </>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
+                      </article>
+                    );
+                  })}
+                </div>
 
-            <form className="cas-compose" onSubmit={runQuery}>
-              <textarea
-                aria-label="AI Sentinel question"
-                onChange={(event) => setQuestion(event.currentTarget.value)}
-                value={question}
+                <form className="cas-compose" onSubmit={runQuery}>
+                  <textarea
+                    aria-label="AI Sentinel question"
+                    onChange={(event) => setQuestion(event.currentTarget.value)}
+                    onKeyDown={handleQuestionKeyDown}
+                    placeholder="OpenShift 운영 질문을 입력하세요. Enter로 전송, Shift+Enter로 줄바꿈"
+                    value={question}
+                  />
+                  <div className="cas-fields">
+                    <input
+                      aria-label="Namespace"
+                      onChange={(event) => setNamespace(event.currentTarget.value)}
+                      placeholder="namespace"
+                      value={namespace}
+                    />
+                    <input
+                      aria-label="Resource name"
+                      onChange={(event) => setResourceName(event.currentTarget.value)}
+                      placeholder="resource"
+                      value={resourceName}
+                    />
+                    <input
+                      aria-label="Resource kind"
+                      onChange={(event) => setResourceKind(event.currentTarget.value)}
+                      placeholder="kind"
+                      value={resourceKind}
+                    />
+                  </div>
+                  <div className="cas-actions">
+                    <button className="cas-secondary" disabled={isRunning} onClick={resetConversation} type="button">
+                      새 대화
+                    </button>
+                    {isRunning ? (
+                      <button className="cas-secondary" data-test="cas-stop-analysis" onClick={stopQuery} type="button">
+                        중지
+                      </button>
+                    ) : (
+                      <button className="cas-submit" data-test="cas-run-analysis" type="submit">
+                        질의
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+            ) : (
+              <OverviewCockpit
+                activeView={activeView}
+                overview={overview}
+                status={overviewStatus}
+                onRefresh={refreshOverview}
+                onRunQuestion={runOverviewQuestion}
+                onSelectWorkload={selectWorkload}
+                isRunning={isRunning}
               />
-              <div className="cas-fields">
-                <input
-                  aria-label="Namespace"
-                  onChange={(event) => setNamespace(event.currentTarget.value)}
-                  placeholder="namespace"
-                  value={namespace}
-                />
-                <input
-                  aria-label="Resource name"
-                  onChange={(event) => setResourceName(event.currentTarget.value)}
-                  placeholder="resource"
-                  value={resourceName}
-                />
-                <input
-                  aria-label="Resource kind"
-                  onChange={(event) => setResourceKind(event.currentTarget.value)}
-                  placeholder="kind"
-                  value={resourceKind}
-                />
-              </div>
-              <div className="cas-actions">
-                <button className="cas-secondary" disabled={isRunning} onClick={resetConversation} type="button">
-                  새 대화
-                </button>
-                <button className="cas-submit" data-test="cas-run-analysis" disabled={isRunning} type="submit">
-                  {isRunning ? "분석 중" : "질의"}
-                </button>
-              </div>
-            </form>
+            )}
           </div>
         </section>
       )}
@@ -1175,22 +1474,8 @@ function CASLauncher() {
   );
 }
 
-function CASLauncherMount() {
-  return <CASLauncher />;
-}
-
 export function useCASLauncher() {
-  const launchModal = useModal();
-  const launchedRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!launchedRef.current && launchModal) {
-      launchModal(CASLauncherMount, {}, "cywell-ai-sentinel-launcher");
-      launchedRef.current = true;
-    }
-  }, [launchModal]);
-
-  return null;
+  return React.useMemo(() => ({ surface: "cas-launcher" }), []);
 }
 
 export default useCASLauncher;

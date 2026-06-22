@@ -27,8 +27,10 @@ function rejectText(id, text, needle, passDetail, failDetail = passDetail) {
 }
 
 const launcherSource = await readFile("apps/console-plugin/src/plugin/useCASLauncher.tsx", "utf8");
+const providerSource = await readFile("apps/console-plugin/src/plugin/CASContextProvider.tsx", "utf8");
 const manifest = await readFile("apps/console-plugin/dist/plugin-manifest.json", "utf8");
 const launcherBundle = await readFile("apps/console-plugin/dist/exposed-useCASLauncher-chunk.js", "utf8");
+const providerBundle = await readFile("apps/console-plugin/dist/exposed-CASContextProvider-chunk.js", "utf8");
 
 expectText(
   "console-chat:brainz",
@@ -59,6 +61,36 @@ expectText(
   launcherSource,
   "data-test=\"cas-chat-thread\"",
   "launcher renders a chat thread surface"
+);
+expectText(
+  "console-chat:default-view",
+  launcherSource,
+  "data-test=\"cas-chat-default-view\"",
+  "launcher defaults to a chat-first surface"
+);
+expectText(
+  "console-chat:view-switcher",
+  launcherSource,
+  "data-test=\"cas-view-switcher\"",
+  "launcher exposes header icon view switching"
+);
+expectText(
+  "console-chat:enter-send",
+  launcherSource,
+  "handleQuestionKeyDown",
+  "launcher supports Enter to send and Shift+Enter for newline"
+);
+expectText(
+  "console-chat:stop-action",
+  launcherSource,
+  "data-test=\"cas-stop-analysis\"",
+  "launcher exposes a stop action while a query is running"
+);
+expectText(
+  "console-chat:copy-retry",
+  launcherSource,
+  "copyMessage",
+  "launcher exposes assistant message copy and retry helpers"
 );
 expectText(
   "console-chat:assistant-message",
@@ -133,6 +165,24 @@ expectText(
   "built plugin remains a launcher context-provider"
 );
 expectText(
+  "console-chat:provider-renders-launcher",
+  providerSource,
+  "<CASLauncher />",
+  "context provider directly renders the CAS launcher"
+);
+rejectText(
+  "console-chat:no-modal-side-effect",
+  launcherSource,
+  "useModal",
+  "launcher does not depend on modal side effects for visibility"
+);
+expectText(
+  "console-chat:bundle-provider-launcher",
+  providerBundle,
+  "CASLauncher",
+  "built context provider imports and renders the CAS launcher"
+);
+expectText(
   "console-chat:bundle-brainz",
   launcherBundle,
   "/api/aiops/brainz",
@@ -155,6 +205,24 @@ expectText(
   launcherBundle,
   "cas-fallback-notice",
   "built launcher bundle contains fallback notice surface"
+);
+expectText(
+  "console-chat:bundle-default-view",
+  launcherBundle,
+  "cas-chat-default-view",
+  "built launcher bundle contains the chat-first surface"
+);
+expectText(
+  "console-chat:bundle-view-switcher",
+  launcherBundle,
+  "cas-view-switcher",
+  "built launcher bundle contains header view switching"
+);
+expectText(
+  "console-chat:bundle-stop-action",
+  launcherBundle,
+  "cas-stop-analysis",
+  "built launcher bundle contains a stop action"
 );
 expectText(
   "console-cockpit:bundle-health-strip",

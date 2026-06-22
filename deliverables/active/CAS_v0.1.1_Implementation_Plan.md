@@ -6,6 +6,8 @@
 
 v0.1.1의 핵심은 대시보드를 단순 관제 화면으로 만들지 않고, **챗봇형 RCA 조종석**으로 만드는 것이다. 사용자는 OpenShift Web Console 안에서 CAS 버튼을 열고, 현재 콘솔의 메뉴와 기능을 그대로 활용하면서 자연어로 RCA를 시작한다. CAS는 OpenShift의 Pod, Event, Log, Metric, Workload, Namespace, Monitoring, Administrator/Developer 관점의 정보를 읽기 전용으로 수집하고, 가독성이 떨어지는 기본 시각화는 RCA에 더 적합한 카드, 타임라인, 리스크 테이블, 액션 큐로 재구성한다.
 
+2026-06-22 추가 결정: CAS 패널의 기본 화면은 Dashboard가 아니라 **Chat**이다. Cockpit, Evidence, Actions는 CAS 헤더의 아이콘으로 전환되는 보조 화면이다. 즉, 대시보드는 항상 펼쳐진 관제판이 아니라 챗봇이 필요할 때 호출하는 도구 집합이다.
+
 ## 1. 현재 기준 상태
 
 ### 완료된 기반
@@ -26,16 +28,23 @@ v0.1.1의 핵심은 대시보드를 단순 관제 화면으로 만들지 않고,
 v0.1.1에서는 화면을 다음 구조로 바꾼다.
 
 ```text
-Ask -> See -> Explain -> Prove -> Act
+Chat -> Cockpit icon -> Evidence icon -> Actions icon
 ```
 
-즉, 사용자는 CAS 패널에서 질문하고, CAS는 OpenShift Web Console의 기능과 데이터를 바탕으로 현재 위험도, RCA 후보, 증적 타임라인, 다음 행동을 한 화면에 제시한다.
+즉, 사용자는 CAS 패널에서 먼저 질문하고, CAS는 OpenShift Web Console의 기능과 데이터를 바탕으로 현재 위험도, RCA 후보, 증적 타임라인, 다음 행동을 필요 시 별도 화면으로 전환해 제시한다.
 
 ## 2. v0.1.1 제품 정의
 
 ### 한 문장 정의
 
 **CAS v0.1.1은 OpenShift Web Console 안에서 동작하는 챗봇형 RCA 대시보드이며, 콘솔의 기존 운영 기능을 AI 질의, 증적 수집, 원인 후보, 후속 행동으로 재구성하는 버전이다.**
+
+기본 UX 원칙:
+
+- Chat이 본체다.
+- Cockpit, Evidence, Actions는 헤더 아이콘으로 전환되는 보조 화면이다.
+- 사용자는 Chat에서 질문, 복사, 재시도, 중지, 새 대화 같은 기본 챗봇 편의기능을 먼저 기대한다.
+- 대시보드 기능은 챗봇의 답변과 RCA 흐름을 보조해야 하며, 항상 펼쳐져 Chat의 비중을 줄이면 안 된다.
 
 ### 화면 철학
 
@@ -65,8 +74,8 @@ CAS는 다음 역할을 한다.
 
 ### 목표
 
-1. CAS Launcher 패널 첫 화면을 **Chat Dashboard Cockpit**으로 전환한다.
-2. 챗봇 입력은 유지하되, 입력 전에도 현재 클러스터/namespace 위험도를 볼 수 있게 한다.
+1. CAS Launcher 패널 첫 화면을 **Chat 기본 화면**으로 전환한다.
+2. 현재 클러스터/namespace 위험도는 Chat 상단의 compact context와 헤더 아이콘 화면으로 제공한다.
 3. OpenShift Web Console 기능과 연결되는 RCA 중심 shortcut을 제공한다.
 4. RCA 결과를 단순 텍스트가 아니라 **Candidate, Evidence, Timeline, Action Queue**로 표시한다.
 5. 가독성이 낮은 차트는 작은 KPI, risk table, event reason bar, evidence timeline으로 대체한다.
@@ -88,20 +97,24 @@ v0.1.1에서는 다음을 하지 않는다.
 
 ## 4. v0.1.1 UX 구조
 
-### 4.1 Chat Dashboard Cockpit
+### 4.1 Chat-first RCA Cockpit
 
 CAS 패널은 세 영역으로 구성한다.
 
 ```text
 [Header]
-AI Sentinel / Brain status / Evidence status / Scope
+AI Sentinel / Chat icon / Cockpit icon / Evidence icon / Actions icon / Close
 
-[Cockpit]
-Health Score | Active Risk | Warning Events | Restart Spikes
-RCA Candidate | Risk Workloads | Evidence Timeline | Action Queue
+[Chat]
+Brain status / compact health context / chat thread / assistant tools
 
 [Chat Composer]
 Question input / namespace / resource / send
+
+[Icon Views]
+Cockpit: Health / RCA Candidate / Risk Workloads
+Evidence: Event Reasons / Evidence Timeline / Missing Evidence
+Actions: Action Queue / RCA Targets / Console Links
 ```
 
 ### 4.2 화면 구성
@@ -245,6 +258,8 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | 항목 | Pass / Fail | 측정 방법 | Evidence | 현재 Gap |
 | --- | --- | --- | --- | --- |
 | CAS launcher 위치 | CAS만 AI launcher로 표시 | console operator spec 확인 | `lightspeed-console-plugin` 없음, `LightspeedButton=Disabled` | 완료 |
+| Chat-first UX | CAS 패널 기본 화면이 Chat | source/bundle verifier | `cas-chat-default-view`, `cas-view-switcher` | 완료 |
+| 챗봇 기본 편의 | Enter 전송, Stop, Copy, Retry, 새 대화 | source/bundle verifier | `cas-stop-analysis`, copy/retry helpers | 완료 |
 | Overview API | `/api/aiops/overview`가 read-only overview 반환 | Gateway pod 내부 HTTPS 호출 | `mode=overview_read_only` | 완료 |
 | UserToken 보존 | overview/query 모두 UserToken 경유 | ConsolePlugin proxy 확인 | `authorization: UserToken` runtime PASS | 완료 |
 | Health Strip | score/risk/signals 표시 | DOM/data-test 및 bundle verifier | `cas-health-strip` | 완료 |
@@ -265,6 +280,7 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | Gateway overview | 완료 | `GET /api/aiops/overview` 추가, critical missing evidence degrade 처리 |
 | OpenShift evidence | 완료 | pods/events/clusterversion read-only 수집, refs resolve 검증 PASS |
 | Console cockpit | 완료 | Health, RCA Candidate, Risk Workloads, Event Reasons, Evidence Timeline, Action Queue 렌더링 |
+| Chat UX | 완료 | Chat 기본 화면, 헤더 아이콘 전환, Enter/Stop/Copy/Retry/New Chat 반영 |
 | Runtime 배포 | 완료 | `npm run deploy:crc` PASS, overview/query 모두 UserToken proxy로 통과 |
 | 시각 QA | 완료 | `npm run verify:console:visual` PASS, `test-results/visual/cas-cockpit-desktop.png`, `test-results/visual/cas-cockpit-mobile-500.png` |
 
@@ -278,6 +294,7 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | namespace 입력 중 overview 요청이 과도하게 발생할 수 있음 | panel open 기준 fetch로 줄이고 실패 시 stale overview 제거 |
 | bundle verifier가 cockpit 일부만 확인함 | candidate/action/risk/timeline bundle marker 검증 추가 |
 | 패널 헤더 아이콘과 form field가 좁은 폭에서 레이아웃을 밀 수 있음 | SVG 크기 고정, box-sizing, mobile left/right panel layout, visual smoke verifier 추가 |
+| 대시보드가 항상 펼쳐져 챗봇의 역할을 줄임 | Chat 기본 화면으로 전환, Cockpit/Evidence/Actions를 헤더 아이콘 view로 분리 |
 
 ## 8. v0.1.1 화면 세부안
 
@@ -409,15 +426,17 @@ CAS가 모든 console 메뉴를 화면에 복제하면 가독성이 떨어진다
 v0.1.1은 아래 조건을 만족해야 완료다.
 
 1. CAS 버튼이 native Lightspeed 대신 보인다.
-2. 패널을 열면 Overview Cockpit이 먼저 보인다.
-3. Overview Cockpit은 Health, Risk, RCA Candidate, Evidence Timeline, Action Queue를 표시한다.
-4. 사용자는 Risk Workload 또는 Action Queue에서 바로 RCA 질문을 시작할 수 있다.
-5. Query 결과는 기존 Lightspeed-backed answer와 OpenShift evidence를 유지한다.
-6. Evidence가 부족하면 "없음"이 아니라 missing reason으로 표시한다.
-7. OpenShift native page로 이동할 수 있는 console link가 제공된다.
-8. `npm run verify`가 통과한다.
-9. `npm run verify:crc:deployment`가 overview runtime까지 통과한다.
-10. `.env`와 materials 문서는 변경하지 않는다.
+2. 패널을 열면 Chat이 먼저 보인다.
+3. 헤더 아이콘으로 Cockpit, Evidence, Actions 화면을 전환할 수 있다.
+4. Chat은 Enter 전송, Shift+Enter 줄바꿈, Stop, Copy, Retry, 새 대화를 제공한다.
+5. Cockpit/Evidence/Actions는 Health, Risk, RCA Candidate, Evidence Timeline, Action Queue를 분리해서 표시한다.
+6. 사용자는 Risk Workload 또는 Action Queue에서 바로 RCA 질문을 시작할 수 있다.
+7. Query 결과는 기존 Lightspeed-backed answer와 OpenShift evidence를 유지한다.
+8. Evidence가 부족하면 "없음"이 아니라 missing reason으로 표시한다.
+9. OpenShift native page로 이동할 수 있는 console link가 제공된다.
+10. `npm run verify`가 통과한다.
+11. `npm run verify:crc:deployment`가 overview runtime까지 통과한다.
+12. `.env`와 materials 문서는 변경하지 않는다.
 
 ## 12. 일정안
 
@@ -439,6 +458,7 @@ v0.1.1 브랜치에서 수행 완료된 작업:
 5. npm run verify: PASS
 6. npm run deploy:crc: PASS
 7. npm run verify:console:visual: PASS
+8. Chat-first header icon UX: 완료
 ```
 
 후속 수동 확인:
@@ -458,5 +478,5 @@ branch: feat/CAS-v0.1.1
 base: main
 target version: v0.1.1
 implementation baseline: fdae8397246cdb1efd42c0d117edfb14916f6167
-current product state: v0.1.1 RCA cockpit implemented, visual smoke verified, CRC runtime verified
+current product state: v0.1.1 chat-first RCA cockpit implemented, visual smoke verified, CRC runtime verified
 ```
