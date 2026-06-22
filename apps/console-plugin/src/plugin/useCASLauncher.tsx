@@ -11,8 +11,12 @@ type CauseCandidate = {
 
 type EvidenceItem = {
   id: string;
+  type?: string;
   source: string;
   summary: string;
+  observed_at?: string;
+  score?: number;
+  query?: string;
 };
 
 type MissingEvidence = {
@@ -24,6 +28,10 @@ type RCAResult = {
   run_id?: string;
   mode?: string;
   conversation_id?: string | null;
+  tool_plan?: {
+    task_type?: string;
+    tool_plan?: Array<{ step?: number; tool?: string; verb?: string; optional?: boolean }>;
+  };
   audit?: {
     answer_provider?: string;
     brain?: {
@@ -39,7 +47,15 @@ type RCAResult = {
   evidence_bundle?: {
     evidence?: EvidenceItem[];
     missing?: MissingEvidence[];
+    evidence_status?: EvidenceStatus[];
   };
+};
+
+type EvidenceStatus = {
+  type: "openshift" | "metric" | "runbook" | string;
+  status: "collected" | "missing" | string;
+  count: number;
+  reason?: string;
 };
 
 type BrainStatus = {
@@ -112,6 +128,13 @@ type OverviewResult = {
     evidence_refs?: string[];
   };
   evidence_timeline?: TimelineItem[];
+  evidence_groups?: {
+    openshift?: EvidenceItem[];
+    metric?: EvidenceItem[];
+    runbook?: EvidenceItem[];
+    missing?: MissingEvidence[];
+  };
+  evidence_status?: EvidenceStatus[];
   actions?: OverviewAction[];
   missing?: MissingEvidence[];
 };
@@ -285,6 +308,16 @@ const languageCopy: Record<
     noWarningEventReasons: string;
     missingEvidence: string;
     noMissingEvidence: string;
+    evidenceStatus: string;
+    openshiftEvidence: string;
+    metricEvidence: string;
+    runbookEvidence: string;
+    toolPlan: string;
+    whyThisMatters: string;
+    whyOpenShift: string;
+    whyMetric: string;
+    whyRunbook: string;
+    metricProvider: string;
     evidenceTimeline: string;
     signals: string;
     noTimelineEvidence: string;
@@ -307,7 +340,7 @@ const languageCopy: Record<
     stopLabel: "분석 중지",
     newChat: "새 대화",
     recommendationMeta: "추천 질문 5개 · Enter 전송",
-    openCockpit: "관제 열기",
+    openCockpit: "상황 열기",
     pending: "분석 중입니다. Gateway를 통해 Lightspeed brain에 질의하고 있습니다.",
     abort: "요청을 중지했습니다.",
     failure: "분석 요청에 실패했습니다.",
@@ -319,9 +352,9 @@ const languageCopy: Record<
     languageTitle: "언어: 한국어. 영어로 전환",
     viewLabels: {
       chat: "채팅",
-      cockpit: "관제",
-      evidence: "증적",
-      actions: "조치"
+      cockpit: "상황",
+      evidence: "근거",
+      actions: "다음 행동"
     },
     viewsNavLabel: "AI Sentinel 화면",
     closeLabel: "AI Sentinel 닫기",
@@ -339,7 +372,7 @@ const languageCopy: Record<
     rcaCandidate: "RCA 후보",
     overviewLoading: "Overview를 불러오는 중입니다.",
     confidence: "신뢰도",
-    evidence: "증적",
+    evidence: "근거",
     none: "없음",
     pendingEvidence: "대기 중",
     noRiskWorkloads: "현재 범위에서 위험 워크로드가 없습니다.",
@@ -348,10 +381,20 @@ const languageCopy: Record<
     noWarningEventReasons: "경고 이벤트 원인이 없습니다.",
     missingEvidence: "부족한 증적",
     noMissingEvidence: "부족한 증적이 없습니다.",
-    evidenceTimeline: "증적 타임라인",
+    evidenceStatus: "근거 수집 상태",
+    openshiftEvidence: "OpenShift 상태/이벤트",
+    metricEvidence: "Metric 관측값",
+    runbookEvidence: "Runbook 참고",
+    toolPlan: "읽기 전용 Tool Plan",
+    whyThisMatters: "왜 보는가",
+    whyOpenShift: "OpenShift 상태, 이벤트, 로그는 RCA의 1차 사실 근거입니다.",
+    whyMetric: "재시작, 메모리, 포화 신호는 문제가 현재 진행 중인지 과거 상태인지 구분합니다.",
+    whyRunbook: "Runbook은 원시 근거를 안전한 다음 확인 절차로 바꿉니다.",
+    metricProvider: "Metric provider",
+    evidenceTimeline: "OpenShift 이벤트 흐름",
     signals: "신호",
     noTimelineEvidence: "아직 타임라인 증적이 없습니다.",
-    actionQueue: "조치 큐",
+    actionQueue: "다음 행동",
     actionCount: "개 조치",
     run: "실행",
     open: "열기",
@@ -359,7 +402,7 @@ const languageCopy: Record<
     runRcaTargets: "RCA 실행 대상",
     noRcaTargets: "현재 실행 가능한 RCA 대상이 없습니다.",
     evidenceSummary: (evidence, causes, missing) => `근거 ${evidence}개 · RCA 후보 ${causes}개 · 부족한 증적 ${missing}개`,
-    evidenceSection: "증적",
+    evidenceSection: "근거",
     missingSection: "부족한 증적"
   },
   en: {
@@ -369,7 +412,7 @@ const languageCopy: Record<
     stopLabel: "Stop analysis",
     newChat: "New chat",
     recommendationMeta: "5 recommended questions · Enter to send",
-    openCockpit: "Open Cockpit",
+    openCockpit: "Open Situation",
     pending: "Analyzing through the Gateway and the Lightspeed brain.",
     abort: "Request stopped.",
     failure: "Analysis request failed.",
@@ -381,9 +424,9 @@ const languageCopy: Record<
     languageTitle: "Language: English. Switch to Korean",
     viewLabels: {
       chat: "Chat",
-      cockpit: "Cockpit",
-      evidence: "Evidence",
-      actions: "Actions"
+      cockpit: "Situation",
+      evidence: "Grounds",
+      actions: "Next Actions"
     },
     viewsNavLabel: "AI Sentinel views",
     closeLabel: "Close AI Sentinel",
@@ -410,10 +453,20 @@ const languageCopy: Record<
     noWarningEventReasons: "No Warning event reasons.",
     missingEvidence: "Missing Evidence",
     noMissingEvidence: "No missing evidence.",
-    evidenceTimeline: "Evidence Timeline",
+    evidenceStatus: "Evidence Status",
+    openshiftEvidence: "OpenShift status/events",
+    metricEvidence: "Metric observations",
+    runbookEvidence: "Runbook references",
+    toolPlan: "Read-only Tool Plan",
+    whyThisMatters: "Why this matters",
+    whyOpenShift: "OpenShift status, events, and logs are the primary RCA facts.",
+    whyMetric: "Restart, memory, and saturation signals show whether the issue is current or historical.",
+    whyRunbook: "Runbooks turn raw evidence into safe next checks.",
+    metricProvider: "Metric provider",
+    evidenceTimeline: "OpenShift Event Flow",
     signals: "signals",
     noTimelineEvidence: "No timeline evidence yet.",
-    actionQueue: "Action Queue",
+    actionQueue: "Next Actions",
     actionCount: "actions",
     run: "Run",
     open: "Open",
@@ -650,7 +703,7 @@ const styles = `
 .cas-health-strip {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .cas-signal-card {
@@ -709,7 +762,8 @@ const styles = `
 .cas-risk-list,
 .cas-action-list,
 .cas-timeline-list,
-.cas-reason-list {
+.cas-reason-list,
+.cas-status-list {
   display: grid;
   gap: 7px;
 }
@@ -717,7 +771,8 @@ const styles = `
 .cas-risk-row,
 .cas-action-row,
 .cas-timeline-row,
-.cas-reason-row {
+.cas-reason-row,
+.cas-status-row-item {
   background: #fff;
   border: 1px solid var(--cas-line);
   border-radius: 6px;
@@ -962,13 +1017,46 @@ const styles = `
   gap: 8px;
 }
 
+.cas-evidence-group {
+  display: grid;
+  gap: 7px;
+}
+
+.cas-evidence-group + .cas-evidence-group {
+  border-top: 1px solid var(--cas-line);
+  padding-top: 9px;
+}
+
+.cas-status-row-item {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.cas-status-row-item[data-status="missing"] {
+  border-color: rgba(166, 98, 0, 0.24);
+}
+
 .cas-cause,
 .cas-evidence-item,
 .cas-missing-item {
   background: #fff;
   border: 1px solid var(--cas-line);
   border-radius: 6px;
+  min-width: 0;
   padding: 9px 10px;
+}
+
+.cas-result-details-body,
+.cas-evidence-item,
+.cas-evidence-item strong,
+.cas-evidence-item div,
+.cas-evidence-item span,
+.cas-missing-item,
+.cas-missing-item strong,
+.cas-missing-item div {
+  overflow-wrap: anywhere;
 }
 
 .cas-missing-item {
@@ -1317,6 +1405,30 @@ function formatTimelineTime(value?: string) {
   return date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
 }
 
+function evidenceGroupLabel(type: string | undefined, copy: (typeof languageCopy)[Language]) {
+  if (type === "metric") return copy.metricEvidence;
+  if (type === "runbook" || type === "rag_reference") return copy.runbookEvidence;
+  return copy.openshiftEvidence;
+}
+
+function evidenceGroupWhy(type: string | undefined, copy: (typeof languageCopy)[Language]) {
+  if (type === "metric") return `${copy.whyThisMatters}: ${copy.whyMetric}`;
+  if (type === "runbook" || type === "rag_reference") return `${copy.whyThisMatters}: ${copy.whyRunbook}`;
+  return `${copy.whyThisMatters}: ${copy.whyOpenShift}`;
+}
+
+function groupEvidenceBySource(evidence: EvidenceItem[]) {
+  return {
+    openshift: evidence.filter((item) => !["metric", "runbook", "rag_reference"].includes(item.type ?? "")),
+    metric: evidence.filter((item) => item.type === "metric"),
+    runbook: evidence.filter((item) => item.type === "runbook" || item.type === "rag_reference")
+  };
+}
+
+function statusFor(evidenceStatus: EvidenceStatus[] | undefined, type: string) {
+  return evidenceStatus?.find((item) => item.type === type);
+}
+
 function parseMarkdownBlocks(content: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
   const lines = String(content || "").split(/\r?\n/);
@@ -1465,6 +1577,41 @@ function MarkdownAnswer({ content, primary }: { content: string; primary: boolea
   );
 }
 
+function EvidenceGroup({
+  title,
+  type,
+  items,
+  copy,
+  emptyText
+}: {
+  title: string;
+  type: string;
+  items: EvidenceItem[];
+  copy: (typeof languageCopy)[Language];
+  emptyText: string;
+}) {
+  return (
+    <div className="cas-evidence-group" data-test={`cas-evidence-group-${type}`}>
+      <div className="cas-panel-heading">
+        <strong>{title}</strong>
+        <span className="cas-meta">{items.length}</span>
+      </div>
+      <div className="cas-meta">{evidenceGroupWhy(type, copy)}</div>
+      <div className="cas-evidence-list">
+        {items.slice(0, 6).map((item) => (
+          <div className="cas-evidence-item" key={item.id}>
+            <strong>{item.id}</strong>
+            <div>{item.summary}</div>
+            <span>{item.source}</span>
+            {item.query && <span>{item.query}</span>}
+          </div>
+        ))}
+        {items.length === 0 && <div className="cas-meta">{emptyText}</div>}
+      </div>
+    </div>
+  );
+}
+
 function OverviewCockpit({
   overview,
   status,
@@ -1490,6 +1637,9 @@ function OverviewCockpit({
   const actions = overview?.actions ?? [];
   const eventReasons = overview?.event_reasons ?? [];
   const missing = overview?.missing ?? [];
+  const evidenceStatus = overview?.evidence_status ?? [];
+  const evidenceGroups = overview?.evidence_groups ?? {};
+  const metricStatus = statusFor(evidenceStatus, "metric");
   const candidate = overview?.rca_candidate;
 
   return (
@@ -1523,6 +1673,13 @@ function OverviewCockpit({
               <span>{copy.riskWorkloads}</span>
               <strong>{signals.risky_workloads ?? 0}</strong>
               <div className="cas-meta">{copy.topTargets}</div>
+            </div>
+            <div className="cas-signal-card" data-test="cas-metric-provider">
+              <span>{copy.metricProvider}</span>
+              <strong>{metricStatus?.status ?? "missing"}</strong>
+              <div className="cas-meta">
+                {metricStatus?.count ?? 0} {copy.signals}
+              </div>
             </div>
           </div>
 
@@ -1580,6 +1737,30 @@ function OverviewCockpit({
 
       {activeView === "evidence" && (
         <div className="cas-cockpit-grid">
+          <article className="cas-cockpit-panel" data-wide="true" data-test="cas-evidence-status">
+            <div className="cas-panel-heading">
+              <strong>{copy.evidenceStatus}</strong>
+              <span className="cas-meta">{evidenceStatus.length}</span>
+            </div>
+            <div className="cas-status-list">
+              {evidenceStatus.map((item) => (
+                <div className="cas-status-row-item" data-status={item.status} key={item.type}>
+                  <div className="cas-row-main">
+                    <strong>{item.type}</strong>
+                    <span className="cas-risk-pill" data-risk={item.status === "collected" ? "low" : "medium"}>
+                      {item.status}
+                    </span>
+                  </div>
+                  <div className="cas-meta">
+                    {item.count} {copy.signals}
+                    {item.reason ? ` · ${item.reason}` : ""}
+                  </div>
+                </div>
+              ))}
+              {evidenceStatus.length === 0 && <div className="cas-meta">{copy.pendingEvidence}</div>}
+            </div>
+          </article>
+
           <article className="cas-cockpit-panel" data-test="cas-event-reasons">
             <div className="cas-panel-heading">
               <strong>{copy.eventReasons}</strong>
@@ -1604,7 +1785,7 @@ function OverviewCockpit({
               <span className="cas-meta">{missing.length}</span>
             </div>
             <div className="cas-missing-list">
-              {missing.slice(0, 4).map((item) => (
+              {missing.slice(0, 6).map((item) => (
                 <div className="cas-missing-item" key={`${item.type}-${item.reason}`}>
                   <strong>{item.type}</strong>
                   <div className="cas-meta">{item.reason}</div>
@@ -1612,6 +1793,36 @@ function OverviewCockpit({
               ))}
               {missing.length === 0 && <div className="cas-meta">{copy.noMissingEvidence}</div>}
             </div>
+          </article>
+
+          <article className="cas-cockpit-panel" data-wide="true" data-test="cas-evidence-groups">
+            <EvidenceGroup
+              copy={copy}
+              emptyText={copy.noTimelineEvidence}
+              items={evidenceGroups.openshift ?? timeline.map((item) => ({
+                id: item.id ?? `${item.ts}-${item.summary}`,
+                type: item.type,
+                summary: item.summary,
+                source: item.source,
+                observed_at: item.ts
+              }))}
+              title={copy.openshiftEvidence}
+              type="openshift"
+            />
+            <EvidenceGroup
+              copy={copy}
+              emptyText={copy.pendingEvidence}
+              items={evidenceGroups.metric ?? []}
+              title={copy.metricEvidence}
+              type="metric"
+            />
+            <EvidenceGroup
+              copy={copy}
+              emptyText={copy.pendingEvidence}
+              items={evidenceGroups.runbook ?? []}
+              title={copy.runbookEvidence}
+              type="runbook"
+            />
           </article>
 
           <article className="cas-cockpit-panel" data-wide="true" data-test="cas-evidence-timeline">
@@ -1705,7 +1916,9 @@ function EvidenceSummary({ result, copy }: { result: RCAResult; copy: (typeof la
   const causes = result.rca_result?.cause_candidates ?? [];
   const evidence = result.evidence_bundle?.evidence ?? [];
   const missing = result.evidence_bundle?.missing ?? [];
-  const total = causes.length + evidence.length + missing.length;
+  const toolSteps = result.tool_plan?.tool_plan ?? [];
+  const groups = groupEvidenceBySource(evidence);
+  const total = causes.length + evidence.length + missing.length + toolSteps.length;
 
   if (total === 0) return null;
 
@@ -1728,13 +1941,46 @@ function EvidenceSummary({ result, copy }: { result: RCAResult; copy: (typeof la
         )}
 
         {evidence.length > 0 && (
-          <div className="cas-evidence-list">
+          <div className="cas-evidence-list" data-test="cas-result-evidence-groups">
             <strong className="cas-section-title">{copy.evidenceSection}</strong>
-            {evidence.map((item) => (
-              <div className="cas-evidence-item" key={item.id}>
-                <strong>{item.id}</strong>
-                <div>{item.summary}</div>
-                <span>{item.source}</span>
+            {[
+              { type: "openshift", items: groups.openshift },
+              { type: "metric", items: groups.metric },
+              { type: "runbook", items: groups.runbook }
+            ].map((group) =>
+              group.items.length > 0 ? (
+                <div className="cas-evidence-group" key={group.type}>
+                  <div className="cas-panel-heading">
+                    <strong>{evidenceGroupLabel(group.type, copy)}</strong>
+                    <span className="cas-meta">{group.items.length}</span>
+                  </div>
+                  <div className="cas-meta">{evidenceGroupWhy(group.type, copy)}</div>
+                  {group.items.map((item) => (
+                    <div className="cas-evidence-item" key={item.id}>
+                      <strong>{item.id}</strong>
+                      <div>{item.summary}</div>
+                      <span>{item.source}</span>
+                      {item.query && <span>{item.query}</span>}
+                    </div>
+                  ))}
+                </div>
+              ) : null
+            )}
+          </div>
+        )}
+
+        {toolSteps.length > 0 && (
+          <div className="cas-evidence-list" data-test="cas-tool-plan-panel">
+            <strong className="cas-section-title">{copy.toolPlan}</strong>
+            {toolSteps.map((step) => (
+              <div className="cas-evidence-item" key={`${step.step}-${step.tool}`}>
+                <strong>
+                  {step.step}. {step.tool}
+                </strong>
+                <div className="cas-meta">
+                  {step.verb ?? "get"}
+                  {step.optional ? " · optional" : ""}
+                </div>
               </div>
             ))}
           </div>

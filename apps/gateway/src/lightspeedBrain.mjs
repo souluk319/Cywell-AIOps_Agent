@@ -4,6 +4,7 @@ import {
   PRODUCT,
   assertReadOnlyToolPlan,
   createEvidenceBundle,
+  createEvidenceStatus,
   createRcaResult,
   createToolPlan
 } from "../../../packages/contracts/src/index.js";
@@ -222,12 +223,14 @@ function mergeCollectedEvidence(run, input = {}) {
   if (!run.evidence_bundle) return run;
   run.evidence_bundle.evidence = [...evidence, ...(run.evidence_bundle.evidence ?? [])];
   run.evidence_bundle.missing = [...missing, ...(run.evidence_bundle.missing ?? [])];
+  run.evidence_bundle.evidence_status = createEvidenceStatus(run.evidence_bundle);
   run.audit = {
     ...(run.audit ?? {}),
     evidence: {
       provider: input.cas_evidence?.provider ?? "none",
       collected_count: evidence.length,
-      missing_count: missing.length
+      missing_count: missing.length,
+      status: run.evidence_bundle.evidence_status
     }
   };
   return run;
@@ -306,7 +309,8 @@ export function createLightspeedRun(input = {}, lightspeedResult = {}) {
       evidence: {
         provider: input.cas_evidence?.provider ?? "none",
         collected_count: openShiftEvidence.length,
-        missing_count: openShiftMissing.length
+        missing_count: openShiftMissing.length,
+        status: evidenceBundle.evidence_status
       },
       response_schema_valid: true,
       redaction_applied: true

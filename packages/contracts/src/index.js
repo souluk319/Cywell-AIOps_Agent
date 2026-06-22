@@ -68,7 +68,7 @@ export function createToolPlan(overrides = {}) {
 }
 
 export function createEvidenceBundle(overrides = {}) {
-  return {
+  const bundle = {
     run_id: "20260621-001",
     target: {
       namespace: "default",
@@ -92,6 +92,10 @@ export function createEvidenceBundle(overrides = {}) {
     ],
     ...overrides
   };
+  return {
+    ...bundle,
+    evidence_status: overrides.evidence_status ?? createEvidenceStatus(bundle)
+  };
 }
 
 export function createRcaResult(overrides = {}) {
@@ -114,7 +118,7 @@ export function createRcaResult(overrides = {}) {
 }
 
 export function createOverviewResult(overrides = {}) {
-  return {
+  const overview = {
     product: PRODUCT.officialName,
     mode: "overview_read_only",
     scope: {
@@ -143,6 +147,61 @@ export function createOverviewResult(overrides = {}) {
     missing: [],
     ...overrides
   };
+  return {
+    ...overview,
+    evidence_status:
+      overrides.evidence_status ??
+      createEvidenceStatus({
+        evidence: [
+          ...(overview.evidence_groups?.openshift ?? []),
+          ...(overview.evidence_groups?.metric ?? []),
+          ...(overview.evidence_groups?.runbook ?? [])
+        ],
+        missing: overview.missing
+      })
+  };
+}
+
+export function createEvidenceStatus(collection = {}) {
+  const evidence = Array.isArray(collection.evidence) ? collection.evidence : [];
+  const missing = Array.isArray(collection.missing) ? collection.missing : [];
+  const groups = [
+    {
+      type: "openshift",
+      matches: new Set([
+        "openshift_api",
+        "target_resource",
+        "namespace",
+        "pod",
+        "pod_status",
+        "pod_log",
+        "log",
+        "event",
+        "clusterversion",
+        "deployment"
+      ])
+    },
+    { type: "metric", matches: new Set(["metric"]) },
+    { type: "runbook", matches: new Set(["runbook", "rag_reference"]) }
+  ];
+
+  return groups.map((group) => {
+    const count = evidence.filter((item) => group.matches.has(item.type)).length;
+    const missingReasons = missing.filter((item) => item.type === group.type || group.matches.has(item.type));
+    if (count > 0) {
+      return {
+        type: group.type,
+        status: "collected",
+        count
+      };
+    }
+    return {
+      type: group.type,
+      status: "missing",
+      count: 0,
+      reason: missingReasons[0]?.reason ?? `${group.type} evidence unavailable`
+    };
+  });
 }
 
 export function assertReadOnlyToolPlan(toolPlan) {

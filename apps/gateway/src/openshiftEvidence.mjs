@@ -1,6 +1,8 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { createOverviewResult } from "../../../packages/contracts/src/index.js";
+import { createEvidenceStatus, createOverviewResult } from "../../../packages/contracts/src/index.js";
+import { collectMetricEvidence, collectMetricOverview, getMetricConfig } from "./metricAdapter.mjs";
+import { collectRunbookEvidence, getRunbookConfig } from "./runbookAdapter.mjs";
 
 const defaultApiUrl = "https://kubernetes.default.svc";
 const defaultTimeoutMs = 8000;
@@ -12,6 +14,13 @@ export function getEvidenceConfig(env = process.env) {
     timeoutMs: Number(env.CAS_EVIDENCE_TIMEOUT_MS ?? defaultTimeoutMs),
     tlsInsecure: env.CAS_OPENSHIFT_API_TLS_INSECURE === "true",
     logTailLines: Number(env.CAS_EVIDENCE_LOG_TAIL_LINES ?? 80)
+  };
+}
+
+function getAuxiliaryConfigs(options = {}) {
+  return {
+    metricConfig: options.metricConfig ?? getMetricConfig(),
+    runbookConfig: options.runbookConfig ?? getRunbookConfig()
   };
 }
 
@@ -156,6 +165,24 @@ function missingItem(type, reason) {
   };
 }
 
+function mergeAuxiliaryCollection(collection, auxiliary) {
+  collection.evidence.push(...(auxiliary.evidence ?? []));
+  collection.missing.push(...(auxiliary.missing ?? []));
+}
+
+function openshiftEvidenceOnly(collection = {}) {
+  return (collection.evidence ?? []).filter((item) => !["metric", "runbook", "rag_reference"].includes(item.type));
+}
+
+function evidenceGroups({ openshift = [], metric = [], runbook = [], missing = [] } = {}) {
+  return {
+    openshift,
+    metric,
+    runbook,
+    missing
+  };
+}
+
 function workloadStatus(pod = {}) {
   const waiting = (pod.status?.containerStatuses ?? []).find((status) => status.state?.waiting)?.state?.waiting;
   const terminated = (pod.status?.containerStatuses ?? []).find((status) => status.lastState?.terminated)?.lastState?.terminated;
@@ -283,6 +310,24 @@ function overviewActionQueue(namespace, topWorkload) {
   return actions;
 }
 
+function runbookActions(runbookEvidence = []) {
+  return runbookEvidence.slice(0, 3).map((item) => ({
+    label: `Open runbook: ${item.summary}`,
+    type: "console_link",
+    href: item.source
+  }));
+}
+
+function timelineEvidence(timeline = []) {
+  return timeline.map((item) => ({
+    id: item.id,
+    type: item.type,
+    summary: item.summary,
+    source: item.source,
+    observed_at: item.ts
+  }));
+}
+
 async function captureJson(collection, id, type, source, path, options, summarize) {
   try {
     const response = await kubeJson(path, options);
@@ -404,6 +449,34 @@ async function collectDeploymentEvidence(collection, target, options) {
   );
 }
 
+async function finalizeEvidenceCollection(input, collection, options = {}) {
+  const { metricConfig, runbookConfig } = getAuxiliaryConfigs(options);
+  const enrichedInput = {
+    ...input,
+    cas_evidence: collection
+  };
+  const [metric, runbook] = await Promise.all([
+    collectMetricEvidence(enrichedInput, {
+      authorization: options.authorization,
+      config: metricConfig,
+      transport: options.metricTransport
+    }),
+    collectRunbookEvidence(enrichedInput, {
+      config: runbookConfig
+    })
+  ]);
+  mergeAuxiliaryCollection(collection, metric);
+  mergeAuxiliaryCollection(collection, runbook);
+  collection.evidence_groups = evidenceGroups({
+    openshift: openshiftEvidenceOnly(collection),
+    metric: metric.evidence ?? [],
+    runbook: runbook.evidence ?? [],
+    missing: collection.missing
+  });
+  collection.evidence_status = createEvidenceStatus(collection);
+  return collection;
+}
+
 export async function collectOpenShiftEvidence(input = {}, options = {}) {
   const config = options.config ?? getEvidenceConfig();
   const target = getEvidenceTarget(input);
@@ -416,13 +489,13 @@ export async function collectOpenShiftEvidence(input = {}, options = {}) {
 
   if (config.provider === "none") {
     collection.missing.push(missingItem("openshift_api", "CAS_EVIDENCE_PROVIDER=none"));
-    return collection;
+    return finalizeEvidenceCollection(input, collection, options);
   }
 
   const authorization = options.authorization;
   if (!authorization?.startsWith("Bearer ")) {
     collection.missing.push(missingItem("openshift_api", "missing user bearer token for OpenShift evidence collection"));
-    return collection;
+    return finalizeEvidenceCollection(input, collection, options);
   }
 
   const requestOptions = {
@@ -446,7 +519,7 @@ export async function collectOpenShiftEvidence(input = {}, options = {}) {
     collection.missing.push(missingItem("target_resource", `unsupported evidence target kind ${target.kind}`));
   }
 
-  return collection;
+  return finalizeEvidenceCollection(input, collection, options);
 }
 
 export async function collectOpenShiftOverview(input = {}, options = {}) {
@@ -567,11 +640,46 @@ export async function collectOpenShiftOverview(input = {}, options = {}) {
       ? `${riskWorkloads.length} risky workloads detected in ${namespace}. ${clusterSummary}`
       : `No risky workloads detected in ${namespace}. ${clusterSummary}`;
 
-  const overviewMissing = [
-    ...missing,
-    missingItem("metric", "Prometheus metric adapter is not configured in v0.1.1"),
-    missingItem("runbook", "Runbook RAG adapter is planned after the cockpit flow")
-  ];
+  const { metricConfig, runbookConfig } = getAuxiliaryConfigs(options);
+  const openShiftOverviewEvidence = timelineEvidence(timeline);
+  const [metricOverview, runbookOverview] = await Promise.all([
+    collectMetricOverview(
+      {
+        namespace,
+        scope
+      },
+      {
+        authorization,
+        config: metricConfig,
+        transport: options.metricTransport
+      }
+    ),
+    collectRunbookEvidence(
+      {
+        question: `OpenShift ${namespace} namespace overview warning events restart RCA next checks`,
+        namespace,
+        scope,
+        cas_evidence: {
+          evidence: openShiftOverviewEvidence,
+          missing
+        }
+      },
+      {
+        config: runbookConfig
+      }
+    )
+  ]);
+  const overviewMissing = [...missing, ...(metricOverview.missing ?? []), ...(runbookOverview.missing ?? [])];
+  const groupedEvidence = evidenceGroups({
+    openshift: openShiftOverviewEvidence,
+    metric: metricOverview.evidence ?? [],
+    runbook: runbookOverview.evidence ?? [],
+    missing: overviewMissing
+  });
+  const overviewEvidenceStatus = createEvidenceStatus({
+    evidence: [...groupedEvidence.openshift, ...groupedEvidence.metric, ...groupedEvidence.runbook],
+    missing: overviewMissing
+  });
 
   return createOverviewResult({
     scope,
@@ -590,7 +698,9 @@ export async function collectOpenShiftOverview(input = {}, options = {}) {
     risk_workloads: riskWorkloads,
     rca_candidate: candidate,
     evidence_timeline: timeline,
-    actions: overviewActionQueue(namespace, topWorkload),
+    evidence_groups: groupedEvidence,
+    evidence_status: overviewEvidenceStatus,
+    actions: [...overviewActionQueue(namespace, topWorkload), ...runbookActions(runbookOverview.evidence ?? [])],
     missing: overviewMissing
   });
 }

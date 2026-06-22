@@ -215,7 +215,7 @@ if (consolePod) {
     const overviewCode = [
       "const https=require('https');",
       `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
-      "const req=https.request('https://127.0.0.1:9443/api/aiops/overview?namespace=default',{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,score:j.health?.score,actions:j.actions?.length||0,missing:(j.missing??[]).map(m=>m.type),signals:j.signals}));});});",
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/overview?namespace=default',{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,score:j.health?.score,actions:j.actions?.length||0,evidenceStatus:j.evidence_status,metric:(j.evidence_groups?.metric??[]).map(e=>e.id),runbook:(j.evidence_groups?.runbook??[]).map(e=>e.id),signals:j.signals}));});});",
       "req.on('error',e=>{console.error(e.message);process.exit(1);});req.end();"
     ].join("");
     const overview = execNode(consolePod.metadata.name, overviewCode, 60000);
@@ -223,9 +223,10 @@ if (consolePod) {
       "runtime:overview-through-plugin",
       overview.ok &&
         overview.stdout.includes("overview_read_only") &&
-        overview.stdout.includes("\"metric\"") &&
+        overview.stdout.includes("\"type\":\"metric\"") &&
+        overview.stdout.includes("runbook:") &&
         overview.stdout.includes("\"actions\":"),
-      "console plugin forwards user token and CAS overview cockpit returns read-only signals",
+      "console plugin forwards user token and CAS overview returns metric/runbook read-only signals",
       overview.stderr || overview.stdout
     );
 
@@ -233,7 +234,7 @@ if (consolePod) {
       "const https=require('https');",
       `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
       "const payload=JSON.stringify({question:'ClusterVersion 상태를 한 문장으로 요약해줘.',scope:{cluster:'local-cluster',namespaces:['default']},resourceRef:{kind:'ClusterVersion',name:'version'},mode:'read_only',stream:false,locale:'ko-KR'});",
-      "const req=https.request('https://127.0.0.1:9443/api/aiops/query',{method:'POST',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,'content-type':'application/json','content-length':Buffer.byteLength(payload)}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,provider:j.audit?.answer_provider,brain:j.audit?.brain?.status,evidence:j.audit?.evidence,answerLength:j.rca_result?.answer?.length||0,conversation:!!j.conversation_id,evidenceIds:(j.evidence_bundle?.evidence??[]).map(e=>e.id).slice(0,8)}));});});",
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/query',{method:'POST',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,'content-type':'application/json','content-length':Buffer.byteLength(payload)}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,provider:j.audit?.answer_provider,brain:j.audit?.brain?.status,evidence:j.audit?.evidence,answerLength:j.rca_result?.answer?.length||0,conversation:!!j.conversation_id,evidenceIds:(j.evidence_bundle?.evidence??[]).map(e=>e.id).slice(0,12),metric:(j.evidence_bundle?.evidence??[]).filter(e=>e.type==='metric').map(e=>e.summary),runbook:(j.evidence_bundle?.evidence??[]).filter(e=>e.type==='runbook').map(e=>e.id)}));});});",
       "req.on('error',e=>{console.error(e.message);process.exit(1);});req.write(payload);req.end();"
     ].join("");
     const liveQuery = execNode(consolePod.metadata.name, liveQueryCode, 150000);
@@ -243,8 +244,10 @@ if (consolePod) {
         liveQuery.stdout.includes("lightspeed_read_only") &&
         liveQuery.stdout.includes("openshift-lightspeed") &&
         liveQuery.stdout.includes("\"brain\":\"ok\"") &&
-        liveQuery.stdout.includes("openshift:clusterversion:version"),
-      "console plugin forwards user token, CAS collects OpenShift evidence, and Lightspeed answers",
+        liveQuery.stdout.includes("openshift:clusterversion:version") &&
+        liveQuery.stdout.includes("metric:") &&
+        liveQuery.stdout.includes("runbook:"),
+      "console plugin forwards user token, CAS collects OpenShift/metric/runbook evidence, and Lightspeed answers",
       liveQuery.stderr || liveQuery.stdout
     );
   }

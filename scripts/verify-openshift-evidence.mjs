@@ -5,6 +5,8 @@ import {
   collectOpenShiftEvidence,
   enrichInputWithOpenShiftEvidence
 } from "../apps/gateway/src/openshiftEvidence.mjs";
+import { collectMetricEvidence } from "../apps/gateway/src/metricAdapter.mjs";
+import { collectRunbookEvidence } from "../apps/gateway/src/runbookAdapter.mjs";
 
 const checks = [];
 
@@ -32,6 +34,17 @@ const config = {
   timeoutMs: 1000,
   tlsInsecure: true,
   logTailLines: 12
+};
+const metricConfig = {
+  provider: "thanos",
+  thanosUrl: "https://thanos.example",
+  timeoutMs: 1000,
+  tlsInsecure: true
+};
+const runbookConfig = {
+  provider: "jsonl",
+  corpusPath: "apps/gateway/runbooks/komsco-ocp-mini.jsonl",
+  topK: 3
 };
 
 const transport = async (url) => {
@@ -161,6 +174,33 @@ const transport = async (url) => {
   };
 };
 
+const metricTransport = async (url) => {
+  const target = new URL(url);
+  const query = target.searchParams.get("query") ?? "";
+  if (query.includes("kube_pod_container_status_restarts_total")) {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        status: "success",
+        data: {
+          resultType: "vector",
+          result: [{ metric: { pod: "api-7c8d9" }, value: [Date.now() / 1000, "2"] }]
+        }
+      })
+    };
+  }
+  return {
+    statusCode: 200,
+    body: JSON.stringify({
+      status: "success",
+      data: {
+        resultType: "vector",
+        result: []
+      }
+    })
+  };
+};
+
 const clusterVersion = await collectOpenShiftEvidence(
   {
     question: "ClusterVersion 상태 요약",
@@ -194,7 +234,10 @@ const pod = await collectOpenShiftEvidence(
   {
     authorization: "Bearer test-token",
     config,
-    transport
+    transport,
+    metricConfig,
+    runbookConfig,
+    metricTransport
   }
 );
 
@@ -206,9 +249,18 @@ expect(
   pod.evidence.some((item) => item.id === "openshift:previous-log:default:api-7c8d9:api"),
   "previous pod log evidence is collected"
 );
+expect("evidence:metric", pod.evidence.some((item) => item.type === "metric"), "metric evidence is collected through Thanos adapter");
+expect("evidence:runbook", pod.evidence.some((item) => item.type === "runbook"), "runbook evidence is collected through JSONL adapter");
+expect(
+  "evidence:status",
+  pod.evidence_status?.some((item) => item.type === "metric" && item.status === "collected") &&
+    pod.evidence_status?.some((item) => item.type === "runbook" && item.status === "collected"),
+  "evidence_status marks metric and runbook as collected"
+);
 
 const context = buildOpenShiftEvidenceContext(pod);
 expect("evidence:context", context.includes("Collected read-only OpenShift evidence"), "evidence context is generated for the brain prompt");
+expect("evidence:context-runbook", context.includes("runbook:"), "brain prompt includes runbook evidence context");
 
 const missing = await collectOpenShiftEvidence(
   {
@@ -234,10 +286,56 @@ const enriched = await enrichInputWithOpenShiftEvidence(
   {
     authorization: "Bearer test-token",
     config,
-    transport
+    transport,
+    runbookConfig,
+    metricConfig,
+    metricTransport
   }
 );
 expect("evidence:enriched-input", enriched.cas_evidence_context.includes("openshift:clusterversion:version"), "input is enriched with evidence context");
+
+const runbook = await collectRunbookEvidence(
+  {
+    question: "OOMKilled Pod memory limit RCA",
+    resourceRef: { kind: "Pod", name: "api-7c8d9" },
+    scope: { namespaces: ["default"] }
+  },
+  { config: runbookConfig }
+);
+expect("runbook:hit", runbook.evidence.length >= 1, "runbook adapter returns at least one curated JSONL hit");
+expect(
+  "runbook:shape",
+  runbook.evidence.every((item) => item.id.startsWith("runbook:") && item.type === "runbook" && item.source),
+  "runbook evidence uses the v0.1.1 shape"
+);
+
+const metric = await collectMetricEvidence(
+  {
+    resourceRef: { kind: "Pod", name: "api-7c8d9" },
+    scope: { namespaces: ["default"] }
+  },
+  {
+    authorization: "Bearer test-token",
+    config: metricConfig,
+    transport: metricTransport
+  }
+);
+expect("metric:evidence", metric.evidence.length >= 3, "metric adapter emits Pod restart, working set, and limit evidence");
+expect("metric:no-series", metric.evidence.some((item) => item.summary.includes("no-series")), "metric no-series is recorded as evidence");
+const metricFailure = await collectMetricEvidence(
+  {
+    resourceRef: { kind: "Pod", name: "api-7c8d9" },
+    scope: { namespaces: ["default"] }
+  },
+  {
+    authorization: "Bearer test-token",
+    config: metricConfig,
+    transport: async () => {
+      throw new Error("network denied");
+    }
+  }
+);
+expect("metric:failure-missing", metricFailure.missing.some((item) => item.type === "metric" && item.reason.includes("network denied")), "metric adapter failures are recorded in missing evidence");
 
 const overview = await collectOpenShiftOverview(
   {
@@ -246,7 +344,10 @@ const overview = await collectOpenShiftOverview(
   {
     authorization: "Bearer test-token",
     config,
-    transport
+    transport,
+    metricConfig,
+    runbookConfig,
+    metricTransport
   }
 );
 expect("overview:mode", overview.mode === "overview_read_only", "overview contract mode is read-only");
@@ -255,7 +356,9 @@ expect("overview:signals", overview.signals?.warning_events === 2 && overview.si
 expect("overview:risk-workloads", overview.risk_workloads?.length >= 2, "overview includes risky workloads");
 expect("overview:timeline", overview.evidence_timeline?.some((item) => item.summary.includes("FailedScheduling")), "overview includes evidence timeline");
 expect("overview:actions", overview.actions?.some((item) => item.type === "cas_query"), "overview includes a Run RCA action");
-expect("overview:missing", overview.missing?.some((item) => item.type === "metric"), "overview marks unavailable metric adapter");
+expect("overview:metric-group", overview.evidence_groups?.metric?.length >= 1, "overview includes metric evidence group");
+expect("overview:runbook-group", overview.evidence_groups?.runbook?.length >= 1, "overview includes runbook evidence group");
+expect("overview:evidence-status", overview.evidence_status?.some((item) => item.type === "runbook" && item.status === "collected"), "overview exposes evidence_status");
 expect(
   "overview:refs-resolve",
   overview.rca_candidate?.evidence_refs?.every((ref) => {

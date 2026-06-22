@@ -51,6 +51,20 @@ spec:
               value: "true"
             - name: CAS_EVIDENCE_TIMEOUT_MS
               value: "8000"
+            - name: CAS_RUNBOOK_PROVIDER
+              value: jsonl
+            - name: CAS_RUNBOOK_CORPUS_PATH
+              value: /opt/app-root/src/apps/gateway/runbooks/komsco-ocp-mini.jsonl
+            - name: CAS_RUNBOOK_TOP_K
+              value: "3"
+            - name: CAS_METRIC_PROVIDER
+              value: thanos
+            - name: CAS_THANOS_URL
+              value: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091
+            - name: CAS_METRIC_TIMEOUT_MS
+              value: "8000"
+            - name: CAS_METRIC_TLS_INSECURE
+              value: "true"
           ports:
             - name: https
               containerPort: 9443

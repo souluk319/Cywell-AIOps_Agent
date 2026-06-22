@@ -4,6 +4,7 @@ import {
   assertReadOnlyToolPlan,
   createAnalyzeRequest,
   createEvidenceBundle,
+  createEvidenceStatus,
   createOverviewResult,
   createRcaResult,
   createToolPlan
@@ -46,11 +47,13 @@ requireField("request:scope", request, "scope.namespaces");
 requireField("request:mode", request, "mode");
 requireField("toolplan:type", toolPlan, "task_type");
 requireField("evidence:run", evidence, "run_id");
+requireField("evidence:status", evidence, "evidence_status");
 requireField("rca:cause", rca, "cause_candidates");
 requireField("overview:mode", overview, "mode");
 requireField("overview:health", overview, "health.score");
 requireField("overview:signals", overview, "signals.warning_events");
 requireField("overview:actions", overview, "actions");
+requireField("overview:evidence-status", overview, "evidence_status");
 
 const guard = assertReadOnlyToolPlan(toolPlan);
 if (guard.ok) {
@@ -68,6 +71,23 @@ if (!unsafeGuard.ok) {
   pass("guard:unsafe-blocked", unsafeGuard.violations.join("; "));
 } else {
   fail("guard:unsafe-blocked", "unsafe delete tool plan was not blocked");
+}
+
+const status = createEvidenceStatus({
+  evidence: [
+    { type: "pod", id: "openshift:pod:default:api", summary: "pod status", source: "api" },
+    { type: "metric", id: "metric:pod_restart:default:Pod:api", summary: "no-series", source: "thanos.api.v1.query" },
+    { type: "runbook", id: "runbook:komsco_ocp_rca:pod-oomkilled", summary: "runbook", source: "playbookstudio" }
+  ],
+  missing: []
+});
+for (const type of ["openshift", "metric", "runbook"]) {
+  const item = status.find((entry) => entry.type === type);
+  if (item?.status === "collected" && item.count >= 1) {
+    pass(`evidence-status:${type}`, `${type} collected count=${item.count}`);
+  } else {
+    fail(`evidence-status:${type}`, `${type} status missing or not collected`);
+  }
 }
 
 const failures = checks.filter((check) => check.status === "FAIL");

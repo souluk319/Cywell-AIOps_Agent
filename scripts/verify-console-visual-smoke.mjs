@@ -85,12 +85,12 @@ ${styles}
 </div>
 <div class="cas-launcher-root" data-test="cas-launcher-root">
 <section aria-label="Cywell AI Sentinel" class="cas-panel" data-test="cas-launcher-panel" role="dialog">
-  <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>KOMSCO AI AGENT</span></div><div class="cas-header-tools"><nav aria-label="AI Sentinel 화면" class="cas-view-switcher" data-test="cas-view-switcher"><button aria-label="채팅" class="cas-view-button" data-active="true" type="button">C</button><button aria-label="관제" class="cas-view-button" type="button">O</button><button aria-label="증적" class="cas-view-button" type="button">E</button><button aria-label="조치" class="cas-view-button" type="button">A</button></nav><button aria-label="언어: 한국어. 영어로 전환" class="cas-view-button cas-language-toggle" data-language="ko" data-test="cas-language-toggle" type="button">${globe}<span>한</span></button><button aria-label="AI Sentinel 닫기" class="cas-close" type="button">x</button></div></header>
+  <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>KOMSCO AI AGENT</span></div><div class="cas-header-tools"><nav aria-label="AI Sentinel 화면" class="cas-view-switcher" data-test="cas-view-switcher"><button aria-label="채팅" class="cas-view-button" data-active="true" type="button">C</button><button aria-label="상황" class="cas-view-button" type="button">S</button><button aria-label="근거" class="cas-view-button" type="button">G</button><button aria-label="다음 행동" class="cas-view-button" type="button">N</button></nav><button aria-label="언어: 한국어. 영어로 전환" class="cas-view-button cas-language-toggle" data-language="ko" data-test="cas-language-toggle" type="button">${globe}<span>한</span></button><button aria-label="AI Sentinel 닫기" class="cas-close" type="button">x</button></div></header>
   <div class="cas-panel-body">
     <div class="cas-status-row"><span class="cas-badge" data-state="ready" data-test="cas-brain-status">ready · openshift-lightspeed</span><span class="cas-badge" data-test="cas-provider-badge">UserToken proxy</span><span class="cas-conversation" data-test="cas-conversation-id">conversation smoke-test</span></div>
     <div class="cas-meta">OpenShift Lightspeed readiness 확인됨</div>
     <div class="cas-chat-surface" data-test="cas-chat-default-view">
-    <div class="cas-chat-topline"><span class="cas-badge" data-state="ready">상태 점수 82 · medium</span><button class="cas-link-button" type="button">관제 열기</button></div>
+    <div class="cas-chat-topline"><span class="cas-badge" data-state="ready">상태 점수 82 · medium</span><button class="cas-link-button" type="button">상황 열기</button></div>
     <div class="cas-chat-thread" data-test="cas-chat-thread">
       <article class="cas-message" data-role="assistant">
         <strong class="cas-message-role">AI Sentinel</strong>
@@ -102,7 +102,7 @@ ${styles}
           <ol class="cas-md-list"><li><code class="cas-md-inline-code">oc get clusterversion version -o yaml</code></li><li>Degraded 조건과 availableUpdates 확인</li></ol>
         </div>
         <div class="cas-result-meta"><span class="cas-meta">Lightspeed real answer · openshift-lightspeed</span></div>
-        <details class="cas-result-details" data-test="cas-evidence-panel"><summary>근거 3개 · RCA 후보 1개 · 부족한 증적 0개</summary><div class="cas-result-details-body"><div class="cas-evidence-list"><div class="cas-evidence-item"><strong>openshift:clusterversion:version</strong><div>ClusterVersion desired=4.20.5 conditions=[Available=True, Progressing=False]</div><span>apis/config.openshift.io/v1/clusterversions/version</span></div></div></div></details>
+        <details class="cas-result-details" data-test="cas-evidence-panel"><summary>근거 5개 · RCA 후보 1개 · 부족한 증적 0개</summary><div class="cas-result-details-body"><div class="cas-evidence-list"><div class="cas-evidence-group"><div class="cas-panel-heading"><strong>OpenShift 상태/이벤트</strong><span class="cas-meta">1</span></div><div class="cas-meta">왜 보는가: OpenShift 상태, 이벤트, 로그는 RCA의 1차 사실 근거입니다.</div><div class="cas-evidence-item"><strong>openshift:clusterversion:version</strong><div>ClusterVersion desired=4.20.5 conditions=[Available=True, Progressing=False]</div><span>apis/config.openshift.io/v1/clusterversions/version</span></div></div><div class="cas-evidence-group"><div class="cas-panel-heading"><strong>Metric 관측값</strong><span class="cas-meta">1</span></div><div class="cas-evidence-item"><strong>metric:namespace_restart_increase_by_pod:default:Namespace:default</strong><div>namespace_restart_increase_by_pod returned no-series</div><span>thanos.api.v1.query</span></div></div></div></div></details>
       </article>
     </div>
     <form class="cas-compose">

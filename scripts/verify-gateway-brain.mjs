@@ -51,6 +51,7 @@ const payload = buildLightspeedPayload({
 expect("brain:payload-mode", payload.mode === "ask", "Lightspeed payload uses ask mode by default");
 expect("brain:payload-context", payload.query.includes("read-only OpenShift operations assistant"), "payload carries CAS read-only context");
 expect("brain:payload-evidence", payload.query.includes("openshift:clusterversion:version"), "payload carries CAS OpenShift evidence context");
+expect("brain:payload-cas-context", payload.query.includes("CAS evidence context"), "payload separates CAS evidence context from the user question");
 expect("brain:payload-direct-answer", payload.query.includes("Answer directly first"), "payload asks Lightspeed to answer directly first");
 
 const run = await createLightspeedBackedRun(
@@ -66,12 +67,24 @@ const run = await createLightspeedBackedRun(
           type: "clusterversion",
           summary: "ClusterVersion desired=4.20.5 conditions=[Available=True, Progressing=False, Degraded=False]",
           source: "apis/config.openshift.io/v1/clusterversions/version"
+        },
+        {
+          id: "metric:namespace_restart_increase_by_pod:default:Namespace:default",
+          type: "metric",
+          summary: "namespace_restart_increase_by_pod for default:Namespace:default returned no-series",
+          source: "thanos.api.v1.query"
+        },
+        {
+          id: "runbook:komsco_ocp_cluster:clusterversion-operator-conditions",
+          type: "runbook",
+          summary: "KOMSCO OpenShift Cluster Runbook > Cluster > Version > Operator conditions",
+          source: "/docs/cas/runbooks/komsco-ocp-mini#clusterversion-operator-conditions"
         }
       ],
       missing: []
     },
     cas_evidence_context:
-      "Collected read-only OpenShift evidence:\n- openshift:clusterversion:version [clusterversion]: ClusterVersion desired=4.20.5"
+      "Collected read-only OpenShift evidence:\n- openshift:clusterversion:version [clusterversion]: ClusterVersion desired=4.20.5\n- metric:namespace_restart_increase_by_pod:default:Namespace:default [metric]: no-series\n- runbook:komsco_ocp_cluster:clusterversion-operator-conditions [runbook]: ClusterVersion conditions"
   },
   {
     authorization: "Bearer test-token",
@@ -101,6 +114,17 @@ expect(
   "brain:run-openshift-evidence",
   run.evidence_bundle?.evidence?.some((item) => item.id === "openshift:clusterversion:version"),
   "OpenShift evidence is preserved in the CAS result"
+);
+expect(
+  "brain:run-metric-runbook-evidence",
+  run.evidence_bundle?.evidence?.some((item) => item.type === "metric") &&
+    run.evidence_bundle?.evidence?.some((item) => item.type === "runbook"),
+  "metric and runbook evidence are preserved in the CAS result"
+);
+expect(
+  "brain:run-evidence-status",
+  run.evidence_bundle?.evidence_status?.some((item) => item.type === "metric" && item.status === "collected"),
+  "evidence_status is attached to the Lightspeed-backed run"
 );
 
 const fallback = await createLightspeedBackedRun(

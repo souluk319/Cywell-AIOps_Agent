@@ -128,8 +128,26 @@ expectText(
 expectText(
   "console-chat:korean-view-label",
   launcherSource,
-  "관제",
-  "launcher includes Korean labels for header view functions"
+  "상황",
+  "launcher includes Korean Situation label for header view functions"
+);
+expectText(
+  "console-chat:korean-grounds-label",
+  launcherSource,
+  "근거",
+  "launcher includes Korean Grounds label for header view functions"
+);
+expectText(
+  "console-chat:korean-next-actions-label",
+  launcherSource,
+  "다음 행동",
+  "launcher includes Korean Next Actions label for header view functions"
+);
+rejectText(
+  "console-chat:no-old-control-label",
+  launcherSource,
+  "openCockpit: \"관제 열기\"",
+  "launcher no longer uses the old cockpit-open label"
 );
 expectText(
   "console-chat:locale-map",
@@ -310,6 +328,30 @@ expectText(
   "launcher renders an evidence timeline"
 );
 expectText(
+  "console-cockpit:evidence-status",
+  launcherSource,
+  "data-test=\"cas-evidence-status\"",
+  "launcher renders evidence collection status"
+);
+expectText(
+  "console-cockpit:evidence-groups",
+  launcherSource,
+  "data-test=\"cas-evidence-groups\"",
+  "launcher renders OpenShift/Metric/Runbook evidence groups"
+);
+expectText(
+  "console-cockpit:metric-provider",
+  launcherSource,
+  "data-test=\"cas-metric-provider\"",
+  "launcher shows Metric provider state in the Situation tab"
+);
+expectText(
+  "console-chat:tool-plan-panel",
+  launcherSource,
+  "data-test=\"cas-tool-plan-panel\"",
+  "launcher keeps the read-only Tool Plan in the folded answer panel"
+);
+expectText(
   "console-cockpit:action-queue",
   launcherSource,
   "data-test=\"cas-action-queue\"",
@@ -470,6 +512,18 @@ expectText(
   launcherBundle,
   "cas-evidence-timeline",
   "built launcher bundle contains evidence timeline surface"
+);
+expectText(
+  "console-cockpit:bundle-evidence-status",
+  launcherBundle,
+  "cas-evidence-status",
+  "built launcher bundle contains evidence status surface"
+);
+expectText(
+  "console-cockpit:bundle-evidence-groups",
+  launcherBundle,
+  "cas-evidence-groups",
+  "built launcher bundle contains evidence groups surface"
 );
 
 const failures = checks.filter((check) => check.status === "FAIL");

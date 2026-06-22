@@ -1,6 +1,6 @@
 {
   "name": "@cywell-ai-sentinel/console-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
   },
   "consolePlugin": {
     "name": "cywell-ai-sentinel",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "displayName": "AI Sentinel",
     "description": "Evidence-based AIOps Agent for OpenShift operations.",
     "exposedModules": {
@@ -21,6 +21,6 @@
     }
   },
   "dependencies": {
-    "@cywell-ai-sentinel/contracts": "0.1.0"
+    "@cywell-ai-sentinel/contracts": "0.1.1"
   }
 }

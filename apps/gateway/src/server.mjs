@@ -5,6 +5,8 @@ import { PRODUCT } from "../../../packages/contracts/src/index.js";
 import { createMockOomKilledRun, streamMockRun } from "./mockRca.mjs";
 import { checkLightspeedReadiness, createLightspeedBackedRun, getBrainConfig } from "./lightspeedBrain.mjs";
 import { collectOpenShiftOverview, enrichInputWithOpenShiftEvidence, getEvidenceConfig } from "./openshiftEvidence.mjs";
+import { getMetricConfig } from "./metricAdapter.mjs";
+import { getRunbookConfig } from "./runbookAdapter.mjs";
 
 const port = Number(process.env.PORT ?? 8080);
 const host = process.env.HOST ?? "0.0.0.0";
@@ -12,6 +14,8 @@ const tlsCertFile = process.env.CAS_TLS_CERT_FILE;
 const tlsKeyFile = process.env.CAS_TLS_KEY_FILE;
 const brainConfig = getBrainConfig();
 const evidenceConfig = getEvidenceConfig();
+const metricConfig = getMetricConfig();
+const runbookConfig = getRunbookConfig();
 
 function loadTlsOptions() {
   if (!tlsCertFile || !tlsKeyFile) return undefined;
@@ -66,7 +70,9 @@ const requestHandler = async (request, response) => {
         product: PRODUCT.officialName,
         mode: brainConfig.provider === "openshift-lightspeed" ? "lightspeed_read_only" : "mock_read_only",
         brain_provider: brainConfig.provider,
-        evidence_provider: evidenceConfig.provider
+        evidence_provider: evidenceConfig.provider,
+        metric_provider: metricConfig.provider,
+        runbook_provider: runbookConfig.provider
       });
       return;
     }
@@ -96,7 +102,9 @@ const requestHandler = async (request, response) => {
         },
         {
           authorization: request.headers.authorization,
-          config: evidenceConfig
+          config: evidenceConfig,
+          metricConfig,
+          runbookConfig
         }
       );
       sendJson(response, 200, overview);
@@ -110,7 +118,9 @@ const requestHandler = async (request, response) => {
           ? body
           : await enrichInputWithOpenShiftEvidence(body, {
               authorization: request.headers.authorization,
-              config: evidenceConfig
+              config: evidenceConfig,
+              metricConfig,
+              runbookConfig
             });
       const run =
         brainConfig.provider === "openshift-lightspeed"

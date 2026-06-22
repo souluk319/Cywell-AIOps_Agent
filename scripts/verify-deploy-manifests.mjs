@@ -51,6 +51,11 @@ for (const file of files) {
       } else {
         fail("networkpolicy:lightspeed-egress", "egress to OpenShift Lightspeed 8443 missing");
       }
+      if (text.includes("openshift-monitoring") && text.includes("thanos-query") && text.includes("port: 9091")) {
+        pass("networkpolicy:thanos-egress", "egress to OpenShift Monitoring Thanos 9091 present");
+      } else {
+        fail("networkpolicy:thanos-egress", "egress to OpenShift Monitoring Thanos 9091 missing");
+      }
       if (text.includes("openshift-dns") && text.includes("protocol: UDP") && text.includes("port: 53") && text.includes("port: 5353")) {
         pass("networkpolicy:dns-egress", "egress to OpenShift DNS 53/5353 present");
       } else {
@@ -89,6 +94,21 @@ for (const file of files) {
         pass("gateway:openshift-api-url", "gateway points at in-cluster Kubernetes API");
       } else {
         fail("gateway:openshift-api-url", "gateway Kubernetes API URL missing");
+      }
+      if (text.includes("CAS_RUNBOOK_PROVIDER") && text.includes("jsonl") && text.includes("komsco-ocp-mini.jsonl")) {
+        pass("gateway:runbook-jsonl", "gateway includes curated JSONL runbook adapter config");
+      } else {
+        fail("gateway:runbook-jsonl", "gateway curated JSONL runbook config missing");
+      }
+      if (text.includes("CAS_METRIC_PROVIDER") && text.includes("thanos") && text.includes("thanos-querier.openshift-monitoring")) {
+        pass("gateway:metric-thanos", "gateway includes Thanos metric adapter config");
+      } else {
+        fail("gateway:metric-thanos", "gateway Thanos metric config missing");
+      }
+      if (text.includes("automountServiceAccountToken: false")) {
+        pass("gateway:no-serviceaccount-token", "gateway keeps ServiceAccount token automount disabled");
+      } else {
+        fail("gateway:no-serviceaccount-token", "gateway must keep ServiceAccount token automount disabled");
       }
     }
     if (file.includes("50-consoleplugin")) {
