@@ -1,6 +1,7 @@
 import * as React from "react";
 
 const API_BASE = "/api/proxy/plugin/cywell-ai-sentinel/cas-api";
+const CSRF_COOKIE_NAME = "csrf-token";
 
 type CauseCandidate = {
   cause: string;
@@ -115,6 +116,30 @@ type OverviewResult = {
 };
 
 const initialQuestion = "ClusterVersion 상태를 한 문장으로 요약해줘.";
+
+function getCookieValue(name: string) {
+  if (typeof document === "undefined") return undefined;
+  const match = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`));
+  if (!match) return undefined;
+  return decodeURIComponent(match.slice(name.length + 1));
+}
+
+function gatewayHeaders(headers: Record<string, string> = {}) {
+  const csrfToken = getCookieValue(CSRF_COOKIE_NAME);
+  return {
+    ...headers,
+    ...(csrfToken ? { "X-CSRFToken": csrfToken } : {})
+  };
+}
+
+async function gatewayErrorMessage(response: Response) {
+  const text = await response.text().catch(() => "");
+  const detail = text.trim().replace(/\s+/g, " ").slice(0, 180);
+  return `CAS Gateway HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
+}
 
 const styles = `
 .cas-launcher-root {
@@ -1050,7 +1075,8 @@ export function CASLauncher() {
     setBrainStatus((current) => ({ ...current, state: "checking", detail: "연결 확인 중" }));
     try {
       const response = await fetch(`${API_BASE}/api/aiops/brainz`, {
-        headers: { accept: "application/json" }
+        credentials: "same-origin",
+        headers: gatewayHeaders({ accept: "application/json" })
       });
       const body = await response.json();
       const provider = body?.brain?.provider ?? "openshift-lightspeed";
@@ -1084,7 +1110,8 @@ export function CASLauncher() {
     setOverviewStatus("loading");
     try {
       const response = await fetch(`${API_BASE}/api/aiops/overview?namespace=${encodeURIComponent(namespace || "default")}`, {
-        headers: { accept: "application/json" }
+        credentials: "same-origin",
+        headers: gatewayHeaders({ accept: "application/json" })
       });
       const body = (await response.json()) as OverviewResult;
       setOverview(body);
@@ -1160,11 +1187,12 @@ export function CASLauncher() {
       try {
         const response = await fetch(`${API_BASE}/api/aiops/query`, {
           method: "POST",
+          credentials: "same-origin",
           signal: abortController.signal,
-          headers: {
+          headers: gatewayHeaders({
             "content-type": "application/json",
             accept: "application/json"
-          },
+          }),
           body: JSON.stringify({
             question: submittedQuestion,
             scope: {
@@ -1183,7 +1211,7 @@ export function CASLauncher() {
         });
 
         if (!response.ok) {
-          throw new Error(`CAS Gateway HTTP ${response.status}`);
+          throw new Error(await gatewayErrorMessage(response));
         }
 
         const body = (await response.json()) as RCAResult;

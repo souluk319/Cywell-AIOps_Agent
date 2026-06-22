@@ -28,6 +28,7 @@ function rejectText(id, text, needle, passDetail, failDetail = passDetail) {
 
 const launcherSource = await readFile("apps/console-plugin/src/plugin/useCASLauncher.tsx", "utf8");
 const providerSource = await readFile("apps/console-plugin/src/plugin/CASContextProvider.tsx", "utf8");
+const staticAppSource = await readFile("apps/console-plugin/src/static/app.js", "utf8");
 const manifest = await readFile("apps/console-plugin/dist/plugin-manifest.json", "utf8");
 const launcherBundle = await readFile("apps/console-plugin/dist/exposed-useCASLauncher-chunk.js", "utf8");
 const providerBundle = await readFile("apps/console-plugin/dist/exposed-CASContextProvider-chunk.js", "utf8");
@@ -115,6 +116,36 @@ expectText(
   launcherSource,
   "UserToken proxy",
   "launcher marks UserToken proxy integration"
+);
+expectText(
+  "console-proxy:csrf-cookie",
+  launcherSource,
+  "csrf-token",
+  "launcher reads OpenShift Console CSRF cookie for proxied POST requests"
+);
+expectText(
+  "console-proxy:csrf-header",
+  launcherSource,
+  "X-CSRFToken",
+  "launcher sends the OpenShift Console CSRF header for Gateway POST requests"
+);
+expectText(
+  "console-proxy:same-origin-credentials",
+  launcherSource,
+  "credentials: \"same-origin\"",
+  "launcher explicitly sends same-origin console cookies through the plugin proxy"
+);
+expectText(
+  "console-proxy:error-detail",
+  launcherSource,
+  "gatewayErrorMessage",
+  "launcher preserves proxy error detail for actionable diagnostics"
+);
+expectText(
+  "console-static:csrf-header",
+  staticAppSource,
+  "X-CSRFToken",
+  "static fallback app also sends the OpenShift Console CSRF header"
 );
 expectText(
   "console-cockpit:health-strip",

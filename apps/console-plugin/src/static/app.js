@@ -7,6 +7,30 @@ const answerEl = document.querySelector("#answer");
 const runIdEl = document.querySelector("#run-id");
 const causeCardsEl = document.querySelector("#cause-cards");
 const evidenceListEl = document.querySelector("#evidence-list");
+const CSRF_COOKIE_NAME = "csrf-token";
+
+function getCookieValue(name) {
+  const match = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`));
+  if (!match) return undefined;
+  return decodeURIComponent(match.slice(name.length + 1));
+}
+
+function gatewayHeaders(headers = {}) {
+  const csrfToken = getCookieValue(CSRF_COOKIE_NAME);
+  return {
+    ...headers,
+    ...(csrfToken ? { "X-CSRFToken": csrfToken } : {})
+  };
+}
+
+async function gatewayErrorMessage(response) {
+  const text = await response.text().catch(() => "");
+  const detail = text.trim().replace(/\s+/g, " ").slice(0, 180);
+  return `HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
+}
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -66,7 +90,8 @@ form.addEventListener("submit", async (event) => {
   try {
     const response = await fetch(`${apiBase}/api/aiops/query`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      headers: gatewayHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({
         question,
         scope: {
@@ -84,7 +109,7 @@ form.addEventListener("submit", async (event) => {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(await gatewayErrorMessage(response));
     }
 
     const run = await response.json();
@@ -95,4 +120,3 @@ form.addEventListener("submit", async (event) => {
     answerEl.textContent = error instanceof Error ? error.message : "분석 요청에 실패했습니다.";
   }
 });
-
