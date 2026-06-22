@@ -2,7 +2,6 @@
 import { readFile } from "node:fs/promises";
 import { assertReadOnlyToolPlan } from "../packages/contracts/src/index.js";
 import { buildLightspeedPayload, createLightspeedBackedRun } from "../apps/gateway/src/lightspeedBrain.mjs";
-import { enrichInputWithOpenShiftEvidence } from "../apps/gateway/src/openshiftEvidence.mjs";
 import { enrichInputWithSimulation, listSimulationScenarios } from "../apps/gateway/src/simulationLab.mjs";
 
 const scenarioFile = "apps/gateway/simulations/komsco-ops-scenarios.json";
@@ -240,31 +239,13 @@ async function runScenario(scenario) {
       name: scenario.target.name
     },
     mode: "read_only",
-    locale: "ko-KR"
+    locale: "ko-KR",
+    simulation_id: scenario.id
   };
 
-  const enriched = await enrichInputWithOpenShiftEvidence(input, {
+  const enriched = await enrichInputWithSimulation(input, {
     authorization: "Bearer synthetic-user-token",
-    config: {
-      provider: "openshift-api",
-      apiUrl: "https://openshift.example",
-      timeoutMs: 1000,
-      tlsInsecure: true,
-      logTailLines: 40
-    },
-    metricConfig: {
-      provider: "thanos",
-      thanosUrl: "https://thanos.example",
-      timeoutMs: 1000,
-      tlsInsecure: true
-    },
-    runbookConfig: {
-      provider: "jsonl",
-      corpusPath,
-      topK: 5
-    },
-    transport: openshiftTransportFor(scenario),
-    metricTransport: metricTransportFor(scenario)
+    corpusPath
   });
 
   const payload = buildLightspeedPayload(enriched);
@@ -291,8 +272,13 @@ async function runScenario(scenario) {
     const normalizedTerm = lower(term);
     return !payloadQuery.includes(normalizedTerm) && !context.includes(normalizedTerm);
   });
+  const learningSignals = [scenario.learning?.objective, ...(scenario.learning?.checkpoints ?? []).slice(0, 2)]
+    .filter(Boolean)
+    .map(lower);
+  const missingLearningSignals = learningSignals.filter((term) => !payloadQuery.includes(term) && !context.includes(term));
 
   expect(`${scenario.id}:openshift-evidence`, evidence.some((item) => item.type === "pod") && evidence.some((item) => item.type === "event"), "pod and event evidence collected");
+  expect(`${scenario.id}:simulation-learning-evidence`, evidence.some((item) => item.id === `simulation:learning:${scenario.id}`), "learning objective is attached as simulation evidence");
   expect(`${scenario.id}:metric-evidence`, metricEvidence.length >= 3, "pod restart, memory working set, and memory limit metrics collected or recorded as no-series");
   expect(`${scenario.id}:runbook-hit`, expectedHitCount >= 1, `customer-specific runbook hit found: ${runbookIds.join(", ")}`);
   expect(
@@ -300,6 +286,12 @@ async function runScenario(scenario) {
     missingTerms.length === 0,
     `customer terms present in brain prompt: ${scenario.expectedTerms.join(", ")}`,
     `missing customer terms in brain prompt: ${missingTerms.join(", ")}`
+  );
+  expect(
+    `${scenario.id}:learning-context`,
+    missingLearningSignals.length === 0,
+    "learning objective and checkpoints are present in brain prompt",
+    `missing learning signals in brain prompt: ${missingLearningSignals.join(", ")}`
   );
   expect(`${scenario.id}:brain-run`, run.mode === "lightspeed_read_only" && run.audit?.answer_provider === "openshift-lightspeed", "Lightspeed-backed CAS run created");
   expect(`${scenario.id}:guardrail`, guard.ok === true, "tool plan remains read-only");
@@ -317,11 +309,28 @@ async function runScenario(scenario) {
 
 const scenarioDocument = JSON.parse(await readFile(scenarioFile, "utf8"));
 expect("simulation:scenario-schema", scenarioDocument.schema === "cas_ops_simulation_v1", "scenario document schema is valid");
-expect("simulation:scenario-count", scenarioDocument.scenarios?.length >= 4, "at least four synthetic operations scenarios are available");
+expect("simulation:scenario-count", scenarioDocument.scenarios?.length >= 8, "at least eight synthetic operations scenarios are available");
+expect(
+  "simulation:scenario-learning",
+  scenarioDocument.scenarios?.every(
+    (scenario) =>
+      scenario.category &&
+      scenario.learning?.objective &&
+      scenario.learning?.cycle?.length >= 4 &&
+      scenario.learning?.checkpoints?.length >= 3 &&
+      scenario.learning?.followUps?.length >= 3
+  ),
+  "each scenario carries a learning objective, cycle, checkpoints, and follow-up questions"
+);
 
 const catalog = listSimulationScenarios();
-expect("simulation:catalog-api", catalog.scenarios.length >= 4, "Gateway simulation catalog exposes scenarios");
+expect("simulation:catalog-api", catalog.scenarios.length >= 8, "Gateway simulation catalog exposes scenarios");
 expect("simulation:catalog-actions", catalog.scenarios.every((scenario) => scenario.remediations?.length >= 1), "each simulation scenario exposes at least one remediation action");
+expect(
+  "simulation:catalog-learning",
+  catalog.scenarios.every((scenario) => scenario.category && scenario.learning?.objective && scenario.learning?.cycle?.length >= 4),
+  "Gateway simulation catalog exposes learning metadata for the UI"
+);
 const resolved = await enrichInputWithSimulation(
   {
     simulation_id: "issuance-api-oom",

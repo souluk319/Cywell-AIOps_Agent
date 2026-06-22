@@ -6,7 +6,14 @@
       "id": "issuance-api-oom",
       "title": "issuance-api OOMKilled during report export",
       "summary": "발급 API가 report-export 처리 중 memory limit을 초과해 재시작된 상황입니다.",
+      "category": "workload-memory",
       "risk": "high",
+      "learning": {
+        "objective": "OOMKilled가 단순 재시작 문제가 아니라 previous log, memory working set, limit, known incident가 연결된 RCA라는 점을 익힙니다.",
+        "cycle": ["문제 감지", "증적 수집", "원인 후보", "회복 확인"],
+        "checkpoints": ["lastState.reason=OOMKilled", "working set > memory limit", "report-export previous log", "known incident hit"],
+        "followUps": ["OOMKilled 근거만 짧게 요약해줘.", "memory limit 변경 없이 확인할 명령만 알려줘.", "운영자 보고용 RCA 요약문으로 정리해줘."]
+      },
       "question": "komsco-prod namespace의 issuance-api pod가 OOMKilled로 재시작된 원인을 근거 중심으로 분석해줘.",
       "target": {
         "namespace": "komsco-prod",
@@ -52,6 +59,8 @@
           "label": "Memory baseline review simulation",
           "description": "운영자가 previous log와 메모리 지표를 확인한 뒤 report-export 경로의 memory baseline을 재산정했다고 가정합니다.",
           "question": "방금 memory baseline 검토 조치를 시뮬레이션했어. 현재 issuance-api 상태가 안정화됐는지 근거로 확인해줘.",
+          "expectedOutcome": "재시작 증가가 0으로 내려가고 memory working set이 limit 아래로 회복됩니다.",
+          "followUps": ["회복 후 남은 리스크만 알려줘.", "재발 방지 조치 후보를 정리해줘.", "RCA 리포트 형태로 마무리해줘."],
           "resolution": {
             "pod": {
               "phase": "Running",
@@ -80,7 +89,14 @@
       "id": "settlement-worker-pending",
       "title": "settlement-worker Pending during batch window",
       "summary": "야간 정산 batch window에서 settlement-worker가 quota/capacity 제약으로 Pending에 머무는 상황입니다.",
+      "category": "scheduling-capacity",
       "risk": "medium",
+      "learning": {
+        "objective": "Pending을 장애로만 보지 않고 quota, node capacity, batch window 정책을 분리해서 판단하는 흐름을 익힙니다.",
+        "cycle": ["Pending 확인", "FailedScheduling 해석", "정책/용량 분리", "재예약 확인"],
+        "checkpoints": ["FailedScheduling event", "ResourceQuota mention", "batch window policy", "no restart spike"],
+        "followUps": ["FailedScheduling 이벤트 의미를 쉽게 설명해줘.", "quota 문제와 node capacity 문제를 분리해줘.", "배치 담당자에게 전달할 문장으로 정리해줘."]
+      },
       "question": "komsco-batch namespace의 settlement-worker pod가 Pending 상태인데 배치 운영 관점에서 원인을 분석해줘.",
       "target": {
         "namespace": "komsco-batch",
@@ -120,6 +136,8 @@
           "label": "Batch window reschedule simulation",
           "description": "운영자가 배치 동시성 정책을 확인하고 정산 작업을 승인된 window 안에서 재예약했다고 가정합니다.",
           "question": "배치 작업 재예약 조치를 시뮬레이션했어. settlement-worker Pending 위험이 해소됐는지 확인해줘.",
+          "expectedOutcome": "Pending이 Running으로 바뀌고 Scheduled 이벤트가 나타납니다.",
+          "followUps": ["정책성 Pending인지 장애성 Pending인지 판단해줘.", "다음에 같은 일이 생기면 먼저 볼 항목을 알려줘.", "조치 전 승인 필요한 항목만 분리해줘."],
           "resolution": {
             "pod": {
               "phase": "Running",
@@ -149,7 +167,14 @@
       "id": "issuance-api-probe-timeout",
       "title": "issuance-api readiness failures from dependency timeout",
       "summary": "issuance-api readiness probe가 oracle-svc timeout과 함께 실패하는 상황입니다.",
+      "category": "dependency-health",
       "risk": "medium",
+      "learning": {
+        "objective": "Pod는 Running이어도 readiness가 실패하면 서비스 품질 장애가 될 수 있음을 이벤트와 로그로 연결해 봅니다.",
+        "cycle": ["Readiness 경고", "dependency log 연결", "서비스 영향 판단", "회복 확인"],
+        "checkpoints": ["Unhealthy event", "oracle-svc timeout log", "pod still Running", "dependency runbook hit"],
+        "followUps": ["readiness 실패가 왜 장애 신호인지 설명해줘.", "oracle-svc와 Pod 이벤트를 연결해서 보여줘.", "서비스 영향도를 판단하는 기준을 알려줘."]
+      },
       "question": "issuance-api의 readiness probe 실패와 oracle-svc timeout 로그를 연결해서 원인 후보를 알려줘.",
       "target": {
         "namespace": "komsco-prod",
@@ -189,6 +214,8 @@
           "label": "Dependency health check simulation",
           "description": "운영자가 oracle-svc endpoint와 readiness dependency check를 확인해 일시적 timeout이 해소됐다고 가정합니다.",
           "question": "oracle-svc dependency health check 조치를 시뮬레이션했어. readiness 실패가 사라졌는지 확인해줘.",
+          "expectedOutcome": "Readiness probe가 통과하고 dependency timeout 로그가 사라집니다.",
+          "followUps": ["남은 관찰 포인트만 알려줘.", "dependency 장애와 애플리케이션 장애를 구분해줘.", "비파괴 확인 명령만 정리해줘."],
           "resolution": {
             "pod": {
               "phase": "Running",
@@ -217,7 +244,14 @@
       "id": "registry-imagepull",
       "title": "ImagePullBackOff from restricted registry access",
       "summary": "보안 namespace의 audit-log-writer가 restricted registry pull secret 문제로 이미지를 당기지 못하는 상황입니다.",
+      "category": "image-registry",
       "risk": "high",
+      "learning": {
+        "objective": "ImagePullBackOff에서 이미지 태그, registry 접근, pull secret, service account를 순서대로 좁혀가는 법을 익힙니다.",
+        "cycle": ["Pull 실패 확인", "권한/태그 분기", "보안 정책 확인", "기동 확인"],
+        "checkpoints": ["ErrImagePull event", "unauthorized message", "pull secret policy", "audit workload severity"],
+        "followUps": ["ImagePullBackOff 원인 분기표로 정리해줘.", "pull secret 확인 명령만 알려줘.", "보안 namespace라서 조심할 점을 알려줘."]
+      },
       "question": "komsco-secure namespace의 audit-log-writer가 ImagePullBackOff 상태야. registry와 pull secret 관점에서 확인해줘.",
       "target": {
         "namespace": "komsco-secure",
@@ -263,6 +297,8 @@
           "label": "Pull secret rotation check simulation",
           "description": "운영자가 service account imagePullSecrets와 registry authorization 상태를 확인하고 승인된 secret rotation을 완료했다고 가정합니다.",
           "question": "pull secret rotation 확인 조치를 시뮬레이션했어. audit-log-writer 이미지 pull 문제가 해소됐는지 근거로 확인해줘.",
+          "expectedOutcome": "이미지 Pull 이벤트가 Normal로 바뀌고 audit-log-writer가 Running 상태가 됩니다.",
+          "followUps": ["secret 값을 노출하지 않고 확인할 방법을 알려줘.", "보안 감사 관점의 RCA 요약을 만들어줘.", "다음 재발 방지 후보를 알려줘."],
           "resolution": {
             "pod": {
               "phase": "Running",
@@ -284,6 +320,319 @@
               "pod_memory_limit": "536870912"
             },
             "previousLog": "INFO audit-log-writer container started after image pull simulation"
+          }
+        }
+      ]
+    }
+    ,
+    {
+      "id": "portal-crashloop-secret",
+      "title": "customer-portal CrashLoopBackOff from missing secret",
+      "summary": "배포 직후 customer-portal이 필수 Secret/env 값을 찾지 못해 CrashLoopBackOff에 빠진 상황입니다.",
+      "category": "config-secret",
+      "risk": "high",
+      "learning": {
+        "objective": "CrashLoopBackOff를 restart 숫자만 보지 않고 previous log, exit reason, Secret/ConfigMap 참조로 좁혀가는 흐름을 익힙니다.",
+        "cycle": ["CrashLoop 확인", "previous log 확인", "설정 누락 분기", "기동 확인"],
+        "checkpoints": ["CrashLoopBackOff waiting reason", "missing secret previous log", "restart increase", "config/secret runbook hit"],
+        "followUps": ["CrashLoopBackOff 원인 후보만 압축해줘.", "Secret 값을 노출하지 않고 확인할 명령을 알려줘.", "배포 이후 장애인지 판단해줘."]
+      },
+      "question": "komsco-prod namespace의 customer-portal이 CrashLoopBackOff야. Secret 또는 ConfigMap 누락 관점으로 RCA 해줘.",
+      "target": {
+        "namespace": "komsco-prod",
+        "kind": "Pod",
+        "name": "customer-portal-7d9d6f7dbb-r5k2p",
+        "container": "customer-portal"
+      },
+      "pod": {
+        "phase": "Running",
+        "nodeName": "worker-a",
+        "restartCount": 7,
+        "state": "waiting",
+        "waitingReason": "CrashLoopBackOff",
+        "lastReason": "Error"
+      },
+      "events": [
+        {
+          "type": "Warning",
+          "reason": "BackOff",
+          "message": "Back-off restarting failed container customer-portal",
+          "lastTimestamp": "2026-06-22T05:02:00Z"
+        }
+      ],
+      "previousLog": "FATAL required environment variable OIDC_CLIENT_SECRET is missing; config profile=prod; token=redacted",
+      "metrics": {
+        "pod_restart_increase": "7",
+        "pod_memory_working_set": "167772160",
+        "pod_memory_limit": "536870912"
+      },
+      "expectedRunbookIds": [
+        "runbook:komsco_ops_rca:crashloop-config-secret-missing",
+        "runbook:komsco_ops_security:security-redaction-rules"
+      ],
+      "expectedTerms": ["CrashLoopBackOff", "secret", "previous log"],
+      "remediations": [
+        {
+          "id": "simulate-secret-reference-check",
+          "label": "Secret reference check simulation",
+          "description": "운영자가 Secret 이름과 Deployment env 참조만 확인하고 값 자체는 노출하지 않았다고 가정합니다.",
+          "question": "Secret reference 확인 조치를 시뮬레이션했어. customer-portal CrashLoopBackOff가 해소됐는지 확인해줘.",
+          "expectedOutcome": "재시작 증가가 멈추고 pod state가 Running으로 회복됩니다.",
+          "followUps": ["민감정보 없이 RCA를 정리해줘.", "재발 방지 체크리스트를 만들어줘.", "배포 담당자에게 전달할 요약문을 만들어줘."],
+          "resolution": {
+            "pod": {
+              "phase": "Running",
+              "nodeName": "worker-a",
+              "restartCount": 7,
+              "state": "running"
+            },
+            "events": [
+              {
+                "type": "Normal",
+                "reason": "SimulationRecovered",
+                "message": "customer-portal started after approved secret reference correction simulation",
+                "lastTimestamp": "2026-06-22T05:16:00Z"
+              }
+            ],
+            "metrics": {
+              "pod_restart_increase": "0",
+              "pod_memory_working_set": "189792256",
+              "pod_memory_limit": "536870912"
+            },
+            "previousLog": "INFO customer-portal started with expected secret reference metadata; secret value redacted"
+          }
+        }
+      ]
+    },
+    {
+      "id": "route-5xx-backend-readiness",
+      "title": "issuance-api route 5xx from backend readiness loss",
+      "summary": "Route 5xx 증가가 router 자체가 아니라 backend Pod readiness 실패와 연결된 상황입니다.",
+      "category": "route-backend",
+      "risk": "high",
+      "learning": {
+        "objective": "Route 장애를 router 문제로 단정하지 않고 route, service endpoint, backend readiness를 순서대로 연결하는 법을 익힙니다.",
+        "cycle": ["Route 5xx 확인", "backend endpoint 확인", "readiness 연결", "트래픽 회복 확인"],
+        "checkpoints": ["route 5xx mention", "Unhealthy backend event", "endpoint/backend branch", "route runbook hit"],
+        "followUps": ["Route 5xx를 backend 관점에서 설명해줘.", "router 문제와 backend 문제를 구분해줘.", "서비스 영향도 문장으로 정리해줘."]
+      },
+      "question": "issuance-api Route 5xx가 늘었어. router 문제가 아니라 backend readiness 문제인지 근거로 확인해줘.",
+      "target": {
+        "namespace": "komsco-prod",
+        "kind": "Pod",
+        "name": "issuance-api-6f4476d6d9-5xx9p",
+        "container": "issuance-api"
+      },
+      "pod": {
+        "phase": "Running",
+        "nodeName": "worker-b",
+        "restartCount": 2,
+        "state": "running",
+        "lastReason": "Error"
+      },
+      "events": [
+        {
+          "type": "Warning",
+          "reason": "Unhealthy",
+          "message": "Readiness probe failed while route 5xx increased; backend endpoints intermittently unavailable",
+          "lastTimestamp": "2026-06-22T05:44:00Z"
+        }
+      ],
+      "previousLog": "WARN route backend latency high; readiness gate failed; haproxy 5xx correlated with backend endpoint removal",
+      "metrics": {
+        "pod_restart_increase": "2",
+        "pod_memory_working_set": "603979776",
+        "pod_memory_limit": "805306368"
+      },
+      "expectedRunbookIds": [
+        "runbook:komsco_ops_rca:route-5xx-ingress-backend",
+        "runbook:komsco_ops_slo:slo-service-health-thresholds"
+      ],
+      "expectedTerms": ["route", "5xx", "backend"],
+      "remediations": [
+        {
+          "id": "simulate-backend-readiness-recovery",
+          "label": "Backend readiness recovery simulation",
+          "description": "운영자가 backend endpoint와 readiness 상태를 확인해 service endpoint가 회복됐다고 가정합니다.",
+          "question": "backend readiness 회복 조치를 시뮬레이션했어. route 5xx 위험이 낮아졌는지 확인해줘.",
+          "expectedOutcome": "Readiness 이벤트가 Normal로 바뀌고 restart 증가가 멈춥니다.",
+          "followUps": ["SLO 관점에서 남은 위험을 알려줘.", "Route-Service-Pod 연결을 그림처럼 설명해줘.", "재발 감시 지표를 추천해줘."],
+          "resolution": {
+            "pod": {
+              "phase": "Running",
+              "nodeName": "worker-b",
+              "restartCount": 2,
+              "state": "running"
+            },
+            "events": [
+              {
+                "type": "Normal",
+                "reason": "Ready",
+                "message": "Backend readiness recovered and route 5xx signal cleared in simulation",
+                "lastTimestamp": "2026-06-22T05:58:00Z"
+              }
+            ],
+            "metrics": {
+              "pod_restart_increase": "0",
+              "pod_memory_working_set": "419430400",
+              "pod_memory_limit": "805306368"
+            },
+            "previousLog": "INFO backend readiness gate passed; route 5xx correlation cleared"
+          }
+        }
+      ]
+    },
+    {
+      "id": "audit-pvc-mount-failure",
+      "title": "audit-log-writer Pending from PVC mount failure",
+      "summary": "감사 로그 워크로드가 PVC mount/attach 문제로 시작하지 못하는 상황입니다.",
+      "category": "storage-pvc",
+      "risk": "high",
+      "learning": {
+        "objective": "Storage 장애에서 Pod Pending, FailedMount 이벤트, PVC/PV/StorageClass 확인 순서를 익힙니다.",
+        "cycle": ["Pending 확인", "FailedMount 해석", "PVC 경로 확인", "mount 회복 확인"],
+        "checkpoints": ["FailedMount event", "PVC mount keyword", "audit evidence severity", "storage runbook hit"],
+        "followUps": ["PVC Pending과 FailedMount 차이를 설명해줘.", "스토리지 담당자에게 넘길 근거를 정리해줘.", "RBAC로 증적이 부족할 때 어떻게 말해야 하는지 알려줘."]
+      },
+      "question": "komsco-secure namespace의 audit-log-writer가 PVC mount 문제로 Pending이야. 스토리지 관점으로 분석해줘.",
+      "target": {
+        "namespace": "komsco-secure",
+        "kind": "Pod",
+        "name": "audit-log-writer-59dff8b949-pvc7m",
+        "container": "audit-log-writer"
+      },
+      "pod": {
+        "phase": "Pending",
+        "nodeName": "worker-c",
+        "restartCount": 0,
+        "state": "waiting",
+        "waitingReason": "ContainerCreating"
+      },
+      "events": [
+        {
+          "type": "Warning",
+          "reason": "FailedMount",
+          "message": "MountVolume.MountDevice failed for volume audit-evidence-pvc: timed out waiting for attach",
+          "lastTimestamp": "2026-06-22T06:18:00Z"
+        }
+      ],
+      "previousLog": "",
+      "metrics": {
+        "pod_restart_increase": "0",
+        "pod_memory_working_set": null,
+        "pod_memory_limit": "536870912"
+      },
+      "expectedRunbookIds": [
+        "runbook:komsco_ops_storage:pvc-volume-mount-attach",
+        "runbook:komsco_ops_services:service-audit-log-writer-profile"
+      ],
+      "expectedTerms": ["pvc", "mount", "attach"],
+      "remediations": [
+        {
+          "id": "simulate-pvc-attach-recovery",
+          "label": "PVC attach recovery simulation",
+          "description": "운영자가 PVC/PV/StorageClass와 attach-detach 이벤트를 확인해 mount 지연이 해소됐다고 가정합니다.",
+          "question": "PVC attach 회복 조치를 시뮬레이션했어. audit-log-writer가 안전하게 시작됐는지 확인해줘.",
+          "expectedOutcome": "FailedMount 경고가 사라지고 Pod가 Running으로 전환됩니다.",
+          "followUps": ["감사 증적 서비스라서 위험한 이유를 알려줘.", "스토리지 RCA 보고서 초안을 만들어줘.", "다음 모니터링 항목을 추천해줘."],
+          "resolution": {
+            "pod": {
+              "phase": "Running",
+              "nodeName": "worker-c",
+              "restartCount": 0,
+              "state": "running"
+            },
+            "events": [
+              {
+                "type": "Normal",
+                "reason": "SuccessfulMountVolume",
+                "message": "Mounted audit-evidence-pvc after attach recovery simulation",
+                "lastTimestamp": "2026-06-22T06:34:00Z"
+              }
+            ],
+            "metrics": {
+              "pod_restart_increase": "0",
+              "pod_memory_working_set": "234881024",
+              "pod_memory_limit": "536870912"
+            },
+            "previousLog": "INFO audit-log-writer resumed append-only evidence storage after PVC mount simulation"
+          }
+        }
+      ]
+    },
+    {
+      "id": "networkpolicy-dns-timeout",
+      "title": "issuance-api dependency timeout from NetworkPolicy/DNS path",
+      "summary": "issuance-api가 redis-cache로 연결하지 못하고 DNS/NetworkPolicy 경로 문제를 의심해야 하는 상황입니다.",
+      "category": "network-policy",
+      "risk": "medium",
+      "learning": {
+        "objective": "애플리케이션 timeout 로그를 바로 코드 문제로 보지 않고 Service, Endpoint, DNS, NetworkPolicy 증적으로 좁히는 흐름을 익힙니다.",
+        "cycle": ["timeout 로그 확인", "서비스 경로 분기", "정책/엔드포인트 확인", "연결 회복 확인"],
+        "checkpoints": ["DNS or egress timeout log", "NetworkPolicy keyword", "dependency runbook hit", "read-only boundary"],
+        "followUps": ["NetworkPolicy 문제인지 DNS 문제인지 나눠서 설명해줘.", "읽기 전용으로 확인할 순서를 알려줘.", "네트워크 담당자에게 넘길 증거를 정리해줘."]
+      },
+      "question": "issuance-api가 redis-cache timeout을 내고 있어. DNS 또는 NetworkPolicy 경로 문제인지 근거로 좁혀줘.",
+      "target": {
+        "namespace": "komsco-prod",
+        "kind": "Pod",
+        "name": "issuance-api-6f4476d6d9-net8s",
+        "container": "issuance-api"
+      },
+      "pod": {
+        "phase": "Running",
+        "nodeName": "worker-a",
+        "restartCount": 0,
+        "state": "running"
+      },
+      "events": [
+        {
+          "type": "Warning",
+          "reason": "Unhealthy",
+          "message": "Readiness probe failed: redis-cache dependency timeout; DNS lookup and egress NetworkPolicy require review",
+          "lastTimestamp": "2026-06-22T06:52:00Z"
+        }
+      ],
+      "previousLog": "WARN redis-cache timeout after DNS resolution retry; possible egress NetworkPolicy selector mismatch; password=redacted",
+      "metrics": {
+        "pod_restart_increase": "0",
+        "pod_memory_working_set": "318767104",
+        "pod_memory_limit": "805306368"
+      },
+      "expectedRunbookIds": [
+        "runbook:komsco_ops_network:dns-networkpolicy-connectivity",
+        "runbook:komsco_ops_rca:probe-failure-dependency-timeout"
+      ],
+      "expectedTerms": ["networkpolicy", "dns", "timeout"],
+      "remediations": [
+        {
+          "id": "simulate-networkpolicy-selector-review",
+          "label": "NetworkPolicy selector review simulation",
+          "description": "운영자가 Service endpoint, DNS operator 상태, NetworkPolicy selector를 읽기 전용으로 확인했다고 가정합니다.",
+          "question": "NetworkPolicy selector 확인 조치를 시뮬레이션했어. redis-cache timeout이 해소됐는지 확인해줘.",
+          "expectedOutcome": "Readiness가 통과하고 dependency timeout 로그가 사라집니다.",
+          "followUps": ["정책 변경 없이 확인 가능한 명령만 알려줘.", "네트워크 경로 RCA를 요약해줘.", "민감정보 마스킹이 필요한 지점을 짚어줘."],
+          "resolution": {
+            "pod": {
+              "phase": "Running",
+              "nodeName": "worker-a",
+              "restartCount": 0,
+              "state": "running"
+            },
+            "events": [
+              {
+                "type": "Normal",
+                "reason": "Ready",
+                "message": "redis-cache dependency check passed after NetworkPolicy selector review simulation",
+                "lastTimestamp": "2026-06-22T07:06:00Z"
+              }
+            ],
+            "metrics": {
+              "pod_restart_increase": "0",
+              "pod_memory_working_set": "301989888",
+              "pod_memory_limit": "805306368"
+            },
+            "previousLog": "INFO redis-cache dependency check passed; sensitive connection values remain redacted"
           }
         }
       ]

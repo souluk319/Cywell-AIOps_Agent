@@ -33,7 +33,9 @@ export function listSimulationScenarios(options = {}) {
       id: scenario.id,
       title: scenario.title,
       summary: scenario.summary ?? scenario.question,
+      category: scenario.category ?? "operations",
       risk: scenario.risk ?? "high",
+      learning: scenario.learning ?? {},
       question: scenario.question,
       target: scenario.target,
       signals: {
@@ -277,6 +279,17 @@ function simulationEvidence(scenario, action) {
       observed_at: new Date().toISOString()
     }
   ];
+  if (scenario.learning?.objective) {
+    items.push({
+      id: `simulation:learning:${scenario.id}`,
+      type: "simulation",
+      summary: truncate(
+        `Learning objective: ${scenario.learning.objective}. Checkpoints: ${(scenario.learning.checkpoints ?? []).join(", ")}`
+      ),
+      source: "cas.simulation.learning",
+      observed_at: new Date().toISOString()
+    });
+  }
   if (action) {
     items.push({
       id: `simulation:action:${scenario.id}:${action.id}`,
@@ -351,7 +364,10 @@ export async function enrichInputWithSimulation(input = {}, options = {}) {
   enriched.cas_evidence_context = [
     "CAS Simulation Lab evidence:",
     `- scenario=${activeScenario.id} title=${activeScenario.title}`,
+    activeScenario.learning?.objective ? `- learning_objective=${activeScenario.learning.objective}` : "",
+    activeScenario.learning?.checkpoints?.length ? `- learning_checkpoints=${activeScenario.learning.checkpoints.join(" | ")}` : "",
     action ? `- simulated_action=${action.id}: ${action.label}` : "- simulated_action=none",
+    action?.expectedOutcome ? `- expected_recovery=${action.expectedOutcome}` : "",
     enriched.cas_evidence_context
   ]
     .filter(Boolean)

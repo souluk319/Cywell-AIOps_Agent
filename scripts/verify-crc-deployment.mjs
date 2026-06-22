@@ -232,17 +232,19 @@ if (consolePod) {
 
     const simulationsCode = [
       "const https=require('https');",
-      "https.get('https://127.0.0.1:9443/api/aiops/simulations',{rejectUnauthorized:false,headers:{accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,count:j.scenarios?.length||0,first:j.scenarios?.[0]?.id,actions:j.scenarios?.[0]?.remediations?.length||0}));});}).on('error',e=>{console.error(e.message);process.exit(1);});"
+      "https.get('https://127.0.0.1:9443/api/aiops/simulations',{rejectUnauthorized:false,headers:{accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,count:j.scenarios?.length||0,first:j.scenarios?.[0]?.id,actions:j.scenarios?.[0]?.remediations?.length||0,learning:Boolean(j.scenarios?.[0]?.learning?.objective),cases:(j.scenarios||[]).map(s=>s.id).slice(-4)}));});}).on('error',e=>{console.error(e.message);process.exit(1);});"
     ].join("");
     const simulations = execNode(consolePod.metadata.name, simulationsCode, 60000);
     expect(
       "runtime:simulations-through-plugin",
-      simulations.ok &&
+        simulations.ok &&
         simulations.stdout.includes("simulation_catalog") &&
-        simulations.stdout.includes("\"count\":4") &&
+        simulations.stdout.includes("\"count\":8") &&
         simulations.stdout.includes("issuance-api-oom") &&
+        simulations.stdout.includes("networkpolicy-dns-timeout") &&
+        simulations.stdout.includes("\"learning\":true") &&
         simulations.stdout.includes("\"actions\":1"),
-      "console plugin exposes data-driven Simulation Lab scenarios",
+      "console plugin exposes data-driven Simulation Lab scenarios and learning metadata",
       simulations.stderr || simulations.stdout
     );
 

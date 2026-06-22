@@ -200,7 +200,7 @@ expectText(
 expectText(
   "console-chat:mode-request",
   launcherSource,
-  "brain_mode: chatMode",
+  "brain_mode: effectiveChatMode",
   "launcher sends the selected mode to the Gateway brain contract"
 );
 expectText(
@@ -636,6 +636,18 @@ expectText(
   "launcher renders data-driven simulation scenario cards"
 );
 expectText(
+  "console-simulation:learning",
+  launcherSource,
+  "data-test=\"cas-simulation-learning\"",
+  "launcher renders scenario learning objectives"
+);
+expectText(
+  "console-simulation:cycle",
+  launcherSource,
+  "data-test=\"cas-simulation-cycle\"",
+  "launcher renders the guided simulation cycle"
+);
+expectText(
   "console-simulation:query-contract",
   launcherSource,
   "simulation_id: simulationId",
@@ -646,6 +658,24 @@ expectText(
   launcherSource,
   "simulation_action_id: simulationActionId",
   "launcher sends simulation_action_id for remediation simulation"
+);
+expectText(
+  "console-simulation:troubleshooting-override",
+  launcherSource,
+  "modeOverride?: ChatMode",
+  "simulation runs can override Ask mode into Troubleshooting mode"
+);
+expectText(
+  "console-simulation:effective-mode",
+  launcherSource,
+  "brain_mode: effectiveChatMode",
+  "Gateway requests use the effective chat mode"
+);
+expectText(
+  "console-simulation:next-actions",
+  launcherSource,
+  "data-test=\"cas-simulation-next-actions\"",
+  "assistant simulation answers expose next-step buttons"
 );
 rejectText(
   "console-chat:no-route-ui",

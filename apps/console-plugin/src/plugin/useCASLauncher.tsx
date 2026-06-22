@@ -75,6 +75,10 @@ type ChatMessage = {
   question?: string;
   isPending?: boolean;
   result?: RCAResult;
+  simulation?: {
+    scenarioId: string;
+    actionId?: string;
+  };
 };
 
 type OverviewAction = {
@@ -145,14 +149,23 @@ type SimulationRemediation = {
   label: string;
   description?: string;
   question?: string;
+  expectedOutcome?: string;
+  followUps?: string[];
 };
 
 type SimulationScenario = {
   id: string;
   title: string;
   summary?: string;
+  category?: string;
   risk?: string;
   question: string;
+  learning?: {
+    objective?: string;
+    checkpoints?: string[];
+    cycle?: string[];
+    followUps?: string[];
+  };
   target: {
     namespace: string;
     kind: string;
@@ -394,6 +407,11 @@ const languageCopy: Record<
     simulationFix: string;
     simulationSignals: string;
     simulationNoScenarios: string;
+    simulationLearning: string;
+    simulationCycle: string;
+    simulationOutcome: string;
+    simulationNext: string;
+    simulationBackToLab: string;
   }
 > = {
   ko: {
@@ -500,7 +518,12 @@ const languageCopy: Record<
     simulationRun: "문제 분석",
     simulationFix: "해결 시뮬레이션",
     simulationSignals: "신호",
-    simulationNoScenarios: "시뮬레이션 시나리오가 없습니다."
+    simulationNoScenarios: "시뮬레이션 시나리오가 없습니다.",
+    simulationLearning: "학습 목표",
+    simulationCycle: "사이클",
+    simulationOutcome: "예상 회복",
+    simulationNext: "다음으로 해볼 것",
+    simulationBackToLab: "다른 시나리오"
   },
   en: {
     suggestionLabel: "Frequent checks",
@@ -606,7 +629,12 @@ const languageCopy: Record<
     simulationRun: "Analyze Issue",
     simulationFix: "Simulate Fix",
     simulationSignals: "Signals",
-    simulationNoScenarios: "No simulation scenarios are available."
+    simulationNoScenarios: "No simulation scenarios are available.",
+    simulationLearning: "Learning goal",
+    simulationCycle: "Cycle",
+    simulationOutcome: "Expected recovery",
+    simulationNext: "Try next",
+    simulationBackToLab: "Other scenarios"
   }
 };
 
@@ -939,10 +967,56 @@ const styles = `
   box-shadow: inset 3px 0 0 var(--cas-accent);
 }
 
-.cas-simulation-actions {
+.cas-learning-flow,
+.cas-learning-checks,
+.cas-simulation-next {
   display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cas-learning-chip {
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 999px;
+  color: var(--cas-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cas-learning-note {
+  color: var(--cas-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.cas-simulation-actions {
+  display: grid;
   gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.cas-simulation-actions button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cas-simulation-actions .cas-secondary {
+  justify-content: center;
+}
+
+.cas-simulation-next {
+  border-top: 1px solid var(--cas-line);
+  margin-top: 8px;
+  padding-top: 8px;
 }
 
 .cas-panel-heading {
@@ -2859,13 +2933,27 @@ function SimulationLab({
             <div className="cas-meta">
               {scenario.target.namespace} · {scenario.target.kind}/{scenario.target.name}
             </div>
+            {scenario.learning?.objective && (
+              <div className="cas-learning-note" data-test="cas-simulation-learning">
+                {copy.simulationLearning}: {scenario.learning.objective}
+              </div>
+            )}
+            {(scenario.learning?.cycle?.length ?? 0) > 0 && (
+              <div className="cas-learning-flow" data-test="cas-simulation-cycle">
+                {scenario.learning?.cycle?.map((step, index) => (
+                  <span className="cas-learning-chip" key={`${scenario.id}-cycle-${step}`}>
+                    {index + 1}. {step}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="cas-meta">
               {copy.simulationSignals}: warnings {scenario.signals?.warnings ?? 0} · restarts {scenario.signals?.restarts ?? 0} · metrics{" "}
               {scenario.signals?.metric_series ?? 0}
             </div>
             <div className="cas-simulation-actions">
               <button className="cas-secondary" disabled={isRunning} onClick={() => onRunScenario(scenario)} type="button">
-                {copy.simulationRun}
+                1. {copy.simulationRun}
               </button>
               {(scenario.remediations ?? []).map((remediation) => (
                 <button
@@ -2876,7 +2964,7 @@ function SimulationLab({
                   title={remediation.description}
                   type="button"
                 >
-                  {copy.simulationFix}: {remediation.label}
+                  2. {remediation.label || copy.simulationFix}
                 </button>
               ))}
             </div>
@@ -2885,6 +2973,72 @@ function SimulationLab({
         {status !== "loading" && scenarios.length === 0 && <div className="cas-meta">{copy.simulationNoScenarios}</div>}
       </div>
     </section>
+  );
+}
+
+function SimulationNextActions({
+  copy,
+  isRunning,
+  message,
+  onOpenLab,
+  onRunRemediation,
+  onRunQuestion,
+  scenarios
+}: {
+  copy: (typeof languageCopy)[Language];
+  isRunning: boolean;
+  message: ChatMessage;
+  onOpenLab: () => void;
+  onRunRemediation: (scenario: SimulationScenario, remediation: SimulationRemediation) => void;
+  onRunQuestion: (scenario: SimulationScenario, question: string, remediation?: SimulationRemediation) => void;
+  scenarios: SimulationScenario[];
+}) {
+  const scenario = message.simulation?.scenarioId
+    ? scenarios.find((candidate) => candidate.id === message.simulation?.scenarioId)
+    : undefined;
+  if (!scenario) return null;
+
+  const remediation = message.simulation?.actionId
+    ? (scenario.remediations ?? []).find((candidate) => candidate.id === message.simulation?.actionId)
+    : undefined;
+  const followUps = remediation?.followUps ?? scenario.learning?.followUps ?? [];
+
+  return (
+    <div className="cas-simulation-next" data-test="cas-simulation-next-actions">
+      {!remediation &&
+        (scenario.remediations ?? []).map((action) => (
+          <button
+            className="cas-link-button"
+            disabled={isRunning}
+            key={action.id}
+            onClick={() => onRunRemediation(scenario, action)}
+            title={action.description}
+            type="button"
+          >
+            2. {action.label || copy.simulationFix}
+          </button>
+        ))}
+      {remediation?.expectedOutcome && (
+        <span className="cas-learning-chip" title={remediation.expectedOutcome}>
+          {copy.simulationOutcome}: {remediation.expectedOutcome}
+        </span>
+      )}
+      {followUps.slice(0, 3).map((question) => (
+        <button
+          className="cas-link-button"
+          disabled={isRunning}
+          key={`${scenario.id}-${question}`}
+          onClick={() => onRunQuestion(scenario, question, remediation)}
+          title={question}
+          type="button"
+        >
+          3. {question}
+        </button>
+      ))}
+      <button className="cas-link-button" disabled={isRunning} onClick={onOpenLab} type="button">
+        {copy.simulationBackToLab}
+      </button>
+    </div>
   );
 }
 
@@ -3170,14 +3324,25 @@ export function CASLauncher() {
       nextNamespace?: string,
       nextResourceKind?: string,
       simulationId?: string,
-      simulationActionId?: string
+      simulationActionId?: string,
+      modeOverride?: ChatMode
     ) => {
       if (isRunning) return;
       const submittedQuestion = normalizeQuestion(questionText, initialQuestionByLanguage[language]);
+      const effectiveChatMode = modeOverride ?? chatMode;
+      if (modeOverride && modeOverride !== chatMode) {
+        setChatMode(modeOverride);
+      }
       const inferredTarget = nextResourceName || nextNamespace || nextResourceKind ? undefined : inferTargetFromQuestion(submittedQuestion, simulations);
       const targetResourceName = nextResourceName ?? inferredTarget?.name ?? resourceName;
       const targetNamespace = nextNamespace ?? inferredTarget?.namespace ?? namespace;
       const targetResourceKind = nextResourceKind ?? inferredTarget?.kind ?? resourceKind;
+      const simulation = simulationId
+        ? {
+            scenarioId: simulationId,
+            actionId: simulationActionId
+          }
+        : undefined;
       if (inferredTarget) {
         setNamespace(inferredTarget.namespace);
         setResourceKind(inferredTarget.kind);
@@ -3188,7 +3353,8 @@ export function CASLauncher() {
       const userMessage: ChatMessage = {
         id: createMessageId("user"),
         role: "user",
-        content: submittedQuestion
+        content: submittedQuestion,
+        simulation
       };
       const pendingMessageId = createMessageId("assistant");
       setMessages((current) => [
@@ -3199,7 +3365,8 @@ export function CASLauncher() {
           role: "assistant",
           content: copy.pending,
           question: submittedQuestion,
-          isPending: true
+          isPending: true,
+          simulation
         }
       ]);
       setIsRunning(true);
@@ -3230,7 +3397,7 @@ export function CASLauncher() {
               name: targetResourceName || "version"
             },
             mode: "read_only",
-            brain_mode: chatMode,
+            brain_mode: effectiveChatMode,
             stream: true,
             locale: localeByLanguage[language],
             conversation_id: conversationId,
@@ -3238,12 +3405,12 @@ export function CASLauncher() {
               namespace: targetNamespace || "default",
               resourceKind: targetResourceKind || (targetResourceName === "version" ? "ClusterVersion" : "Pod"),
               resourceName: targetResourceName || "version",
-              timeRange: chatMode === "troubleshooting" ? "1h" : null,
+              timeRange: effectiveChatMode === "troubleshooting" ? "1h" : null,
               safety: "read_only"
             },
             ui: {
               source: "console-plugin",
-              selectedMode: chatMode,
+              selectedMode: effectiveChatMode,
               conversationId
             },
             simulation_id: simulationId,
@@ -3371,10 +3538,21 @@ export function CASLauncher() {
   const retryMessage = React.useCallback(
     (message: ChatMessage) => {
       if (message.question) {
-        void submitQuestion(message.question);
+        const scenario = message.simulation?.scenarioId
+          ? simulations.find((candidate) => candidate.id === message.simulation?.scenarioId)
+          : undefined;
+        void submitQuestion(
+          message.question,
+          scenario?.target.name,
+          scenario?.target.namespace,
+          scenario?.target.kind,
+          message.simulation?.scenarioId,
+          message.simulation?.actionId,
+          message.simulation ? "troubleshooting" : undefined
+        );
       }
     },
-    [submitQuestion]
+    [simulations, submitQuestion]
   );
 
   const submitSuggestion = React.useCallback(
@@ -3420,41 +3598,38 @@ export function CASLauncher() {
     [submitQuestion]
   );
 
-  const runSimulationScenario = React.useCallback(
-    (scenario: SimulationScenario) => {
+  const runSimulationQuestion = React.useCallback(
+    (scenario: SimulationScenario, nextQuestion: string, remediation?: SimulationRemediation) => {
       setSelectedSimulationId(scenario.id);
       setNamespace(scenario.target.namespace);
       setResourceKind(scenario.target.kind);
       setResourceName(scenario.target.name);
       setActiveView("chat");
       void submitQuestion(
-        scenario.question,
+        nextQuestion,
         scenario.target.name,
         scenario.target.namespace,
         scenario.target.kind,
-        scenario.id
+        scenario.id,
+        remediation?.id,
+        "troubleshooting"
       );
     },
     [submitQuestion]
   );
 
+  const runSimulationScenario = React.useCallback(
+    (scenario: SimulationScenario) => {
+      runSimulationQuestion(scenario, scenario.question);
+    },
+    [runSimulationQuestion]
+  );
+
   const runSimulationRemediation = React.useCallback(
     (scenario: SimulationScenario, remediation: SimulationRemediation) => {
-      setSelectedSimulationId(scenario.id);
-      setNamespace(scenario.target.namespace);
-      setResourceKind(scenario.target.kind);
-      setResourceName(scenario.target.name);
-      setActiveView("chat");
-      void submitQuestion(
-        remediation.question ?? scenario.question,
-        scenario.target.name,
-        scenario.target.namespace,
-        scenario.target.kind,
-        scenario.id,
-        remediation.id
-      );
+      runSimulationQuestion(scenario, remediation.question ?? scenario.question, remediation);
     },
-    [submitQuestion]
+    [runSimulationQuestion]
   );
 
   const selectWorkload = React.useCallback(
@@ -3661,6 +3836,15 @@ export function CASLauncher() {
                             )}
                             <RcaTrace copy={copy} result={message.result} />
                             <EvidenceSummary copy={copy} result={message.result} />
+                            <SimulationNextActions
+                              copy={copy}
+                              isRunning={isRunning}
+                              message={message}
+                              onOpenLab={() => setActiveView("simulation")}
+                              onRunQuestion={runSimulationQuestion}
+                              onRunRemediation={runSimulationRemediation}
+                              scenarios={simulations}
+                            />
                           </>
                         )}
                         {message.role === "assistant" && (
