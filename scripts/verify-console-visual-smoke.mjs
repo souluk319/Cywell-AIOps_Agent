@@ -93,7 +93,13 @@ ${styles}
     <div class="cas-chat-thread" data-test="cas-chat-thread">
       <article class="cas-message" data-role="assistant">
         <strong class="cas-message-role">AI Sentinel</strong>
-        <p class="cas-answer" data-primary="true">ClusterVersion version은 현재 4.20.5로 수렴 완료된 정상 상태로 보입니다. 근거는 Available=True, Progressing=False이며 다음 확인은 Degraded 조건과 conditionalUpdates입니다.</p>
+        <div class="cas-answer cas-markdown" data-primary="true" data-test="cas-markdown-answer">
+          <p class="cas-md-paragraph"><strong>ClusterVersion version</strong>은 현재 4.20.5로 수렴 완료된 정상 상태로 보입니다.</p>
+          <h3 class="cas-md-heading" data-level="3">근거</h3>
+          <ul class="cas-md-list"><li><code class="cas-md-inline-code">Available=True</code></li><li><code class="cas-md-inline-code">Progressing=False</code></li></ul>
+          <h3 class="cas-md-heading" data-level="3">다음 확인</h3>
+          <ol class="cas-md-list"><li><code class="cas-md-inline-code">oc get clusterversion version -o yaml</code></li><li>Degraded 조건과 availableUpdates 확인</li></ol>
+        </div>
         <div class="cas-result-meta"><span class="cas-meta">Lightspeed real answer · openshift-lightspeed</span></div>
         <details class="cas-result-details" data-test="cas-evidence-panel"><summary>근거 3개 · RCA 후보 1개 · 부족한 증적 0개</summary><div class="cas-result-details-body"><div class="cas-evidence-list"><div class="cas-evidence-item"><strong>openshift:clusterversion:version</strong><div>ClusterVersion desired=4.20.5 conditions=[Available=True, Progressing=False]</div><span>apis/config.openshift.io/v1/clusterversions/version</span></div></div></div></details>
       </article>

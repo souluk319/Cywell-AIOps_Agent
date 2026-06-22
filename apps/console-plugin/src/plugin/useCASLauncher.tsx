@@ -115,6 +115,13 @@ type OverviewResult = {
   missing?: MissingEvidence[];
 };
 
+type MarkdownBlock =
+  | { type: "heading"; level: number; text: string }
+  | { type: "paragraph"; text: string }
+  | { type: "ul"; items: string[] }
+  | { type: "ol"; items: string[] }
+  | { type: "code"; text: string };
+
 const initialQuestion = "ClusterVersion 상태를 한 문장으로 요약해줘.";
 const RECOMMENDED_QUESTION_COUNT = 5;
 const OCP_AIOPS_QUESTION_BANK = [
@@ -323,7 +330,7 @@ const styles = `
 
 .cas-panel-title strong,
 .cas-section-title,
-.cas-message strong,
+.cas-message-role,
 .cas-evidence-item strong {
   display: block;
 }
@@ -606,12 +613,66 @@ const styles = `
   font-size: 14px;
   line-height: 1.55;
   margin: 0;
-  white-space: pre-wrap;
 }
 
 .cas-answer[data-primary="true"] {
   color: var(--cas-ink);
   font-size: 15px;
+}
+
+.cas-markdown {
+  display: grid;
+  gap: 9px;
+}
+
+.cas-md-paragraph,
+.cas-md-list,
+.cas-md-heading {
+  margin: 0;
+}
+
+.cas-md-heading {
+  color: var(--cas-ink);
+  font-size: 14px;
+  line-height: 1.35;
+  margin-top: 5px;
+}
+
+.cas-answer[data-primary="true"] .cas-md-heading {
+  font-size: 15px;
+}
+
+.cas-md-list {
+  display: grid;
+  gap: 5px;
+  padding-left: 20px;
+}
+
+.cas-md-list .cas-md-list {
+  margin-top: 5px;
+}
+
+.cas-md-inline-code,
+.cas-md-code {
+  background: #f3f6f8;
+  border: 1px solid var(--cas-line);
+  border-radius: 4px;
+  color: #243242;
+  font-family: Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.cas-md-inline-code {
+  font-size: 0.92em;
+  padding: 1px 4px;
+}
+
+.cas-md-code {
+  display: block;
+  margin: 0;
+  max-width: 100%;
+  overflow: auto;
+  padding: 9px 10px;
+  white-space: pre-wrap;
 }
 
 .cas-result-meta {
@@ -987,6 +1048,154 @@ function formatTimelineTime(value?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function parseMarkdownBlocks(content: string): MarkdownBlock[] {
+  const blocks: MarkdownBlock[] = [];
+  const lines = String(content || "").split(/\r?\n/);
+  let paragraph: string[] = [];
+  let listType: "ul" | "ol" | null = null;
+  let listItems: string[] = [];
+  let codeLines: string[] = [];
+  let inCodeBlock = false;
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+    blocks.push({ type: "paragraph", text: paragraph.join(" ").trim() });
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (!listType || listItems.length === 0) return;
+    blocks.push({ type: listType, items: listItems });
+    listType = null;
+    listItems = [];
+  };
+  const flushCode = () => {
+    blocks.push({ type: "code", text: codeLines.join("\n") });
+    codeLines = [];
+  };
+
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      flushParagraph();
+      flushList();
+      if (inCodeBlock) {
+        flushCode();
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+        codeLines = [];
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeLines.push(line);
+      continue;
+    }
+
+    if (!line.trim()) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const heading = line.match(/^\s{0,3}(#{1,4})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "heading", level: heading[1].length, text: heading[2].trim() });
+      continue;
+    }
+
+    const unordered = line.match(/^\s*[-*]\s+(.+)$/);
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if (unordered || ordered) {
+      flushParagraph();
+      const nextType = unordered ? "ul" : "ol";
+      if (listType && listType !== nextType) flushList();
+      listType = nextType;
+      listItems.push((unordered?.[1] ?? ordered?.[1] ?? "").trim());
+      continue;
+    }
+
+    flushList();
+    paragraph.push(line.trim());
+  }
+
+  flushParagraph();
+  flushList();
+  if (inCodeBlock || codeLines.length > 0) flushCode();
+  return blocks.length > 0 ? blocks : [{ type: "paragraph", text: content }];
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const pattern = /(`[^`]+`|\*\*.+?\*\*)/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > cursor) nodes.push(text.slice(cursor, match.index));
+    const token = match[0];
+    const key = `${keyPrefix}-${match.index}`;
+    if (token.startsWith("`")) {
+      nodes.push(
+        <code className="cas-md-inline-code" key={key}>
+          {token.slice(1, -1)}
+        </code>
+      );
+    } else {
+      nodes.push(
+        <strong key={key}>
+          {renderInlineMarkdown(token.slice(2, -2), `${key}-strong`)}
+        </strong>
+      );
+    }
+    cursor = match.index + token.length;
+  }
+
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
+}
+
+function MarkdownAnswer({ content, primary }: { content: string; primary: boolean }) {
+  const blocks = React.useMemo(() => parseMarkdownBlocks(content), [content]);
+  return (
+    <div className="cas-answer cas-markdown" data-primary={primary ? "true" : "false"} data-test="cas-markdown-answer">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          return (
+            <h3 className="cas-md-heading" data-level={block.level} key={`heading-${index}`}>
+              {renderInlineMarkdown(block.text, `heading-${index}`)}
+            </h3>
+          );
+        }
+        if (block.type === "ul" || block.type === "ol") {
+          const ListTag = block.type;
+          return (
+            <ListTag className="cas-md-list" key={`${block.type}-${index}`}>
+              {block.items.map((item, itemIndex) => (
+                <li key={`${block.type}-${index}-${itemIndex}`}>{renderInlineMarkdown(item, `${block.type}-${index}-${itemIndex}`)}</li>
+              ))}
+            </ListTag>
+          );
+        }
+        if (block.type === "code") {
+          return (
+            <pre className="cas-md-code" key={`code-${index}`}>
+              <code>{block.text}</code>
+            </pre>
+          );
+        }
+        return (
+          <p className="cas-md-paragraph" key={`paragraph-${index}`}>
+            {renderInlineMarkdown(block.text, `paragraph-${index}`)}
+          </p>
+        );
+      })}
+    </div>
+  );
 }
 
 function OverviewCockpit({
@@ -1648,9 +1857,7 @@ export function CASLauncher() {
                         <strong className="cas-message-role">
                           {message.role === "user" ? "운영자" : message.role === "assistant" ? "AI Sentinel" : "시스템"}
                         </strong>
-                        <p className="cas-answer" data-primary={message.role === "assistant" && message.result ? "true" : "false"}>
-                          {message.content}
-                        </p>
+                        <MarkdownAnswer content={message.content} primary={message.role === "assistant" && Boolean(message.result)} />
                         {message.result && (
                           <>
                             <div className="cas-result-meta">

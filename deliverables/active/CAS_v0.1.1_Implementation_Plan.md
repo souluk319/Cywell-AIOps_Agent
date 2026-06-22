@@ -264,6 +264,7 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | 챗봇 기본 편의 | Enter 전송, Stop, Copy, Retry, 새 대화 | source/bundle verifier | `cas-stop-analysis`, copy/retry helpers | 완료 |
 | 추천 질의 UX | OCP AIOps 질문 50개 풀에서 5개 랜덤 노출 | source/bundle verifier | `OCP_AIOPS_QUESTION_BANK >= 50`, `cas-suggestion-list`, `cas-send-question` | 완료 |
 | 답변 우선 표시 | Lightspeed 답변 본문이 카드/증적보다 먼저 보임 | source/visual verifier | `cas-answer[data-primary=true]`, collapsed `cas-evidence-panel` | 완료 |
+| Markdown 답변 표시 | Lightspeed Markdown을 raw text가 아닌 서식으로 표시 | source/bundle/visual verifier | `cas-markdown-answer`, `cas-md-inline-code`, no `dangerouslySetInnerHTML` | 완료 |
 | Overview API | `/api/aiops/overview`가 read-only overview 반환 | Gateway pod 내부 HTTPS 호출 | `mode=overview_read_only` | 완료 |
 | UserToken 보존 | overview/query 모두 UserToken 경유 | ConsolePlugin proxy 확인 | `authorization: UserToken` runtime PASS | 완료 |
 | Health Strip | score/risk/signals 표시 | DOM/data-test 및 bundle verifier | `cas-health-strip` | 완료 |
@@ -301,6 +302,7 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | 대시보드가 항상 펼쳐져 챗봇의 역할을 줄임 | Chat 기본 화면으로 전환, Cockpit/Evidence/Actions를 헤더 아이콘 view로 분리 |
 | Chat 메시지 안에 RCA 카드와 증적이 모두 펼쳐져 답변이 묻힘 | Lightspeed 답변 본문 우선 표시, RCA/증적은 details 접힘 영역으로 이동 |
 | 입력창 기본 질문이 실제 입력값처럼 박혀 사용자가 매번 지워야 함 | 질문 입력값은 비워두고 추천 질문 5개를 별도 노출, focus 시 추천 문항 숨김 |
+| Lightspeed Markdown 서식이 `###`, `**`, `` `code` `` 그대로 노출됨 | 안전한 React Markdown renderer 추가, raw HTML 주입 없이 heading/list/bold/code 렌더링 |
 
 ## 8. v0.1.1 화면 세부안
 
@@ -438,14 +440,15 @@ v0.1.1은 아래 조건을 만족해야 완료다.
 5. Chat Composer는 OCP AIOps 추천 질문 50개 풀에서 5개를 랜덤 노출하고, 빈 입력 전송 시 현재 추천 질의를 실행한다.
 6. 사용자가 입력창을 클릭하면 추천 질문이 사라지고 즉시 직접 타이핑할 수 있다.
 7. 전송/중지 액션은 입력창 내부 아이콘 버튼으로 제공된다.
-8. Cockpit/Evidence/Actions는 Health, Risk, RCA Candidate, Evidence Timeline, Action Queue를 분리해서 표시한다.
-9. 사용자는 Risk Workload 또는 Action Queue에서 바로 RCA 질문을 시작할 수 있다.
-10. Query 결과는 기존 Lightspeed-backed answer와 OpenShift evidence를 유지한다.
-11. Evidence가 부족하면 "없음"이 아니라 missing reason으로 표시한다.
-12. OpenShift native page로 이동할 수 있는 console link가 제공된다.
-13. `npm run verify`가 통과한다.
-14. `npm run verify:crc:deployment`가 overview runtime까지 통과한다.
-15. `.env`와 materials 문서는 변경하지 않는다.
+8. Lightspeed Markdown 답변은 heading, list, bold, inline code, code block 서식으로 표시된다.
+9. Cockpit/Evidence/Actions는 Health, Risk, RCA Candidate, Evidence Timeline, Action Queue를 분리해서 표시한다.
+10. 사용자는 Risk Workload 또는 Action Queue에서 바로 RCA 질문을 시작할 수 있다.
+11. Query 결과는 기존 Lightspeed-backed answer와 OpenShift evidence를 유지한다.
+12. Evidence가 부족하면 "없음"이 아니라 missing reason으로 표시한다.
+13. OpenShift native page로 이동할 수 있는 console link가 제공된다.
+14. `npm run verify`가 통과한다.
+15. `npm run verify:crc:deployment`가 overview runtime까지 통과한다.
+16. `.env`와 materials 문서는 변경하지 않는다.
 
 ## 12. 일정안
 
@@ -469,6 +472,7 @@ v0.1.1 브랜치에서 수행 완료된 작업:
 7. npm run verify:console:visual: PASS
 8. Chat-first header icon UX: 완료
 9. Chat composer recommended question UX: 완료
+10. Safe Markdown answer rendering: 완료
 ```
 
 후속 수동 확인:

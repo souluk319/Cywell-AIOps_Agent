@@ -106,6 +106,30 @@ expectText(
   "launcher renders role-addressable chat messages"
 );
 expectText(
+  "console-chat:markdown-answer",
+  launcherSource,
+  "data-test=\"cas-markdown-answer\"",
+  "launcher renders assistant answers through the safe Markdown renderer"
+);
+expectText(
+  "console-chat:markdown-blocks",
+  launcherSource,
+  "parseMarkdownBlocks",
+  "launcher parses Markdown headings, lists, paragraphs, and code blocks"
+);
+expectText(
+  "console-chat:markdown-inline",
+  launcherSource,
+  "renderInlineMarkdown",
+  "launcher renders Markdown bold and inline code without raw HTML injection"
+);
+rejectText(
+  "console-chat:no-dangerous-html",
+  launcherSource,
+  "dangerouslySetInnerHTML",
+  "launcher does not inject raw Markdown as HTML"
+);
+expectText(
   "console-chat:fallback-visible",
   launcherSource,
   "data-test=\"cas-fallback-notice\"",
@@ -307,6 +331,18 @@ expectText(
   launcherBundle,
   "cas-stop-analysis",
   "built launcher bundle contains a stop action"
+);
+expectText(
+  "console-chat:bundle-markdown-answer",
+  launcherBundle,
+  "cas-markdown-answer",
+  "built launcher bundle contains Markdown answer rendering"
+);
+expectText(
+  "console-chat:bundle-markdown-code",
+  launcherBundle,
+  "cas-md-inline-code",
+  "built launcher bundle contains inline code styling for Markdown answers"
 );
 expectText(
   "console-chat:bundle-suggestions",
