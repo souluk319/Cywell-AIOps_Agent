@@ -44,6 +44,7 @@ Chat -> Cockpit icon -> Evidence icon -> Actions icon
 - Chat이 본체다.
 - Cockpit, Evidence, Actions는 헤더 아이콘으로 전환되는 보조 화면이다.
 - 사용자는 Chat에서 질문, 복사, 재시도, 중지, 새 대화 같은 기본 챗봇 편의기능을 먼저 기대한다.
+- 기본 챗봇 편의에는 추천 질문, 입력 focus 시 예시 제거, 입력창 내부 전송 아이콘, 빈 입력 시 현재 추천 질의 실행이 포함된다.
 - 대시보드 기능은 챗봇의 답변과 RCA 흐름을 보조해야 하며, 항상 펼쳐져 Chat의 비중을 줄이면 안 된다.
 
 ### 화면 철학
@@ -109,7 +110,7 @@ AI Sentinel / Chat icon / Cockpit icon / Evidence icon / Actions icon / Close
 Brain status / compact health context / chat thread / assistant tools
 
 [Chat Composer]
-Question input / namespace / resource / send
+5 rotating recommended questions / question input / inline send icon / collapsed target scope
 
 [Icon Views]
 Cockpit: Health / RCA Candidate / Risk Workloads
@@ -127,7 +128,8 @@ Actions: Action Queue / RCA Targets / Console Links
 | Evidence Timeline | event/log/metric sequence | RCA 판단의 시간 순서 |
 | Workload Risk | namespace, workload, status, restart, reason | RCA를 시작할 대상 |
 | Action Queue | next checks, open console links, runbook candidates | 운영자가 바로 할 다음 행동 |
-| Chat Thread | user question, assistant answer, evidence cards | 기존 챗봇 흐름 유지 |
+| Chat Thread | user question, Lightspeed-grade assistant answer, collapsed evidence | 답변 본문 우선, 증적은 보조정보 |
+| Chat Composer | 5 recommended questions, inline send icon, collapsed target fields | 입력 focus 시 추천 문항 제거, 빈 입력 전송 시 현재 추천 질의 실행 |
 
 ### 4.3 OpenShift Web Console 기능 활용
 
@@ -260,6 +262,8 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | CAS launcher 위치 | CAS만 AI launcher로 표시 | console operator spec 확인 | `lightspeed-console-plugin` 없음, `LightspeedButton=Disabled` | 완료 |
 | Chat-first UX | CAS 패널 기본 화면이 Chat | source/bundle verifier | `cas-chat-default-view`, `cas-view-switcher` | 완료 |
 | 챗봇 기본 편의 | Enter 전송, Stop, Copy, Retry, 새 대화 | source/bundle verifier | `cas-stop-analysis`, copy/retry helpers | 완료 |
+| 추천 질의 UX | OCP AIOps 질문 50개 풀에서 5개 랜덤 노출 | source/bundle verifier | `OCP_AIOPS_QUESTION_BANK >= 50`, `cas-suggestion-list`, `cas-send-question` | 완료 |
+| 답변 우선 표시 | Lightspeed 답변 본문이 카드/증적보다 먼저 보임 | source/visual verifier | `cas-answer[data-primary=true]`, collapsed `cas-evidence-panel` | 완료 |
 | Overview API | `/api/aiops/overview`가 read-only overview 반환 | Gateway pod 내부 HTTPS 호출 | `mode=overview_read_only` | 완료 |
 | UserToken 보존 | overview/query 모두 UserToken 경유 | ConsolePlugin proxy 확인 | `authorization: UserToken` runtime PASS | 완료 |
 | Health Strip | score/risk/signals 표시 | DOM/data-test 및 bundle verifier | `cas-health-strip` | 완료 |
@@ -280,7 +284,7 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | Gateway overview | 완료 | `GET /api/aiops/overview` 추가, critical missing evidence degrade 처리 |
 | OpenShift evidence | 완료 | pods/events/clusterversion read-only 수집, refs resolve 검증 PASS |
 | Console cockpit | 완료 | Health, RCA Candidate, Risk Workloads, Event Reasons, Evidence Timeline, Action Queue 렌더링 |
-| Chat UX | 완료 | Chat 기본 화면, 헤더 아이콘 전환, Enter/Stop/Copy/Retry/New Chat 반영 |
+| Chat UX | 완료 | Chat 기본 화면, 헤더 아이콘 전환, Enter/Stop/Copy/Retry/New Chat, 추천 질문 50개 풀/5개 노출, inline send 반영 |
 | Runtime 배포 | 완료 | `npm run deploy:crc` PASS, overview/query 모두 UserToken proxy로 통과 |
 | 시각 QA | 완료 | `npm run verify:console:visual` PASS, `test-results/visual/cas-cockpit-desktop.png`, `test-results/visual/cas-cockpit-mobile-500.png` |
 
@@ -295,6 +299,8 @@ v0.1.1에서는 기존 query 응답을 유지하되, UI 표시를 강화한다.
 | bundle verifier가 cockpit 일부만 확인함 | candidate/action/risk/timeline bundle marker 검증 추가 |
 | 패널 헤더 아이콘과 form field가 좁은 폭에서 레이아웃을 밀 수 있음 | SVG 크기 고정, box-sizing, mobile left/right panel layout, visual smoke verifier 추가 |
 | 대시보드가 항상 펼쳐져 챗봇의 역할을 줄임 | Chat 기본 화면으로 전환, Cockpit/Evidence/Actions를 헤더 아이콘 view로 분리 |
+| Chat 메시지 안에 RCA 카드와 증적이 모두 펼쳐져 답변이 묻힘 | Lightspeed 답변 본문 우선 표시, RCA/증적은 details 접힘 영역으로 이동 |
+| 입력창 기본 질문이 실제 입력값처럼 박혀 사용자가 매번 지워야 함 | 질문 입력값은 비워두고 추천 질문 5개를 별도 노출, focus 시 추천 문항 숨김 |
 
 ## 8. v0.1.1 화면 세부안
 
@@ -429,14 +435,17 @@ v0.1.1은 아래 조건을 만족해야 완료다.
 2. 패널을 열면 Chat이 먼저 보인다.
 3. 헤더 아이콘으로 Cockpit, Evidence, Actions 화면을 전환할 수 있다.
 4. Chat은 Enter 전송, Shift+Enter 줄바꿈, Stop, Copy, Retry, 새 대화를 제공한다.
-5. Cockpit/Evidence/Actions는 Health, Risk, RCA Candidate, Evidence Timeline, Action Queue를 분리해서 표시한다.
-6. 사용자는 Risk Workload 또는 Action Queue에서 바로 RCA 질문을 시작할 수 있다.
-7. Query 결과는 기존 Lightspeed-backed answer와 OpenShift evidence를 유지한다.
-8. Evidence가 부족하면 "없음"이 아니라 missing reason으로 표시한다.
-9. OpenShift native page로 이동할 수 있는 console link가 제공된다.
-10. `npm run verify`가 통과한다.
-11. `npm run verify:crc:deployment`가 overview runtime까지 통과한다.
-12. `.env`와 materials 문서는 변경하지 않는다.
+5. Chat Composer는 OCP AIOps 추천 질문 50개 풀에서 5개를 랜덤 노출하고, 빈 입력 전송 시 현재 추천 질의를 실행한다.
+6. 사용자가 입력창을 클릭하면 추천 질문이 사라지고 즉시 직접 타이핑할 수 있다.
+7. 전송/중지 액션은 입력창 내부 아이콘 버튼으로 제공된다.
+8. Cockpit/Evidence/Actions는 Health, Risk, RCA Candidate, Evidence Timeline, Action Queue를 분리해서 표시한다.
+9. 사용자는 Risk Workload 또는 Action Queue에서 바로 RCA 질문을 시작할 수 있다.
+10. Query 결과는 기존 Lightspeed-backed answer와 OpenShift evidence를 유지한다.
+11. Evidence가 부족하면 "없음"이 아니라 missing reason으로 표시한다.
+12. OpenShift native page로 이동할 수 있는 console link가 제공된다.
+13. `npm run verify`가 통과한다.
+14. `npm run verify:crc:deployment`가 overview runtime까지 통과한다.
+15. `.env`와 materials 문서는 변경하지 않는다.
 
 ## 12. 일정안
 
@@ -459,6 +468,7 @@ v0.1.1 브랜치에서 수행 완료된 작업:
 6. npm run deploy:crc: PASS
 7. npm run verify:console:visual: PASS
 8. Chat-first header icon UX: 완료
+9. Chat composer recommended question UX: 완료
 ```
 
 후속 수동 확인:

@@ -26,6 +26,12 @@ function rejectText(id, text, needle, passDetail, failDetail = passDetail) {
   else fail(id, failDetail);
 }
 
+function questionBankSize(text) {
+  const match = text.match(/const OCP_AIOPS_QUESTION_BANK = \[([\s\S]*?)\];/);
+  if (!match) return 0;
+  return (match[1].match(/"[^"]+"/g) ?? []).length;
+}
+
 const launcherSource = await readFile("apps/console-plugin/src/plugin/useCASLauncher.tsx", "utf8");
 const providerSource = await readFile("apps/console-plugin/src/plugin/CASContextProvider.tsx", "utf8");
 const staticAppSource = await readFile("apps/console-plugin/src/static/app.js", "utf8");
@@ -116,6 +122,53 @@ expectText(
   launcherSource,
   "UserToken proxy",
   "launcher marks UserToken proxy integration"
+);
+expectText(
+  "console-chat:suggestion-list",
+  launcherSource,
+  "data-test=\"cas-suggestion-list\"",
+  "launcher renders recommended question suggestions"
+);
+expectText(
+  "console-chat:suggestion-count",
+  launcherSource,
+  "RECOMMENDED_QUESTION_COUNT = 5",
+  "launcher shows five recommended questions"
+);
+expectText(
+  "console-chat:suggestion-randomizer",
+  launcherSource,
+  "pickQuestionSuggestions",
+  "launcher rotates recommended questions from the question bank"
+);
+if (questionBankSize(launcherSource) >= 50) {
+  pass("console-chat:question-bank", "launcher carries at least 50 OpenShift AIOps recommended questions");
+} else {
+  fail("console-chat:question-bank", `expected at least 50 questions, got ${questionBankSize(launcherSource)}`);
+}
+expectText(
+  "console-chat:empty-submit-uses-suggestion",
+  launcherSource,
+  "normalizeQuestion(question, activeSuggestion)",
+  "empty input submits the currently visible recommended question"
+);
+expectText(
+  "console-chat:focus-hides-suggestions",
+  launcherSource,
+  "onFocus={() => setShowSuggestions(false)}",
+  "question examples disappear when the user focuses the input"
+);
+expectText(
+  "console-chat:send-icon",
+  launcherSource,
+  "data-test=\"cas-send-question\"",
+  "query action is an icon button inside the composer"
+);
+expectText(
+  "console-chat:target-fields-collapsed",
+  launcherSource,
+  "data-test=\"cas-target-fields\"",
+  "target namespace/resource controls are collapsed behind a toolbar"
 );
 expectText(
   "console-proxy:csrf-cookie",
@@ -254,6 +307,24 @@ expectText(
   launcherBundle,
   "cas-stop-analysis",
   "built launcher bundle contains a stop action"
+);
+expectText(
+  "console-chat:bundle-suggestions",
+  launcherBundle,
+  "cas-suggestion-list",
+  "built launcher bundle contains recommended question suggestions"
+);
+expectText(
+  "console-chat:bundle-send-icon",
+  launcherBundle,
+  "cas-send-question",
+  "built launcher bundle contains the composer send icon button"
+);
+expectText(
+  "console-chat:bundle-target-fields",
+  launcherBundle,
+  "cas-target-fields",
+  "built launcher bundle contains collapsed target controls"
 );
 expectText(
   "console-cockpit:bundle-health-strip",

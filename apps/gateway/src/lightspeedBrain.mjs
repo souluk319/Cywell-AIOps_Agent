@@ -34,6 +34,8 @@ function buildQuery(input = {}) {
   const context = [
     "You are Cywell AI Sentinel, a read-only OpenShift operations assistant.",
     "Do not propose destructive actions. Prefer evidence, RCA hypotheses, and safe next checks.",
+    "Answer directly first in the user's language, then add concise evidence and the safest next check.",
+    "Avoid exposing internal evidence IDs unless they clarify the operational answer.",
     `Target resource: ${target.namespace}/${target.kind}/${target.name}.`,
     `Locale: ${input.locale ?? "ko-KR"}.`
   ].join("\n");
@@ -192,6 +194,20 @@ function referenceEvidence(references = []) {
   }));
 }
 
+function compactText(text = "", maxLength = 180) {
+  const compacted = String(text).replace(/\s+/g, " ").trim();
+  if (compacted.length <= maxLength) return compacted;
+  return `${compacted.slice(0, maxLength - 1).trim()}...`;
+}
+
+function causeFromAnswer(answer = "") {
+  const firstLine = String(answer)
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[`*_#>-]/g, "").trim())
+    .find(Boolean);
+  return compactText(firstLine, 120) || "Lightspeed operational analysis";
+}
+
 function collectedEvidence(input = {}) {
   return Array.isArray(input.cas_evidence?.evidence) ? input.cas_evidence.evidence : [];
 }
@@ -236,7 +252,7 @@ export function createLightspeedRun(input = {}, lightspeedResult = {}) {
     {
       id: "lightspeed:answer",
       type: "llm_answer",
-      summary: "OpenShift Lightspeed returned a streamed answer through /v1/streaming_query",
+      summary: compactText(lightspeedResult.answer, 180) || "OpenShift Lightspeed returned a streamed answer",
       source: "openshift-lightspeed.v1.streaming_query",
       observed_at: new Date().toISOString()
     },
@@ -254,7 +270,7 @@ export function createLightspeedRun(input = {}, lightspeedResult = {}) {
   const rcaResult = createRcaResult({
     cause_candidates: [
       {
-        cause: "openshift lightspeed generated operational analysis",
+        cause: causeFromAnswer(lightspeedResult.answer),
         confidence: 0.72,
         evidence_refs: causeEvidenceRefs
       }

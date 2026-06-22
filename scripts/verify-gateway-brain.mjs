@@ -51,6 +51,7 @@ const payload = buildLightspeedPayload({
 expect("brain:payload-mode", payload.mode === "ask", "Lightspeed payload uses ask mode by default");
 expect("brain:payload-context", payload.query.includes("read-only OpenShift operations assistant"), "payload carries CAS read-only context");
 expect("brain:payload-evidence", payload.query.includes("openshift:clusterversion:version"), "payload carries CAS OpenShift evidence context");
+expect("brain:payload-direct-answer", payload.query.includes("Answer directly first"), "payload asks Lightspeed to answer directly first");
 
 const run = await createLightspeedBackedRun(
   {
@@ -91,6 +92,11 @@ const run = await createLightspeedBackedRun(
 expect("brain:run-mode", run.mode === "lightspeed_read_only", "successful brain run is lightspeed_read_only");
 expect("brain:run-provider", run.audit?.answer_provider === "openshift-lightspeed", "audit marks openshift-lightspeed provider");
 expect("brain:run-evidence", run.evidence_bundle?.evidence?.some((item) => item.id === "lightspeed:answer"), "Lightspeed answer evidence exists");
+expect(
+  "brain:run-cause-from-answer",
+  run.rca_result?.cause_candidates?.[0]?.cause?.includes("ClusterVersion"),
+  "CAS RCA cause is derived from the Lightspeed answer"
+);
 expect(
   "brain:run-openshift-evidence",
   run.evidence_bundle?.evidence?.some((item) => item.id === "openshift:clusterversion:version"),
