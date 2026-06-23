@@ -1,0 +1,59 @@
+schema: olm.package
+name: cywell-ai-sentinel
+defaultChannel: alpha
+---
+schema: olm.channel
+package: cywell-ai-sentinel
+name: alpha
+entries:
+  - name: cywell-ai-sentinel-operator.v0.1.3
+---
+schema: olm.bundle
+name: cywell-ai-sentinel-operator.v0.1.3
+package: cywell-ai-sentinel
+image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-operator-bundle:v0.1.3-crc
+properties:
+  - type: olm.package
+    value:
+      packageName: cywell-ai-sentinel
+      version: 0.1.3
+  - type: olm.gvk
+    value:
+      group: ai.cywell.co.kr
+      kind: CywellAISentinel
+      version: v1alpha1
+  - type: olm.csv.metadata
+    value:
+      displayName: Cywell AI Sentinel Operator
+      description: Evidence-based AIOps Agent for OpenShift operations.
+      provider:
+        name: Cywell
+      maturity: alpha
+      maintainers:
+        - name: Cywell AI Sentinel Team
+          email: ai-sentinel-support@cywell.co.kr
+      keywords:
+        - openshift
+        - lightspeed
+        - aiops
+        - rca
+        - rag
+      links:
+        - name: Cywell AI Sentinel
+          url: https://github.com/souluk319/Cywell-AIOps_Agent
+      annotations:
+        capabilities: Basic Install
+        categories: OpenShift Optional, Monitoring, AI/Machine Learning
+        certified: "false"
+        containerImage: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-operator:v0.1.3-crc
+        createdAt: "2026-06-23T00:00:00Z"
+        description: Evidence-based AIOps Agent for OpenShift operations.
+        repository: https://github.com/souluk319/Cywell-AIOps_Agent
+        support: Cywell
+relatedImages:
+  - name: operator
+    image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-operator:v0.1.3-crc
+  - name: gateway
+    image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-gateway:v0.1.3-crc
+  - name: console-plugin
+    image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-console-plugin:v0.1.3-crc

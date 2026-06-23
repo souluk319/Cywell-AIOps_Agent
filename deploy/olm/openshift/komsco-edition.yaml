@@ -1,0 +1,16 @@
+apiVersion: ai.cywell.co.kr/v1alpha1
+kind: CywellAISentinel
+metadata:
+  name: komsco-edition
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: operand-config
+spec:
+  edition: komsco
+  mode: readOnly
+  provider: openshift-lightspeed
+  targetNamespace: cywell-ai-sentinel
+  images:
+    gateway: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-gateway:v0.1.3-crc
+    consolePlugin: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-console-plugin:v0.1.3-crc

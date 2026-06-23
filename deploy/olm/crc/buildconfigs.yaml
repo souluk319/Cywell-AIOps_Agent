@@ -1,0 +1,164 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cas-gateway
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cas-console-plugin
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: console-plugin
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cas-operator
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cas-operator-bundle
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: operator-bundle
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cas-operator-catalog
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: catalog
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: cas-gateway-v013
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+spec:
+  runPolicy: Serial
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: apps/gateway/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: cas-gateway:v0.1.3-crc
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: cas-console-plugin-v013
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: console-plugin
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+spec:
+  runPolicy: Serial
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: apps/console-plugin/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: cas-console-plugin:v0.1.3-crc
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: cas-operator-v013
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+spec:
+  runPolicy: Serial
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: apps/operator/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: cas-operator:v0.1.3-crc
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: cas-operator-bundle-v013
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: operator-bundle
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+spec:
+  runPolicy: Serial
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: deploy/olm/bundle.Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: cas-operator-bundle:v0.1.3-crc
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: cas-operator-catalog-v013
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: catalog
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+spec:
+  runPolicy: Serial
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: deploy/olm/catalog.Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: cas-operator-catalog:v0.1.3-crc

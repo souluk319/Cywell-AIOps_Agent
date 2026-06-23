@@ -23,10 +23,13 @@
     "verify:console:visual": "node ./scripts/verify-console-visual-smoke.mjs",
     "verify:console:local-preview": "node ./scripts/verify-console-local-preview.mjs",
     "verify:console:simulation-visual": "node ./scripts/verify-console-simulation-visual.mjs",
+    "verify:operator:package": "node ./scripts/verify-operator-package.mjs",
+    "verify:catalog:crc": "node ./scripts/verify-catalog-crc.mjs",
     "verify:crc:connection": "node ./scripts/verify-crc-connection.mjs --require-cluster",
     "verify:crc:connection:preview": "node ./scripts/verify-crc-connection.mjs",
     "verify:crc:deployment": "node ./scripts/verify-crc-deployment.mjs",
     "deploy:crc": "node ./scripts/deploy-crc-dev.mjs",
+    "deploy:olm:crc": "node ./scripts/deploy-olm-crc.mjs",
     "verify:deploy:manifests": "node ./scripts/verify-deploy-manifests.mjs"
   },
   "dependencies": {

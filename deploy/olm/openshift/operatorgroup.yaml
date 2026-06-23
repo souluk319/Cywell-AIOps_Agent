@@ -1,0 +1,11 @@
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: cywell-ai-sentinel
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: operatorgroup
+spec:
+  targetNamespaces:
+    - cywell-ai-sentinel

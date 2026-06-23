@@ -1,0 +1,251 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  name: cywell-ai-sentinel-operator.v0.1.3
+  namespace: placeholder
+  labels:
+    operatorframework.io/arch.amd64: supported
+    operatorframework.io/os.linux: supported
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "ai.cywell.co.kr/v1alpha1",
+          "kind": "CywellAISentinel",
+          "metadata": {
+            "name": "komsco-edition",
+            "namespace": "cywell-ai-sentinel"
+          },
+          "spec": {
+            "edition": "komsco",
+            "mode": "readOnly",
+            "provider": "openshift-lightspeed",
+            "targetNamespace": "cywell-ai-sentinel",
+            "images": {
+              "gateway": "image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-gateway:v0.1.3-crc",
+              "consolePlugin": "image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-console-plugin:v0.1.3-crc"
+            }
+          }
+        }
+      ]
+    capabilities: Basic Install
+    categories: OpenShift Optional, Monitoring, AI/Machine Learning
+    certified: "false"
+    containerImage: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-operator:v0.1.3-crc
+    createdAt: "2026-06-23T00:00:00Z"
+    description: Evidence-based AIOps Agent for OpenShift operations.
+    repository: https://github.com/souluk319/Cywell-AIOps_Agent
+    support: Cywell
+    com.redhat.openshift.versions: v4.16-v4.21
+    operators.openshift.io/valid-subscription: Contact Cywell
+    features.operators.openshift.io/disconnected: "true"
+    features.operators.openshift.io/fips-compliant: "false"
+    features.operators.openshift.io/proxy-aware: "true"
+    features.operators.openshift.io/tls-profiles: "true"
+spec:
+  displayName: Cywell AI Sentinel Operator
+  description: Cywell AI Sentinel installs an OpenShift-native AIOps RCA agent, AI Gateway, and dynamic console plugin that replaces the native Lightspeed launcher while preserving existing console plugins.
+  maturity: alpha
+  version: 0.1.3
+  minKubeVersion: 1.28.0
+  provider:
+    name: Cywell
+  maintainers:
+    - name: Cywell AI Sentinel Team
+      email: ai-sentinel-support@cywell.co.kr
+  keywords:
+    - openshift
+    - lightspeed
+    - aiops
+    - rca
+    - rag
+    - observability
+  links:
+    - name: Cywell AI Sentinel
+      url: https://github.com/souluk319/Cywell-AIOps_Agent
+  installModes:
+    - type: OwnNamespace
+      supported: true
+    - type: SingleNamespace
+      supported: true
+    - type: MultiNamespace
+      supported: false
+    - type: AllNamespaces
+      supported: true
+  customresourcedefinitions:
+    owned:
+      - name: cywellaisentinels.ai.cywell.co.kr
+        version: v1alpha1
+        kind: CywellAISentinel
+        displayName: Cywell AI Sentinel
+        description: Declares the Cywell AI Sentinel Gateway and ConsolePlugin deployment for an OpenShift cluster.
+  relatedImages:
+    - name: operator
+      image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-operator:v0.1.3-crc
+    - name: gateway
+      image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-gateway:v0.1.3-crc
+    - name: console-plugin
+      image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-console-plugin:v0.1.3-crc
+  install:
+    strategy: deployment
+    spec:
+      clusterPermissions:
+        - serviceAccountName: cywell-ai-sentinel-operator
+          rules:
+            - apiGroups:
+                - ai.cywell.co.kr
+              resources:
+                - cywellaisentinels
+              verbs:
+                - get
+                - list
+                - watch
+                - create
+                - update
+                - patch
+                - delete
+            - apiGroups:
+                - ai.cywell.co.kr
+              resources:
+                - cywellaisentinels/status
+              verbs:
+                - get
+                - update
+                - patch
+            - apiGroups:
+                - ""
+              resources:
+                - namespaces
+              verbs:
+                - get
+                - list
+                - create
+                - patch
+                - update
+            - apiGroups:
+                - ""
+              resources:
+                - pods
+                - pods/log
+                - events
+              verbs:
+                - get
+                - list
+                - watch
+            - apiGroups:
+                - apps
+              resources:
+                - replicasets
+              verbs:
+                - get
+                - list
+                - watch
+            - apiGroups:
+                - ""
+              resources:
+                - serviceaccounts
+                - services
+              verbs:
+                - get
+                - list
+                - watch
+                - create
+                - update
+                - patch
+            - apiGroups:
+                - apps
+              resources:
+                - deployments
+              verbs:
+                - get
+                - list
+                - watch
+                - create
+                - update
+                - patch
+            - apiGroups:
+                - networking.k8s.io
+              resources:
+                - networkpolicies
+              verbs:
+                - get
+                - list
+                - watch
+                - create
+                - update
+                - patch
+            - apiGroups:
+                - rbac.authorization.k8s.io
+              resources:
+                - roles
+                - rolebindings
+                - clusterroles
+                - clusterrolebindings
+              verbs:
+                - get
+                - list
+                - watch
+                - create
+                - update
+                - patch
+            - apiGroups:
+                - console.openshift.io
+              resources:
+                - consoleplugins
+              verbs:
+                - get
+                - list
+                - watch
+                - create
+                - update
+                - patch
+            - apiGroups:
+                - operator.openshift.io
+              resources:
+                - consoles
+              verbs:
+                - get
+                - list
+                - watch
+                - update
+                - patch
+      deployments:
+        - name: cywell-ai-sentinel-operator
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: cywell-ai-sentinel
+                app.kubernetes.io/component: operator
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: cywell-ai-sentinel
+                  app.kubernetes.io/component: operator
+                  app.kubernetes.io/part-of: cywell-ai-sentinel
+              spec:
+                serviceAccountName: cywell-ai-sentinel-operator
+                containers:
+                  - name: operator
+                    image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-operator:v0.1.3-crc
+                    imagePullPolicy: Always
+                    env:
+                      - name: POD_NAMESPACE
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
+                      - name: CAS_OPERATOR_VERSION
+                        value: "0.1.3"
+                      - name: CAS_TARGET_NAMESPACE
+                        value: cywell-ai-sentinel
+                      - name: CAS_GATEWAY_IMAGE
+                        value: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-gateway:v0.1.3-crc
+                      - name: CAS_CONSOLE_PLUGIN_IMAGE
+                        value: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-console-plugin:v0.1.3-crc
+                    resources:
+                      requests:
+                        cpu: 20m
+                        memory: 96Mi
+                      limits:
+                        cpu: 250m
+                        memory: 256Mi

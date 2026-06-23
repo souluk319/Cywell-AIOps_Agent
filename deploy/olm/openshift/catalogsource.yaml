@@ -1,0 +1,16 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: cywell-ai-sentinel-catalog
+  namespace: openshift-marketplace
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: catalog
+spec:
+  sourceType: grpc
+  image: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-operator-catalog:v0.1.3-crc
+  displayName: Cywell AI Sentinel Catalog
+  publisher: Cywell
+  updateStrategy:
+    registryPoll:
+      interval: 10m

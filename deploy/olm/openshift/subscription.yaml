@@ -1,0 +1,15 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: cywell-ai-sentinel
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: subscription
+spec:
+  channel: alpha
+  name: cywell-ai-sentinel
+  source: cywell-ai-sentinel-catalog
+  sourceNamespace: openshift-marketplace
+  startingCSV: cywell-ai-sentinel-operator.v0.1.3
+  installPlanApproval: Automatic
