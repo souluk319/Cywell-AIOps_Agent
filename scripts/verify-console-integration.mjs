@@ -521,6 +521,18 @@ expectText(
   "data-test=\"cas-next-check-run\"",
   "Next Checks expose an executable run button for visual and E2E checks"
 );
+expectText(
+  "console-actions:default-actions",
+  launcherSource,
+  "defaultNextCheckActions(target)",
+  "Next Checks render executable default checks even when the overview action payload is empty or still loading"
+);
+expectText(
+  "console-actions:target-prop",
+  launcherSource,
+  "target={{",
+  "Next Checks receive the currently selected analysis target"
+);
 rejectText(
   "console-actions:no-direct-href-navigation",
   launcherSource,

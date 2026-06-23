@@ -2617,6 +2617,36 @@ function executableActionQuestion(action: OverviewAction, language: Language) {
   return `"${label}" 항목을 현재 OpenShift 증거, Metric, Runbook 근거 기준으로 확인해줘.`;
 }
 
+function defaultNextCheckActions(target: QueryTarget): OverviewAction[] {
+  const namespace = target.namespace || "default";
+  const kind = target.kind || (target.name === "version" ? "ClusterVersion" : "Pod");
+  const name = target.name || "version";
+  const resourceTarget = { namespace, kind, name };
+  return [
+    {
+      id: `default-check:rca:${namespace}:${kind}:${name}`,
+      label: `RCA check: ${kind}/${name}`,
+      type: "cas_query",
+      target: resourceTarget,
+      question: `${namespace} namespace의 ${kind}/${name} 상태, 이벤트, 로그, 메트릭, Runbook 근거를 연결해서 원인 후보와 다음 확인 순서를 알려줘.`
+    },
+    {
+      id: `default-check:namespace-events:${namespace}`,
+      label: "Namespace event check",
+      type: "cas_query",
+      target: { namespace, kind: "Namespace", name: namespace },
+      question: `${namespace} namespace의 최근 Warning 이벤트, Pending Pod, 재시작 증가를 기준으로 지금 우선 확인할 장애 후보를 정리해줘.`
+    },
+    {
+      id: "default-check:cluster-version",
+      label: "ClusterVersion check",
+      type: "cas_query",
+      target: { namespace: "default", kind: "ClusterVersion", name: "version" },
+      question: "ClusterVersion/version 상태와 최근 조건을 기준으로 클러스터 자체 이상 징후가 있는지 확인해줘."
+    }
+  ];
+}
+
 function targetKey(target: QueryTarget) {
   return `${target.namespace}::${target.kind}::${target.name}`;
 }
@@ -2959,6 +2989,7 @@ function OverviewCockpit({
   status,
   activeView,
   copy,
+  target,
   onRefresh,
   onRunQuestion,
   onSelectWorkload,
@@ -2968,6 +2999,7 @@ function OverviewCockpit({
   status: "idle" | "loading" | "ready" | "degraded";
   activeView: Exclude<ActiveView, "chat" | "simulation">;
   copy: (typeof languageCopy)[Language];
+  target: QueryTarget;
   onRefresh: () => void;
   onRunQuestion: (question: string, resourceName?: string, namespace?: string, resourceKind?: string, modeOverride?: ChatMode) => void;
   onSelectWorkload: (workload: RiskWorkload) => void;
@@ -2976,7 +3008,8 @@ function OverviewCockpit({
   const signals = overview?.signals ?? {};
   const riskWorkloads = overview?.risk_workloads ?? [];
   const timeline = overview?.evidence_timeline ?? [];
-  const actions = overview?.actions ?? [];
+  const overviewActions = overview?.actions ?? [];
+  const actions = overviewActions.length > 0 ? overviewActions : defaultNextCheckActions(target);
   const eventReasons = overview?.event_reasons ?? [];
   const missing = overview?.missing ?? [];
   const evidenceStatus = overview?.evidence_status ?? [];
@@ -4648,6 +4681,11 @@ export function CASLauncher() {
                 copy={copy}
                 overview={overview}
                 status={overviewStatus}
+                target={{
+                  namespace,
+                  kind: resourceKind,
+                  name: resourceName
+                }}
                 onRefresh={refreshOverview}
                 onRunQuestion={runOverviewQuestion}
                 onSelectWorkload={selectWorkload}
