@@ -140,7 +140,7 @@ expect(
   "OpenShift native LightspeedButton capability is still enabled"
 );
 
-const pods = getJson("runtime:pods", ["get", "pods", "-n", namespace]);
+const pods = getJson("runtime:pods", ["get", "pods", "-n", namespace, "-l", "app.kubernetes.io/name=cywell-ai-sentinel"]);
 const gatewayPod = pods?.items?.find((pod) => pod.metadata?.name?.startsWith("cas-gateway-") && podReady(pod));
 const consolePod = pods?.items?.find((pod) => pod.metadata?.name?.startsWith("cas-console-plugin-") && podReady(pod));
 

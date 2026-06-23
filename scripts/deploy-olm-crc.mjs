@@ -182,6 +182,11 @@ waitForJsonpath(
   240000
 );
 
+if (forceBuild) {
+  console.log("Restarting CAS operands so force-built image tags are pulled");
+  run("oc", ["rollout", "restart", "deploy/cas-gateway", "deploy/cas-console-plugin", "-n", project], { stdio: "inherit" });
+}
+
 console.log("Waiting for CAS operand deployments");
 run("oc", ["rollout", "status", "deploy/cas-gateway", "-n", project, "--timeout=180s"], { stdio: "inherit" });
 run("oc", ["rollout", "status", "deploy/cas-console-plugin", "-n", project, "--timeout=180s"], { stdio: "inherit" });
