@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node ./scripts/build-static.mjs && webpack --config webpack.plugin.config.cjs",
+    "build": "node ./scripts/build-static.mjs && webpack --config webpack.plugin.config.cjs && webpack --config webpack.preview.config.cjs",
     "serve": "node ./scripts/serve.mjs"
   },
   "consolePlugin": {

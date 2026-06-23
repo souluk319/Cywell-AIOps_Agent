@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CAS Local Preview</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: #eef2f6;
+      color: #1f2933;
+      font-family: "Red Hat Text", "Noto Sans KR", "Segoe UI", Arial, sans-serif;
+    }
+
+    .fake-console {
+      min-height: 100vh;
+    }
+
+    .fake-topbar {
+      align-items: center;
+      background: #151515;
+      color: #fff;
+      display: flex;
+      font-weight: 700;
+      height: 56px;
+      padding: 0 24px;
+    }
+
+    .fake-main {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      min-height: calc(100vh - 56px);
+    }
+
+    .fake-nav {
+      align-content: start;
+      background: #fff;
+      border-right: 1px solid #d7dee7;
+      display: grid;
+      gap: 10px;
+      padding: 18px;
+    }
+
+    .fake-content {
+      padding: 24px;
+    }
+
+    .fake-card {
+      background: #fff;
+      border: 1px solid #d7dee7;
+      border-radius: 8px;
+      max-width: 760px;
+      padding: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="fake-console">
+    <div class="fake-topbar">Red Hat OpenShift</div>
+    <div class="fake-main">
+      <aside class="fake-nav">
+        <strong>Administrator</strong>
+        <span>Home</span>
+        <span>Workloads</span>
+        <span>Observe</span>
+        <span>Storage</span>
+        <span>Networking</span>
+      </aside>
+      <main class="fake-content">
+        <section class="fake-card">
+          <h1>Cluster dashboard</h1>
+          <p>CAS local preview mounts the same launcher component used by the console plugin.</p>
+        </section>
+      </main>
+    </div>
+  </div>
+  <div id="cas-local-preview-root"></div>
+  <script src="./cas-local-preview.js"></script>
+</body>
+</html>

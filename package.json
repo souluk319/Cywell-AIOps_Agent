@@ -21,6 +21,7 @@
     "verify:console-plugin": "npm run -w @cywell-ai-sentinel/console-plugin build",
     "verify:console:integration": "node ./scripts/verify-console-integration.mjs",
     "verify:console:visual": "node ./scripts/verify-console-visual-smoke.mjs",
+    "verify:console:local-preview": "node ./scripts/verify-console-local-preview.mjs",
     "verify:console:simulation-visual": "node ./scripts/verify-console-simulation-visual.mjs",
     "verify:crc:connection": "node ./scripts/verify-crc-connection.mjs --require-cluster",
     "verify:crc:connection:preview": "node ./scripts/verify-crc-connection.mjs",

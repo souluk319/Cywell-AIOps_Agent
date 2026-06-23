@@ -43,6 +43,50 @@ function expectOrder(id, text, needles, passDetail, failDetail = passDetail) {
   pass(id, passDetail);
 }
 
+function casPanelRange(text) {
+  const panelStart = text.indexOf('className="cas-panel"');
+  const bodyStart = panelStart < 0 ? -1 : text.indexOf('<div className="cas-panel-body"', panelStart);
+  const panelEnd = bodyStart < 0 ? -1 : text.indexOf("</section>", bodyStart);
+  return {
+    panelStart,
+    panelEnd: panelEnd < 0 ? -1 : panelEnd + "</section>".length
+  };
+}
+
+function expectOutsideCasPanel(id, text, marker, passDetail, failDetail = passDetail) {
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex < 0) {
+    fail(id, `${failDetail}: missing ${marker}`);
+    return;
+  }
+
+  const { panelStart, panelEnd } = casPanelRange(text);
+  if (panelStart < 0 || panelEnd < 0) {
+    fail(id, `${failDetail}: unable to locate cas-panel range`);
+    return;
+  }
+
+  if (markerIndex > panelStart && markerIndex < panelEnd) {
+    fail(id, `${failDetail}: ${marker} is nested inside cas-panel`);
+    return;
+  }
+
+  pass(id, passDetail);
+}
+
+function rejectHeaderText(id, text, needle, passDetail, failDetail = passDetail) {
+  const headerStart = text.indexOf('<header className="cas-panel-header"');
+  const headerEnd = headerStart < 0 ? -1 : text.indexOf("</header>", headerStart);
+  if (headerStart < 0 || headerEnd < 0) {
+    fail(id, `${failDetail}: unable to locate cas-panel-header`);
+    return;
+  }
+
+  const headerSource = text.slice(headerStart, headerEnd);
+  if (headerSource.includes(needle)) fail(id, failDetail);
+  else pass(id, passDetail);
+}
+
 function questionBankSize(text, name) {
   const start = text.indexOf(`const ${name} = [`);
   if (start < 0) return 0;
@@ -111,6 +155,97 @@ expectText(
   launcherSource,
   "height: min(760px, calc(100vh - 112px))",
   "launcher uses a fixed panel height so pending/results do not resize the outer chat window"
+);
+expectText(
+  "console-chat:desktop-panel-width-560",
+  launcherSource,
+  "width: min(560px, calc(100vw - 32px));",
+  "launcher preserves the v0.1.1 560px desktop CAS panel width"
+);
+expectText(
+  "console-chat:conversation-sidebar-marker",
+  launcherSource,
+  'data-test="cas-conversation-sidebar"',
+  "launcher exposes the v0.1.2 external conversation sidebar marker"
+);
+expectText(
+  "console-chat:conversation-storage-key",
+  launcherSource,
+  "CONVERSATION_STORAGE_KEY",
+  "launcher defines a persistent conversation history storage key"
+);
+expectText(
+  "console-chat:conversation-auto-save",
+  launcherSource,
+  "writeSavedConversations(next)",
+  "launcher auto-saves conversations from message state instead of requiring a manual save button"
+);
+expectText(
+  "console-chat:conversation-empty-not-saved",
+  launcherSource,
+  "if (savedMessages.length === 0) return;",
+  "launcher does not save empty conversations"
+);
+expectText(
+  "console-chat:conversation-read-local-storage",
+  launcherSource,
+  "window.localStorage.getItem(CONVERSATION_STORAGE_KEY)",
+  "launcher reads saved conversations from localStorage"
+);
+expectText(
+  "console-chat:conversation-write-local-storage",
+  launcherSource,
+  "window.localStorage.setItem(CONVERSATION_STORAGE_KEY",
+  "launcher writes saved conversations to localStorage"
+);
+expectOutsideCasPanel(
+  "console-chat:conversation-sidebar-outside-panel",
+  launcherSource,
+  'data-test="cas-conversation-sidebar"',
+  "conversation sidebar marker is outside cas-panel so the v0.1.1 panel remains intact",
+  "conversation sidebar must be a sibling wing outside cas-panel"
+);
+rejectText(
+  "console-chat:no-panel-workspace",
+  launcherSource,
+  "cas-panel-workspace",
+  "launcher does not wrap the preserved panel in an internal workspace container"
+);
+rejectText(
+  "console-chat:no-panel-split-layout",
+  launcherSource,
+  "cas-panel-split",
+  "launcher does not introduce an internal split layout inside the CAS panel"
+);
+rejectText(
+  "console-chat:no-panel-fullscreen-layout",
+  launcherSource,
+  "cas-panel-fullscreen",
+  "launcher does not introduce a fullscreen CAS panel layout"
+);
+expectText(
+  "console-chat:conversation-sidebar-collapse-control",
+  launcherSource,
+  'data-test="cas-sidebar-collapse"',
+  "launcher exposes a dedicated conversation wing collapse control"
+);
+expectText(
+  "console-chat:conversation-sidebar-rail",
+  launcherSource,
+  'data-test="cas-sidebar-rail"',
+  "launcher exposes a collapsed rail for reopening conversation history"
+);
+expectText(
+  "console-chat:conversation-sidebar-expand-icon",
+  launcherSource,
+  "function ExpandRightIcon",
+  "collapsed conversation rail uses an explicit expand icon"
+);
+expectText(
+  "console-chat:conversation-sidebar-collapse-icon",
+  launcherSource,
+  "function CollapseLeftIcon",
+  "expanded conversation wing uses an explicit collapse icon"
 );
 expectText(
   "console-chat:internal-thread-scroll",
@@ -245,12 +380,17 @@ expectText(
   "data-test=\"cas-view-switcher\"",
   "launcher exposes header icon view switching"
 );
-expectOrder(
-  "console-chat:new-chat-adjacent-to-chat",
+expectText(
+  "console-chat:new-chat-in-sidebar",
   launcherSource,
-  ["data-test={`cas-view-${view}`}", "view === \"chat\" &&", "data-test=\"cas-new-chat\""],
-  "new chat action is rendered immediately after the chat icon",
-  "new chat must sit next to chat, not after unrelated dashboard views"
+  'data-test="cas-sidebar-new-chat"',
+  "new chat lives in the conversation wing instead of cluttering the panel header"
+);
+rejectHeaderText(
+  "console-chat:no-header-new-chat",
+  launcherSource,
+  "cas-new-chat",
+  "panel header does not duplicate the conversation wing new-chat control"
 );
 expectText(
   "console-chat:language-toggle",
@@ -300,6 +440,36 @@ expectOrder(
   launcherSource,
   ["data-test=\"cas-target-toggle\"", "data-test=\"cas-tutorial-toggle\"", "data-test=\"cas-language-toggle\""],
   "tutorial/help sits after target settings and before language"
+);
+rejectHeaderText(
+  "console-chat:no-header-conversation-sidebar",
+  launcherSource,
+  'data-test="cas-conversation-sidebar"',
+  "panel header does not duplicate the external conversation sidebar control"
+);
+rejectHeaderText(
+  "console-chat:no-header-conversation-list",
+  launcherSource,
+  "cas-conversation-list",
+  "panel header does not contain a duplicate conversation-list icon"
+);
+rejectHeaderText(
+  "console-chat:no-header-history",
+  launcherSource,
+  "cas-history",
+  "panel header does not contain a duplicate history icon"
+);
+rejectHeaderText(
+  "console-chat:no-header-sidebar-open",
+  launcherSource,
+  "cas-sidebar-open",
+  "panel header does not contain a sidebar-open/history control"
+);
+rejectHeaderText(
+  "console-chat:no-header-saved-conversations",
+  launcherSource,
+  "savedConversations",
+  "panel header does not contain a saved-conversations/history control"
 );
 expectText(
   "console-chat:language-icon",
@@ -636,10 +806,10 @@ expectText(
   "target settings has an explicit apply action"
 );
 expectText(
-  "console-chat:new-chat-header",
+  "console-chat:new-chat-sidebar",
   launcherSource,
-  "data-test=\"cas-new-chat\"",
-  "new chat is a header icon instead of a full-width footer control"
+  "data-test=\"cas-sidebar-new-chat\"",
+  "new chat is a compact icon in the conversation sidebar"
 );
 rejectText(
   "console-chat:no-footer-toolbar",
@@ -996,10 +1166,40 @@ expectText(
   "built launcher bundle contains streaming response reader"
 );
 expectText(
-  "console-chat:bundle-new-chat",
+  "console-chat:bundle-sidebar-new-chat",
+  launcherBundle,
+  "cas-sidebar-new-chat",
+  "built launcher bundle contains the sidebar new-chat action"
+);
+rejectText(
+  "console-chat:bundle-no-header-new-chat",
   launcherBundle,
   "cas-new-chat",
-  "built launcher bundle contains header new-chat action"
+  "built launcher bundle does not contain the old header new-chat action"
+);
+expectText(
+  "console-chat:bundle-conversation-sidebar",
+  launcherBundle,
+  "cas-conversation-sidebar",
+  "built launcher bundle contains the external conversation sidebar marker"
+);
+rejectText(
+  "console-chat:bundle-no-panel-workspace",
+  launcherBundle,
+  "cas-panel-workspace",
+  "built launcher bundle does not contain an internal panel workspace wrapper"
+);
+rejectText(
+  "console-chat:bundle-no-panel-split-layout",
+  launcherBundle,
+  "cas-panel-split",
+  "built launcher bundle does not contain an internal split panel layout"
+);
+rejectText(
+  "console-chat:bundle-no-panel-fullscreen-layout",
+  launcherBundle,
+  "cas-panel-fullscreen",
+  "built launcher bundle does not contain a fullscreen panel layout"
 );
 expectText(
   "console-chat:bundle-target-fields",
