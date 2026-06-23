@@ -533,6 +533,18 @@ expectText(
   "target={{",
   "Next Checks receive the currently selected analysis target"
 );
+expectText(
+  "console-actions:language-prop",
+  launcherSource,
+  "language={language}",
+  "Next Checks receive the current language instead of reading an undefined outer variable"
+);
+expectText(
+  "console-actions:language-contract",
+  launcherSource,
+  "language: Language;",
+  "Overview cockpit declares language as an explicit render contract"
+);
 rejectText(
   "console-actions:no-direct-href-navigation",
   launcherSource,

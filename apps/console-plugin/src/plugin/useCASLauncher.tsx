@@ -2989,6 +2989,7 @@ function OverviewCockpit({
   status,
   activeView,
   copy,
+  language,
   target,
   onRefresh,
   onRunQuestion,
@@ -2999,6 +3000,7 @@ function OverviewCockpit({
   status: "idle" | "loading" | "ready" | "degraded";
   activeView: Exclude<ActiveView, "chat" | "simulation">;
   copy: (typeof languageCopy)[Language];
+  language: Language;
   target: QueryTarget;
   onRefresh: () => void;
   onRunQuestion: (question: string, resourceName?: string, namespace?: string, resourceKind?: string, modeOverride?: ChatMode) => void;
@@ -4679,6 +4681,7 @@ export function CASLauncher() {
               <OverviewCockpit
                 activeView={activeView}
                 copy={copy}
+                language={language}
                 overview={overview}
                 status={overviewStatus}
                 target={{
