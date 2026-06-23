@@ -412,8 +412,8 @@ expectText(
 expectText(
   "console-chat:komsco-agent-subtitle",
   launcherSource,
-  "KOMSCO AI AGENT",
-  "launcher header copy brands the customer edition as KOMSCO AI AGENT"
+  "KOMSCO EDITION",
+  "launcher header copy brands the customer edition as KOMSCO EDITION"
 );
 expectText(
   "console-chat:status-light",
@@ -568,6 +568,24 @@ expectText(
   launcherSource,
   "data-test=\"cas-target-namespace-select\"",
   "target namespace is selected from known options instead of raw typing only"
+);
+expectText(
+  "console-chat:target-all-namespaces-option",
+  launcherSource,
+  "targetAllNamespaces",
+  "target selector exposes an All namespaces option for broad RCA discovery"
+);
+expectText(
+  "console-chat:target-all-namespaces-sentinel",
+  launcherSource,
+  "__all_namespaces__",
+  "All namespaces uses an internal sentinel instead of a fake Kubernetes namespace"
+);
+expectText(
+  "console-chat:target-kind-filtered-by-namespace",
+  launcherSource,
+  "matchingKinds(targetOptions, namespace)",
+  "target kind choices are filtered by the selected namespace scope"
 );
 expectText(
   "console-chat:target-kind-select",

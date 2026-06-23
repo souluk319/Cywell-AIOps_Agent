@@ -6,6 +6,7 @@ import { collectRunbookEvidence, getRunbookConfig } from "./runbookAdapter.mjs";
 
 const defaultApiUrl = "https://kubernetes.default.svc";
 const defaultTimeoutMs = 8000;
+const ALL_NAMESPACES = "__all_namespaces__";
 
 export function getEvidenceConfig(env = process.env) {
   return {
@@ -24,9 +25,23 @@ function getAuxiliaryConfigs(options = {}) {
   };
 }
 
+function isAllNamespacesScope(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === ALL_NAMESPACES || normalized === "*" || normalized === "all" || normalized === "all-namespaces";
+}
+
+function namespaceFromInput(input = {}, fallback = "default") {
+  const namespace = input.scope?.namespaces?.[0] ?? input.namespace ?? input.resourceRef?.namespace ?? fallback;
+  return isAllNamespacesScope(namespace) ? ALL_NAMESPACES : String(namespace || fallback);
+}
+
+function namespaceScopeLabel(namespace) {
+  return isAllNamespacesScope(namespace) ? "all namespaces" : `${namespace} namespace`;
+}
+
 export function getEvidenceTarget(input = {}) {
   return {
-    namespace: input.scope?.namespaces?.[0] ?? input.namespace ?? input.resourceRef?.namespace ?? "default",
+    namespace: namespaceFromInput(input),
     kind: input.resourceRef?.kind ?? "Pod",
     name: input.resourceRef?.name ?? "api-7c8d9"
   };
@@ -221,8 +236,12 @@ function podRestartTotal(pod = {}) {
   return (pod.status?.containerStatuses ?? []).reduce((sum, status) => sum + Number(status.restartCount ?? 0), 0);
 }
 
-function podEventList(events = [], podName) {
-  return events.filter((event) => event.involvedObject?.kind === "Pod" && event.involvedObject?.name === podName);
+function podEventList(events = [], podName, namespace) {
+  return events.filter((event) => {
+    const involved = event.involvedObject ?? {};
+    if (involved.kind !== "Pod" || involved.name !== podName) return false;
+    return !namespace || !involved.namespace || involved.namespace === namespace;
+  });
 }
 
 function consoleHrefFor(resource = {}) {
@@ -298,6 +317,13 @@ function actionTargetFromWorkload(workload) {
 }
 
 function namespaceTarget(namespace) {
+  if (isAllNamespacesScope(namespace)) {
+    return {
+      namespace: ALL_NAMESPACES,
+      kind: "Namespace",
+      name: ALL_NAMESPACES
+    };
+  }
   return {
     namespace,
     kind: "Namespace",
@@ -307,6 +333,7 @@ function namespaceTarget(namespace) {
 
 function overviewActionQueue(namespace, topWorkload) {
   const actions = [];
+  const scopeLabel = isAllNamespacesScope(namespace) ? "모든 namespace" : `${namespace} namespace`;
   if (topWorkload) {
     const target = actionTargetFromWorkload(topWorkload);
     const resource = `${topWorkload.kind}/${topWorkload.name}`;
@@ -334,10 +361,10 @@ function overviewActionQueue(namespace, topWorkload) {
   }
   actions.push({
     id: `check:namespace-events:${namespace}`,
-    label: "Namespace event check",
+    label: isAllNamespacesScope(namespace) ? "All namespaces check" : "Namespace event check",
     type: "cas_query",
     target: namespaceTarget(namespace),
-    question: `${namespace} namespace의 최근 Warning 이벤트, Pending Pod, 재시작 증가를 한 번에 확인해서 지금 우선 봐야 할 장애 후보를 정리해줘.`
+    question: `${scopeLabel}의 최근 Warning 이벤트, Pending Pod, 재시작 증가를 한 번에 확인해서 지금 우선 봐야 할 장애 후보를 정리해줘.`
   });
   actions.push({
     id: "check:cluster-version",
@@ -403,6 +430,56 @@ async function collectNamespaceEvidence(collection, target, options) {
     `/api/v1/namespaces/${encodeURIComponent(target.namespace)}`,
     options,
     (namespace) => `Namespace phase=${namespace.status?.phase ?? "unknown"} name=${namespace.metadata?.name ?? target.namespace}`
+  );
+}
+
+async function collectAllNamespacesEvidence(collection, options) {
+  await captureJson(
+    collection,
+    "openshift:namespaces:all",
+    "namespace",
+    "api/v1/namespaces",
+    "/api/v1/namespaces?limit=80",
+    options,
+    (namespaces) => {
+      const items = namespaces.items ?? [];
+      const sample = items
+        .map((namespace) => namespace.metadata?.name)
+        .filter(Boolean)
+        .slice(0, 8)
+        .join(", ");
+      return `Namespaces count=${items.length}${sample ? ` sample=[${sample}]` : ""}`;
+    }
+  );
+  await captureJson(
+    collection,
+    "openshift:pods:all-namespaces",
+    "pod",
+    "api/v1/pods",
+    "/api/v1/pods?limit=100",
+    options,
+    (pods) => {
+      const items = pods.items ?? [];
+      const pending = items.filter((pod) => pod.status?.phase === "Pending").length;
+      const restarted = items.filter((pod) => podRestartTotal(pod) > 0).length;
+      return `Pods across namespaces count=${items.length} pending=${pending} restarted=${restarted}`;
+    }
+  );
+  await captureJson(
+    collection,
+    "openshift:events:all-namespaces",
+    "event",
+    "api/v1/events",
+    "/api/v1/events?limit=120",
+    options,
+    (events) => {
+      const warnings = (events.items ?? []).filter((event) => event.type === "Warning");
+      const sample = warnings
+        .slice(0, 5)
+        .map((event) => `${event.involvedObject?.namespace ?? "cluster"}/${event.reason ?? "Warning"}`)
+        .join(", ");
+      return `Warning events across namespaces count=${warnings.length}${sample ? ` sample=[${sample}]` : ""}`;
+    }
   );
 }
 
@@ -557,12 +634,16 @@ export async function collectOpenShiftEvidence(input = {}, options = {}) {
   };
 
   const kind = String(target.kind ?? "").toLowerCase();
-  if (target.namespace && !["clusterversion", "clusteroperator", "node"].includes(kind)) {
+  if (isAllNamespacesScope(target.namespace) && kind === "namespace") {
+    await collectAllNamespacesEvidence(collection, requestOptions);
+  } else if (target.namespace && !["clusterversion", "clusteroperator", "node", "namespace"].includes(kind)) {
     await collectNamespaceEvidence(collection, target, requestOptions);
   }
 
   if (kind === "clusterversion") {
     await collectClusterVersionEvidence(collection, target, requestOptions);
+  } else if (kind === "namespace") {
+    if (!isAllNamespacesScope(target.namespace)) await collectNamespaceEvidence(collection, target, requestOptions);
   } else if (kind === "pod") {
     await collectPodEvidence(collection, target, requestOptions);
   } else if (kind === "deployment") {
@@ -576,7 +657,7 @@ export async function collectOpenShiftEvidence(input = {}, options = {}) {
 
 export async function collectOpenShiftTargets(input = {}, options = {}) {
   const config = options.config ?? getEvidenceConfig();
-  const currentNamespace = input.namespace ?? input.scope?.namespaces?.[0] ?? "default";
+  const currentNamespace = namespaceFromInput(input);
   const missing = [];
   const targets = new Map();
   const addTarget = (target = {}) => {
@@ -587,7 +668,8 @@ export async function collectOpenShiftTargets(input = {}, options = {}) {
     targets.set(`${namespace}::${kind}::${name}`, { namespace, kind, name });
   };
 
-  addTarget({ namespace: currentNamespace, kind: "ClusterVersion", name: "version" });
+  addTarget({ namespace: ALL_NAMESPACES, kind: "Namespace", name: ALL_NAMESPACES });
+  addTarget({ namespace: "default", kind: "ClusterVersion", name: "version" });
 
   if (config.provider === "none") {
     return {
@@ -627,7 +709,9 @@ export async function collectOpenShiftTargets(input = {}, options = {}) {
 
   const namespaces = await getList("namespace", "/api/v1/namespaces?limit=80");
   const namespaceNames = namespaces.map((item) => item.metadata?.name).filter(Boolean);
-  const selectedNamespaces = [...new Set([currentNamespace, ...namespaceNames])].slice(0, 24);
+  const selectedNamespaces = [...new Set([currentNamespace, ...namespaceNames])]
+    .filter((namespace) => !isAllNamespacesScope(namespace))
+    .slice(0, 24);
   for (const namespace of selectedNamespaces) {
     addTarget({ namespace, kind: "Namespace", name: namespace });
   }
@@ -659,7 +743,8 @@ export async function collectOpenShiftTargets(input = {}, options = {}) {
 
 export async function collectOpenShiftOverview(input = {}, options = {}) {
   const config = options.config ?? getEvidenceConfig();
-  const namespace = input.namespace ?? input.scope?.namespaces?.[0] ?? "default";
+  const namespace = namespaceFromInput(input);
+  const allNamespaces = isAllNamespacesScope(namespace);
   const scope = {
     cluster: input.scope?.cluster ?? "local-cluster",
     namespaces: [namespace]
@@ -725,8 +810,8 @@ export async function collectOpenShiftOverview(input = {}, options = {}) {
 
   const namespacePath = encodeURIComponent(namespace);
   const [pods, events, clusterSummary] = await Promise.all([
-    getList("pod", `/api/v1/namespaces/${namespacePath}/pods?limit=50`),
-    getList("event", `/api/v1/namespaces/${namespacePath}/events?limit=80`),
+    allNamespaces ? getList("pod", "/api/v1/pods?limit=100") : getList("pod", `/api/v1/namespaces/${namespacePath}/pods?limit=50`),
+    allNamespaces ? getList("event", "/api/v1/events?limit=120") : getList("event", `/api/v1/namespaces/${namespacePath}/events?limit=80`),
     getClusterVersion()
   ]);
 
@@ -734,18 +819,19 @@ export async function collectOpenShiftOverview(input = {}, options = {}) {
   const riskWorkloads = pods
     .map((pod) => {
       const podName = pod.metadata?.name ?? "unknown";
-      const podEvents = podEventList(warningEvents, podName);
+      const itemNamespace = pod.metadata?.namespace ?? namespace;
+      const podEvents = podEventList(warningEvents, podName, itemNamespace);
       const risk = workloadRisk(pod, podEvents);
       return {
-        id: `openshift:workload:${namespace}:${podName}`,
-        namespace,
+        id: `openshift:workload:${itemNamespace}:${podName}`,
+        namespace: itemNamespace,
         kind: "Pod",
         name: podName,
         status: workloadStatus(pod),
         restarts: podRestartTotal(pod),
         risk,
         reason: workloadReason(pod, podEvents),
-        href: consoleHrefFor({ namespace, kind: "Pod", name: podName })
+        href: consoleHrefFor({ namespace: itemNamespace, kind: "Pod", name: podName })
       };
     })
     .filter((item) => item.risk !== "low")
@@ -770,10 +856,10 @@ export async function collectOpenShiftOverview(input = {}, options = {}) {
   const score = criticalMissing ? 0 : calculatedScore;
   const risk = criticalMissing ? "unknown" : riskLabel(score);
   const summary = criticalMissing
-    ? `Overview degraded for ${namespace}: required pod/event evidence is unavailable`
+    ? `Overview degraded for ${namespaceScopeLabel(namespace)}: required pod/event evidence is unavailable`
     : riskWorkloads.length > 0
-      ? `${riskWorkloads.length} risky workloads detected in ${namespace}. ${clusterSummary}`
-      : `No risky workloads detected in ${namespace}. ${clusterSummary}`;
+      ? `${riskWorkloads.length} risky workloads detected in ${namespaceScopeLabel(namespace)}. ${clusterSummary}`
+      : `No risky workloads detected in ${namespaceScopeLabel(namespace)}. ${clusterSummary}`;
 
   const { metricConfig, runbookConfig } = getAuxiliaryConfigs(options);
   const openShiftOverviewEvidence = timelineEvidence(timeline);
@@ -791,7 +877,7 @@ export async function collectOpenShiftOverview(input = {}, options = {}) {
     ),
     collectRunbookEvidence(
       {
-        question: `OpenShift ${namespace} namespace overview warning events restart RCA next checks`,
+        question: `OpenShift ${namespaceScopeLabel(namespace)} overview warning events restart RCA next checks`,
         namespace,
         scope,
         cas_evidence: {

@@ -233,18 +233,37 @@ if (consolePod) {
     const targetsCode = [
       "const https=require('https');",
       `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
-      "const req=https.request('https://127.0.0.1:9443/api/aiops/targets?namespace=default',{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,count:j.targets?.length||0,kinds:[...new Set((j.targets||[]).map(t=>t.kind))],sample:(j.targets||[]).slice(0,5)}));});});",
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/targets?namespace=default',{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,count:j.targets?.length||0,kinds:[...new Set((j.targets||[]).map(t=>t.kind))],hasAllNamespaces:(j.targets||[]).some(t=>t.namespace==='__all_namespaces__'&&t.kind==='Namespace'&&t.name==='__all_namespaces__'),sample:(j.targets||[]).slice(0,5)}));});});",
       "req.on('error',e=>{console.error(e.message);process.exit(1);});req.end();"
     ].join("");
     const targets = execNode(consolePod.metadata.name, targetsCode, 60000);
     expect(
       "runtime:targets-through-plugin",
-      targets.ok &&
+        targets.ok &&
         targets.stdout.includes("target_catalog") &&
         targets.stdout.includes("\"count\":") &&
-        targets.stdout.includes("ClusterVersion"),
+        targets.stdout.includes("ClusterVersion") &&
+        targets.stdout.includes("\"hasAllNamespaces\":true"),
       "console plugin forwards user token and CAS target catalog returns selectable analysis targets",
       targets.stderr || targets.stdout
+    );
+
+    const allOverviewCode = [
+      "const https=require('https');",
+      `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/overview?namespace=__all_namespaces__',{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,scope:j.scope?.namespaces?.[0],actions:j.actions?.length||0,signals:j.signals,evidenceStatus:j.evidence_status,metric:(j.evidence_groups?.metric??[]).map(e=>e.id)}));});});",
+      "req.on('error',e=>{console.error(e.message);process.exit(1);});req.end();"
+    ].join("");
+    const allOverview = execNode(consolePod.metadata.name, allOverviewCode, 60000);
+    expect(
+      "runtime:all-namespaces-overview-through-plugin",
+      allOverview.ok &&
+        allOverview.stdout.includes("overview_read_only") &&
+        allOverview.stdout.includes("\"scope\":\"__all_namespaces__\"") &&
+        allOverview.stdout.includes("\"actions\":") &&
+        allOverview.stdout.includes("metric:"),
+      "console plugin supports All namespaces overview without treating it as a fake Kubernetes namespace",
+      allOverview.stderr || allOverview.stdout
     );
 
     const simulationsCode = [

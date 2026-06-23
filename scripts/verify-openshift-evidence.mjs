@@ -134,6 +134,52 @@ const transport = async (url) => {
       })
     };
   }
+  if (path === "/api/v1/pods?limit=100") {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        items: [
+          {
+            metadata: { namespace: "default", name: "api-7c8d9" },
+            status: {
+              phase: "Running",
+              containerStatuses: [{ name: "api", restartCount: 2, state: { running: {} } }]
+            }
+          },
+          {
+            metadata: { namespace: "komsco-batch", name: "settlement-worker-28477112-qx4kp" },
+            status: {
+              phase: "Pending",
+              containerStatuses: []
+            }
+          }
+        ]
+      })
+    };
+  }
+  if (path === "/api/v1/events?limit=120") {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        items: [
+          {
+            type: "Warning",
+            reason: "OOMKilled",
+            message: "Container api was terminated because it used too much memory",
+            involvedObject: { namespace: "default", kind: "Pod", name: "api-7c8d9" },
+            lastTimestamp: "2026-06-21T09:12:00Z"
+          },
+          {
+            type: "Warning",
+            reason: "FailedScheduling",
+            message: "0/1 nodes are available: insufficient memory",
+            involvedObject: { namespace: "komsco-batch", kind: "Pod", name: "settlement-worker-28477112-qx4kp" },
+            lastTimestamp: "2026-06-21T09:13:00Z"
+          }
+        ]
+      })
+    };
+  }
   if (path === "/api/v1/namespaces/default/pods?limit=100") {
     return {
       statusCode: 200,
@@ -304,6 +350,42 @@ expect("evidence:context", context.includes("Collected read-only OpenShift evide
 expect("evidence:context-runbook", context.includes("runbook:"), "brain prompt includes runbook evidence context");
 expect("evidence:context-runbook-excerpt", context.includes("KOMSCO Synthetic"), "brain prompt includes synthetic customer runbook context");
 
+const allNamespacesEvidence = await collectOpenShiftEvidence(
+  {
+    question: "모든 namespace에서 위험 신호를 찾아줘",
+    resourceRef: { kind: "Namespace", name: "__all_namespaces__" },
+    scope: { namespaces: ["__all_namespaces__"] }
+  },
+  {
+    authorization: "Bearer test-token",
+    config,
+    transport,
+    metricConfig,
+    runbookConfig,
+    metricTransport
+  }
+);
+expect(
+  "evidence:all-namespaces:namespaces",
+  allNamespacesEvidence.evidence.some((item) => item.id === "openshift:namespaces:all"),
+  "all-namespaces evidence collects the namespace list instead of calling a fake namespace"
+);
+expect(
+  "evidence:all-namespaces:pods",
+  allNamespacesEvidence.evidence.some((item) => item.id === "openshift:pods:all-namespaces"),
+  "all-namespaces evidence collects pods across namespaces"
+);
+expect(
+  "evidence:all-namespaces:events",
+  allNamespacesEvidence.evidence.some((item) => item.id === "openshift:events:all-namespaces"),
+  "all-namespaces evidence collects events across namespaces"
+);
+expect(
+  "evidence:all-namespaces:no-fake-namespace-missing",
+  !allNamespacesEvidence.missing.some((item) => item.reason.includes("/api/v1/namespaces/__all_namespaces__")),
+  "all-namespaces evidence does not call __all_namespaces__ as a Kubernetes namespace"
+);
+
 const missing = await collectOpenShiftEvidence(
   {
     resourceRef: { kind: "Pod", name: "api-7c8d9" },
@@ -410,6 +492,35 @@ expect(
   overview.actions?.every((item) => item.type !== "cas_query" || (item.question && item.target?.namespace && item.target?.kind && item.target?.name)),
   "overview CAS query actions carry executable questions and analysis targets"
 );
+
+const allOverview = await collectOpenShiftOverview(
+  {
+    scope: { cluster: "local-cluster", namespaces: ["__all_namespaces__"] }
+  },
+  {
+    authorization: "Bearer test-token",
+    config,
+    metricConfig,
+    runbookConfig,
+    transport,
+    metricTransport
+  }
+);
+expect(
+  "overview:all-namespaces:scope",
+  allOverview.scope?.namespaces?.[0] === "__all_namespaces__",
+  "all-namespaces overview preserves the broad analysis scope"
+);
+expect(
+  "overview:all-namespaces:risk-workload",
+  allOverview.risk_workloads?.some((item) => item.namespace === "komsco-batch"),
+  "all-namespaces overview can surface risky workloads from any namespace"
+);
+expect(
+  "overview:all-namespaces:actions",
+  allOverview.actions?.some((item) => item.label === "All namespaces check"),
+  "all-namespaces overview exposes a broad next-check action"
+);
 expect(
   "overview:metric-check-action",
   overview.actions?.some((item) => item.type === "cas_query" && String(item.id ?? "").startsWith("check:metrics:")),
@@ -471,6 +582,16 @@ expect(
   "targets:namespace",
   targets.targets?.some((item) => item.kind === "Namespace" && item.name === "komsco-batch"),
   "target catalog includes Namespace options for namespace-level checks"
+);
+expect(
+  "targets:all-namespaces",
+  targets.targets?.some(
+    (item) =>
+      item.namespace === "__all_namespaces__" &&
+      item.kind === "Namespace" &&
+      item.name === "__all_namespaces__"
+  ),
+  "target catalog includes an All namespaces option for broad discovery"
 );
 expect(
   "targets:pod",

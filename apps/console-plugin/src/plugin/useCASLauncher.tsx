@@ -224,6 +224,7 @@ const localeByLanguage: Record<Language, string> = {
   ko: "ko-KR",
   en: "en-US"
 };
+const ALL_NAMESPACES = "__all_namespaces__";
 const RECOMMENDED_QUESTION_COUNT = 5;
 const OCP_AIOPS_QUESTION_BANK_KO = [
   "ClusterVersion 상태를 한 문장으로 요약해줘.",
@@ -360,6 +361,7 @@ const languageCopy: Record<
     targetNamespace: string;
     targetKind: string;
     targetName: string;
+    targetAllNamespaces: string;
     targetApply: string;
     targetClose: string;
     modeSelectorLabel: string;
@@ -458,13 +460,14 @@ const languageCopy: Record<
     emptyAnswer: "Gateway 응답은 도착했지만 answer 필드가 비어 있습니다.",
     systemReady: "",
     systemReset: "",
-    subtitle: "KOMSCO AI AGENT",
+    subtitle: "KOMSCO EDITION",
     targetPrefix: "대상 설정",
     targetTitle: "분석 대상",
     targetCurrent: "현재 대상",
     targetNamespace: "Namespace",
     targetKind: "Kind",
     targetName: "Name",
+    targetAllNamespaces: "모든 네임스페이스",
     targetApply: "적용",
     targetClose: "닫기",
     modeSelectorLabel: "질문 모드",
@@ -628,13 +631,14 @@ const languageCopy: Record<
     emptyAnswer: "The Gateway responded, but the answer field is empty.",
     systemReady: "",
     systemReset: "",
-    subtitle: "KOMSCO AI AGENT",
+    subtitle: "KOMSCO EDITION",
     targetPrefix: "Target settings",
     targetTitle: "Analysis Target",
     targetCurrent: "Current target",
     targetNamespace: "Namespace",
     targetKind: "Kind",
     targetName: "Name",
+    targetAllNamespaces: "All namespaces",
     targetApply: "Apply",
     targetClose: "Close",
     modeSelectorLabel: "Question mode",
@@ -2598,6 +2602,7 @@ function displayActionLabel(action: OverviewAction, language: Language) {
   const label = action.label ?? "";
   if (language !== "ko") return label;
   if (label === "Namespace event check") return "Namespace 이벤트 확인";
+  if (label === "All namespaces check") return "모든 네임스페이스 확인";
   if (label === "ClusterVersion check") return "ClusterVersion 확인";
   if (label.startsWith("Runbook check:")) return label.replace("Runbook check:", "Runbook 확인:");
   if (label.startsWith("RCA check:")) return label.replace("RCA check:", "RCA 확인:");
@@ -2612,7 +2617,9 @@ function executableActionQuestion(action: OverviewAction, language: Language) {
   if (action.question) return action.question;
   const label = displayActionLabel(action, language);
   if (action.target) {
-    return `${action.target.namespace} namespace의 ${action.target.kind}/${action.target.name}에 대해 "${label}" 항목을 실제 증거 기준으로 확인해줘.`;
+    const namespaceLabel = action.target.namespace === ALL_NAMESPACES ? "모든 namespace" : `${action.target.namespace} namespace`;
+    const targetName = action.target.name === ALL_NAMESPACES ? "all namespaces" : action.target.name;
+    return `${namespaceLabel}의 ${action.target.kind}/${targetName}에 대해 "${label}" 항목을 실제 증거 기준으로 확인해줘.`;
   }
   return `"${label}" 항목을 현재 OpenShift 증거, Metric, Runbook 근거 기준으로 확인해줘.`;
 }
@@ -2622,6 +2629,24 @@ function defaultNextCheckActions(target: QueryTarget): OverviewAction[] {
   const kind = target.kind || (target.name === "version" ? "ClusterVersion" : "Pod");
   const name = target.name || "version";
   const resourceTarget = { namespace, kind, name };
+  if (namespace === ALL_NAMESPACES) {
+    return [
+      {
+        id: "default-check:all-namespaces",
+        label: "All namespaces check",
+        type: "cas_query",
+        target: { namespace: ALL_NAMESPACES, kind: "Namespace", name: ALL_NAMESPACES },
+        question: "모든 namespace의 Warning 이벤트, Pending Pod, 재시작 증가, 위험 workload를 비교해서 지금 우선 확인할 장애 후보를 정리해줘."
+      },
+      {
+        id: "default-check:cluster-version",
+        label: "ClusterVersion check",
+        type: "cas_query",
+        target: { namespace: "default", kind: "ClusterVersion", name: "version" },
+        question: "ClusterVersion/version 상태와 최근 조건을 기준으로 클러스터 자체 이상 징후가 있는지 확인해줘."
+      }
+    ];
+  }
   return [
     {
       id: `default-check:rca:${namespace}:${kind}:${name}`,
@@ -2651,6 +2676,19 @@ function targetKey(target: QueryTarget) {
   return `${target.namespace}::${target.kind}::${target.name}`;
 }
 
+function targetValueLabel(value: string, copy: (typeof languageCopy)[Language]) {
+  return value === ALL_NAMESPACES ? copy.targetAllNamespaces : value;
+}
+
+function targetDisplay(target: QueryTarget, copy: (typeof languageCopy)[Language]) {
+  if (target.namespace === ALL_NAMESPACES && target.kind === "Namespace" && target.name === ALL_NAMESPACES) {
+    return copy.targetAllNamespaces;
+  }
+  const namespace = targetValueLabel(target.namespace, copy);
+  const name = targetValueLabel(target.name, copy);
+  return `${namespace} · ${target.kind || "Resource"}/${name || "name"}`;
+}
+
 function collectTargetOptions(
   overview: OverviewResult | null,
   simulations: SimulationScenario[],
@@ -2667,6 +2705,7 @@ function collectTargetOptions(
     options.set(targetKey(normalized), normalized);
   };
 
+  add({ namespace: ALL_NAMESPACES, kind: "Namespace", name: ALL_NAMESPACES });
   add(current);
   add({ namespace: "default", kind: "ClusterVersion", name: "version" });
   for (const target of catalogTargets) add(target);
@@ -2684,6 +2723,11 @@ function collectTargetOptions(
 
 function uniqueTargetValues(options: QueryTarget[], key: keyof QueryTarget) {
   return [...new Set(options.map((option) => option[key]).filter(Boolean))].sort((left, right) => left.localeCompare(right));
+}
+
+function matchingKinds(options: QueryTarget[], namespace: string) {
+  const exact = uniqueTargetValues(options.filter((option) => option.namespace === namespace), "kind");
+  return exact.length > 0 ? exact : uniqueTargetValues(options, "kind");
 }
 
 function matchingNames(options: QueryTarget[], namespace: string, kind: string) {
@@ -3628,7 +3672,10 @@ export function CASLauncher() {
   const autoScrollRef = React.useRef(true);
   const copy = languageCopy[language];
   const activeSuggestion = questionSuggestions[activeSuggestionIndex] ?? initialQuestionByLanguage[language];
-  const targetSummary = `${namespace || "default"} · ${resourceKind || "Resource"}/${resourceName || "name"}`;
+  const targetSummary = targetDisplay(
+    { namespace: namespace || "default", kind: resourceKind || "Resource", name: resourceName || "name" },
+    copy
+  );
   const statusLabel =
     brainStatus.state === "ready"
       ? copy.statusConnected
@@ -3645,7 +3692,7 @@ export function CASLauncher() {
     [namespace, overview, resourceKind, resourceName, simulations, targetCatalog]
   );
   const namespaceOptions = React.useMemo(() => uniqueTargetValues(targetOptions, "namespace"), [targetOptions]);
-  const kindOptions = React.useMemo(() => uniqueTargetValues(targetOptions, "kind"), [targetOptions]);
+  const kindOptions = React.useMemo(() => matchingKinds(targetOptions, namespace), [namespace, targetOptions]);
   const nameOptions = React.useMemo(() => matchingNames(targetOptions, namespace, resourceKind), [namespace, resourceKind, targetOptions]);
 
   const selectTarget = React.useCallback((target: QueryTarget) => {
@@ -3657,6 +3704,7 @@ export function CASLauncher() {
   const selectNamespace = React.useCallback(
     (nextNamespace: string) => {
       const nextTarget =
+        targetOptions.find((option) => option.namespace === nextNamespace && option.kind === "Namespace" && option.name === nextNamespace) ??
         targetOptions.find((option) => option.namespace === nextNamespace && option.kind === resourceKind) ??
         targetOptions.find((option) => option.namespace === nextNamespace);
       if (nextTarget) {
@@ -3929,6 +3977,7 @@ export function CASLauncher() {
       const targetResourceName = nextResourceName ?? inferredTarget?.name ?? resourceName;
       const targetNamespace = nextNamespace ?? inferredTarget?.namespace ?? namespace;
       const targetResourceKind = nextResourceKind ?? inferredTarget?.kind ?? resourceKind;
+      const targetNamespaceScope = targetNamespace || "default";
       const simulation = simulationId
         ? {
             scenarioId: simulationId,
@@ -3982,7 +4031,7 @@ export function CASLauncher() {
             question: submittedQuestion,
             scope: {
               cluster: simulationId ? "cas-simulation" : "local-cluster",
-              namespaces: [targetNamespace || "default"]
+              namespaces: [targetNamespaceScope]
             },
             resourceRef: {
               kind: targetResourceKind || (targetResourceName === "version" ? "ClusterVersion" : "Pod"),
@@ -3994,7 +4043,7 @@ export function CASLauncher() {
             locale: localeByLanguage[language],
             conversation_id: conversationId,
             context: {
-              namespace: targetNamespace || "default",
+              namespace: targetNamespaceScope,
               resourceKind: targetResourceKind || (targetResourceName === "version" ? "ClusterVersion" : "Pod"),
               resourceName: targetResourceName || "version",
               timeRange: effectiveChatMode === "troubleshooting" ? "1h" : null,
@@ -4414,7 +4463,7 @@ export function CASLauncher() {
                     >
                       {namespaceOptions.map((option) => (
                         <option key={option} value={option}>
-                          {option}
+                          {targetValueLabel(option, copy)}
                         </option>
                       ))}
                     </select>
@@ -4444,7 +4493,7 @@ export function CASLauncher() {
                     >
                       {nameOptions.map((option) => (
                         <option key={option} value={option}>
-                          {option}
+                          {targetValueLabel(option, copy)}
                         </option>
                       ))}
                     </select>

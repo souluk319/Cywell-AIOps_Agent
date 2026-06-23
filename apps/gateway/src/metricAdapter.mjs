@@ -3,6 +3,7 @@ import { request as httpsRequest } from "node:https";
 
 const defaultThanosUrl = "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091";
 const defaultTimeoutMs = 8000;
+const ALL_NAMESPACES = "__all_namespaces__";
 
 export function getMetricConfig(env = process.env) {
   return {
@@ -71,9 +72,19 @@ function targetSlug(target = {}) {
   return [target.namespace, target.kind, target.name].filter(Boolean).join(":") || "cluster";
 }
 
+function isAllNamespacesScope(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === ALL_NAMESPACES || normalized === "*" || normalized === "all" || normalized === "all-namespaces";
+}
+
+function namespaceFromInput(input = {}) {
+  const namespace = input.scope?.namespaces?.[0] ?? input.namespace ?? input.resourceRef?.namespace ?? "default";
+  return isAllNamespacesScope(namespace) ? ALL_NAMESPACES : namespace;
+}
+
 function targetFromInput(input = {}) {
   return {
-    namespace: input.scope?.namespaces?.[0] ?? input.namespace ?? input.resourceRef?.namespace ?? "default",
+    namespace: namespaceFromInput(input),
     kind: input.resourceRef?.kind ?? "Pod",
     name: input.resourceRef?.name ?? "api-7c8d9"
   };
@@ -153,6 +164,14 @@ function podQueries(target) {
 }
 
 function clusterQueries(target) {
+  if (isAllNamespacesScope(target.namespace)) {
+    return [
+      {
+        name: "namespace_restart_increase_by_pod",
+        query: "topk(10, sum by (namespace,pod) (increase(kube_pod_container_status_restarts_total[30m])))"
+      }
+    ];
+  }
   const namespace = String(target.namespace ?? "default").replace(/"/g, '\\"');
   return [
     {
