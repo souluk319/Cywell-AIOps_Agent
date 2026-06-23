@@ -255,7 +255,19 @@ expectText(
   "console-chat:conversation-sidebar",
   launcherSource,
   "data-test=\"cas-conversation-sidebar\"",
-  "conversation history is rendered in the left sidebar"
+  "conversation history is rendered in the left wing"
+);
+expectText(
+  "console-chat:conversation-wing",
+  launcherSource,
+  "className=\"cas-conversation-wing\"",
+  "conversation history is attached as a left wing outside the original panel body"
+);
+rejectText(
+  "console-chat:no-inner-workspace-sidebar",
+  launcherSource,
+  "cas-panel-workspace",
+  "conversation history must not split the original CAS panel into an internal workspace"
 );
 expectText(
   "console-chat:sidebar-new-chat",

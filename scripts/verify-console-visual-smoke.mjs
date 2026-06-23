@@ -84,20 +84,18 @@ ${styles}
   </div>
 </div>
 <div class="cas-launcher-root" data-test="cas-launcher-root">
-<section aria-label="Cywell AI Sentinel" class="cas-panel" data-sidebar-open="true" data-test="cas-launcher-panel" role="dialog">
+<aside aria-label="저장된 대화" class="cas-conversation-wing" data-test="cas-conversation-sidebar">
+  <div class="cas-conversation-sidebar-header"><strong>저장된 대화</strong><button class="cas-link-button" data-test="cas-sidebar-close" type="button">닫기</button></div>
+  <button class="cas-conversation-new" data-test="cas-sidebar-new-chat" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" role="img"><path d="M5 6.5h11.5v8H9l-4 3v-11Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"></path><path d="M17 5v5M14.5 7.5h5" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></svg><span>새 대화</span></button>
+  <label class="cas-conversation-search"><span>대화 검색</span><input aria-label="대화 검색" data-test="cas-sidebar-search" value=""></label>
+  <div class="cas-conversation-list" data-test="cas-saved-conversation-list">
+    <div class="cas-conversation-row"><button class="cas-conversation-item" data-active="true" data-test="cas-saved-conversation" type="button"><strong>ClusterVersion 상태 요약</strong><span>default · ClusterVersion/version</span><span>Ask · 06.23. 14:10</span></button><button aria-label="삭제" class="cas-conversation-delete" data-test="cas-delete-conversation" type="button">x</button></div>
+    <div class="cas-conversation-row"><button class="cas-conversation-item" data-test="cas-saved-conversation" type="button"><strong>settlement-worker Pending 원인 분석</strong><span>komsco-batch · Pod/settlement-worker</span><span>Troubleshooting · 06.23. 13:54</span></button><button aria-label="삭제" class="cas-conversation-delete" data-test="cas-delete-conversation" type="button">x</button></div>
+  </div>
+  <div class="cas-conversation-footer"><span>자동 저장</span><button class="cas-link-button" type="button">설정</button></div>
+</aside>
+<section aria-label="Cywell AI Sentinel" class="cas-panel" data-test="cas-launcher-panel" role="dialog">
   <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>KOMSCO EDITION</span></div><div class="cas-header-tools"><nav aria-label="AI Sentinel 화면" class="cas-view-switcher" data-test="cas-view-switcher"><button aria-label="채팅" class="cas-view-button" data-active="true" type="button">C</button><button aria-label="상황" class="cas-view-button" type="button">S</button><button aria-label="근거" class="cas-view-button" type="button">G</button><button aria-label="다음 확인" class="cas-view-button" type="button">N</button><button aria-label="시뮬레이션" class="cas-view-button" type="button">L</button></nav><button aria-label="대상 설정" class="cas-view-button" data-test="cas-target-toggle" type="button">◎</button><button aria-label="튜토리얼 보기" class="cas-view-button" data-test="cas-tutorial-toggle" type="button">?</button><button aria-label="언어: 한국어. 영어로 전환" class="cas-view-button cas-language-toggle" data-language="ko" data-test="cas-language-toggle" type="button">${globe}<span>한</span></button><button aria-label="AI Sentinel 닫기" class="cas-close" type="button">x</button></div></header>
-  <div class="cas-panel-workspace" data-sidebar-open="true">
-    <aside aria-label="저장된 대화" class="cas-conversation-sidebar" data-test="cas-conversation-sidebar">
-      <div class="cas-conversation-sidebar-header"><strong>저장된 대화</strong><button class="cas-link-button" data-test="cas-sidebar-close" type="button">닫기</button></div>
-      <button class="cas-conversation-new" data-test="cas-sidebar-new-chat" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" role="img"><path d="M5 6.5h11.5v8H9l-4 3v-11Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"></path><path d="M17 5v5M14.5 7.5h5" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></svg><span>새 대화</span></button>
-      <label class="cas-conversation-search"><span>대화 검색</span><input aria-label="대화 검색" data-test="cas-sidebar-search" value=""></label>
-      <div class="cas-conversation-list" data-test="cas-saved-conversation-list">
-        <div class="cas-conversation-row"><button class="cas-conversation-item" data-active="true" data-test="cas-saved-conversation" type="button"><strong>ClusterVersion 상태 요약</strong><span>default · ClusterVersion/version</span><span>Ask · 06.23. 14:10</span></button><button aria-label="삭제" class="cas-conversation-delete" data-test="cas-delete-conversation" type="button">x</button></div>
-        <div class="cas-conversation-row"><button class="cas-conversation-item" data-test="cas-saved-conversation" type="button"><strong>settlement-worker Pending 원인 분석</strong><span>komsco-batch · Pod/settlement-worker</span><span>Troubleshooting · 06.23. 13:54</span></button><button aria-label="삭제" class="cas-conversation-delete" data-test="cas-delete-conversation" type="button">x</button></div>
-      </div>
-      <div class="cas-conversation-footer"><span>자동 저장</span><button class="cas-link-button" type="button">설정</button></div>
-    </aside>
-    <div class="cas-panel-main">
   <div class="cas-panel-body" data-target-open="true">
     <div class="cas-status-row" data-test="cas-brain-status" title="openshift-lightspeed · OpenShift Lightspeed readiness 확인됨"><span class="cas-status-light" data-state="ready"></span><span class="cas-status-label">연결됨</span></div>
     <div class="cas-target-popover" data-test="cas-target-fields">
@@ -138,8 +136,6 @@ ${styles}
     </form>
     </div>
   </div>
-    </div>
-  </div>
 </section>
 <button aria-label="Cywell AI Sentinel" class="cas-launcher-button" data-test="cas-launcher-button" title="Cywell AI Sentinel" type="button">${icon}</button>
 </div>
@@ -147,13 +143,9 @@ ${styles}
 <script>
 function runQa() {
   if (innerWidth <= 620) {
-    const panelNode = document.querySelector(".cas-panel");
-    const workspaceNode = document.querySelector(".cas-panel-workspace");
-    const sidebarNode = document.querySelector(".cas-conversation-sidebar");
-    panelNode?.setAttribute("data-sidebar-open", "false");
-    workspaceNode?.setAttribute("data-sidebar-open", "false");
+    const sidebarNode = document.querySelector(".cas-conversation-wing");
     if (sidebarNode) {
-      sidebarNode.outerHTML = '<div aria-label="저장된 대화" class="cas-sidebar-rail" data-test="cas-sidebar-rail"><button aria-label="저장된 대화" class="cas-sidebar-rail-button" data-test="cas-sidebar-open" type="button">☰</button><span></span><button aria-label="새 대화" class="cas-sidebar-rail-button" data-test="cas-sidebar-new-chat-collapsed" type="button">+</button></div>';
+      sidebarNode.outerHTML = '<div aria-label="저장된 대화" class="cas-conversation-wing-rail" data-test="cas-sidebar-rail"><button aria-label="저장된 대화" class="cas-sidebar-rail-button" data-test="cas-sidebar-open" type="button">☰</button><span></span><button aria-label="새 대화" class="cas-sidebar-rail-button" data-test="cas-sidebar-new-chat-collapsed" type="button">+</button></div>';
     }
   }
   const panel = document.querySelector(".cas-panel").getBoundingClientRect();
@@ -163,8 +155,8 @@ function runQa() {
   const targetPopover = document.querySelector(".cas-target-popover");
   const targetRect = targetPopover.getBoundingClientRect();
   const chatRect = chatThread.getBoundingClientRect();
-  const sidebar = document.querySelector(".cas-conversation-sidebar");
-  const sidebarRail = document.querySelector(".cas-sidebar-rail");
+  const sidebar = document.querySelector(".cas-conversation-wing");
+  const sidebarRail = document.querySelector(".cas-conversation-wing-rail");
   const sidebarSurface = sidebar || sidebarRail;
   const sidebarRect = sidebarSurface.getBoundingClientRect();
   const suggestionShell = document.querySelector(".cas-suggestion-shell");
@@ -186,12 +178,14 @@ function runQa() {
     viewport: [innerWidth, innerHeight],
     panel: { left: Math.round(panel.left), right: Math.round(panel.right), top: Math.round(panel.top), bottom: Math.round(panel.bottom), width: Math.round(panel.width), height: Math.round(panel.height) },
     expectedPanelHeight: Math.round(expectedPanelHeight),
+    panelKeepsOriginalWidth: innerWidth <= 620 ? true : Math.abs(panel.width - 560) <= 2,
     documentOverflowX: document.documentElement.scrollWidth > innerWidth + 1,
     panelInViewport: panel.left >= -1 && panel.right <= innerWidth + 1 && panel.top >= -1 && panel.bottom <= innerHeight + 1,
     panelBodyScrollsVertically: body.scrollHeight > body.clientHeight,
     panelHeightStable: Math.abs(panel.height - expectedPanelHeight) <= 2,
     sidebarVisible: Boolean(sidebarSurface) && sidebarRect.width >= (innerWidth <= 620 ? 30 : 200) && sidebarRect.height > 120,
     sidebarInsidePanel: sidebarRect.left >= panel.left - 1 && sidebarRect.right <= panel.right + 1 && sidebarRect.top >= panel.top - 1 && sidebarRect.bottom <= panel.bottom + 1,
+    sidebarAttachedAsWing: innerWidth <= 620 ? sidebarRect.left >= panel.left - 1 : Math.abs(sidebarRect.right - panel.left) <= 2,
     noHeaderNewChat: !document.querySelector('[data-test="cas-new-chat"]'),
     chatThreadOwnsScroll: chatThreadStyle.overflowY === "auto" || chatThreadStyle.overflowY === "scroll",
     chatThreadHasSpace: chatThread.clientHeight >= 160,
@@ -209,7 +203,7 @@ function runQa() {
     textareaFixedHeight: textarea.clientHeight >= minTextareaHeight && textarea.clientHeight <= maxTextareaHeight,
     horizontalOverflowItems: bad
   };
-  result.pass = !result.documentOverflowX && result.panelInViewport && result.panelHeightStable && result.sidebarVisible && result.sidebarInsidePanel && result.noHeaderNewChat && result.chatThreadOwnsScroll && result.chatThreadHasSpace && result.targetCardVisible && result.targetDoesNotOverlapThread && result.suggestionHidden && result.modeInsideComposer && result.modeDropdownClosed && result.compactComposer && result.textareaFixedHeight && bad.length === 0;
+  result.pass = !result.documentOverflowX && result.panelInViewport && result.panelKeepsOriginalWidth && result.panelHeightStable && result.sidebarVisible && result.sidebarAttachedAsWing && result.noHeaderNewChat && result.chatThreadOwnsScroll && result.chatThreadHasSpace && result.targetCardVisible && result.targetDoesNotOverlapThread && result.suggestionHidden && result.modeInsideComposer && result.modeDropdownClosed && result.compactComposer && result.textareaFixedHeight && bad.length === 0;
   document.body.setAttribute("data-qa-pass", String(result.pass));
   document.getElementById("qa-result").textContent = JSON.stringify(result, null, 2);
 }
@@ -266,9 +260,10 @@ if (chromePath) {
       result.panelHeightStable,
       `panelHeight=${result.panel.height} expected=${result.expectedPanelHeight}`
     );
+    record(`visual:${viewport.id}:original-panel-width`, result.panelKeepsOriginalWidth, `panelWidth=${result.panel.width}`);
     record(`visual:${viewport.id}:thread-scroll-contract`, result.chatThreadOwnsScroll, "chat thread owns vertical scrolling");
     record(`visual:${viewport.id}:sidebar-visible`, result.sidebarVisible, "conversation sidebar is visible without a header duplicate");
-    record(`visual:${viewport.id}:sidebar-inside-panel`, result.sidebarInsidePanel, "conversation sidebar stays inside the CAS panel");
+    record(`visual:${viewport.id}:sidebar-wing-attachment`, result.sidebarAttachedAsWing, "conversation sidebar is attached as a left wing outside the CAS panel");
     record(`visual:${viewport.id}:no-header-new-chat`, result.noHeaderNewChat, "header does not expose a duplicate new-chat action");
     record(`visual:${viewport.id}:thread-space`, result.chatThreadHasSpace, "chat thread keeps readable space");
     record(`visual:${viewport.id}:target-card`, result.targetCardVisible, "target settings card is visible and labeled");

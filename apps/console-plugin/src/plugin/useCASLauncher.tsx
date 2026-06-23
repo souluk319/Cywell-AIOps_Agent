@@ -923,40 +923,27 @@ const styles = `
   z-index: calc(var(--pf-t--global--z-index--md, 300) + 1);
 }
 
-.cas-panel[data-sidebar-open="false"] {
-  width: min(604px, calc(100vw - 32px));
+.cas-conversation-wing,
+.cas-conversation-wing-rail {
+  bottom: calc(var(--pf-t--global--spacer--2xl, 48px) + var(--pf-t--global--spacer--lg, 24px) + 10px);
+  box-shadow: var(--pf-t--global--box-shadow--lg, 0 18px 44px rgba(3, 22, 30, 0.18));
+  height: min(760px, calc(100vh - 112px));
+  max-height: min(760px, calc(100vh - 112px));
+  position: fixed;
+  right: calc(var(--pf-t--global--spacer--lg, 24px) + min(560px, calc(100vw - 32px)) - 1px);
+  z-index: calc(var(--pf-t--global--z-index--md, 300) + 2);
 }
 
-.cas-panel[data-sidebar-open="true"] {
-  width: min(820px, calc(100vw - 32px));
-}
-
-.cas-panel-workspace {
-  display: grid;
-  flex: 1 1 auto;
-  grid-template-columns: 44px minmax(0, 1fr);
-  min-height: 0;
-}
-
-.cas-panel-workspace[data-sidebar-open="true"] {
-  grid-template-columns: 232px minmax(0, 1fr);
-}
-
-.cas-panel-main {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-}
-
-.cas-sidebar-rail {
+.cas-conversation-wing-rail {
   background: var(--cas-soft);
-  border-right: 1px solid var(--cas-line);
+  border: 1px solid var(--cas-line);
+  border-radius: 8px 0 0 8px;
+  border-right: 0;
   display: grid;
   gap: 8px;
   grid-template-rows: auto 1fr auto;
-  min-height: 0;
-  padding: 9px 7px;
+  padding: 9px 6px;
+  width: 42px;
 }
 
 .cas-sidebar-rail-button {
@@ -986,15 +973,17 @@ const styles = `
   width: 16px;
 }
 
-.cas-conversation-sidebar {
+.cas-conversation-wing {
   background: var(--cas-soft);
-  border-right: 1px solid var(--cas-line);
+  border: 1px solid var(--cas-line);
+  border-radius: 8px 0 0 8px;
+  border-right: 0;
   display: grid;
   gap: 10px;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  min-height: 0;
-  min-width: 0;
+  overflow: hidden;
   padding: 12px;
+  width: 232px;
 }
 
 .cas-conversation-sidebar-header,
@@ -2485,31 +2474,22 @@ const styles = `
     width: auto;
   }
 
-  .cas-panel[data-sidebar-open="true"] {
-    width: auto;
+  .cas-conversation-wing,
+  .cas-conversation-wing-rail {
+    bottom: calc(var(--pf-t--global--spacer--2xl, 48px) + 22px);
+    height: min(720px, calc(100vh - 86px));
+    left: 8px;
+    max-height: min(720px, calc(100vh - 86px));
+    right: auto;
   }
 
-  .cas-panel[data-sidebar-open="false"] {
-    width: auto;
+  .cas-conversation-wing {
+    max-width: min(232px, calc(100vw - 16px));
   }
 
-  .cas-panel-workspace[data-sidebar-open="true"] {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .cas-panel-workspace[data-sidebar-open="false"] {
-    grid-template-columns: 38px minmax(0, 1fr);
-  }
-
-  .cas-conversation-sidebar {
-    border-bottom: 1px solid var(--cas-line);
-    border-right: 0;
-    max-height: 238px;
-  }
-
-  .cas-sidebar-rail {
+  .cas-conversation-wing-rail {
     padding: 9px 4px;
+    width: 38px;
   }
 
   .cas-launcher-button {
@@ -4798,13 +4778,101 @@ export function CASLauncher() {
     <div className="cas-launcher-root" data-test="cas-launcher-root">
       <style>{styles}</style>
       {isOpen && (
-        <section
-          aria-label="Cywell AI Sentinel"
-          className="cas-panel"
-          data-sidebar-open={showConversationSidebar ? "true" : "false"}
-          data-test="cas-launcher-panel"
-          role="dialog"
-        >
+        <>
+        {showConversationSidebar ? (
+          <aside aria-label={copy.savedConversations} className="cas-conversation-wing" data-test="cas-conversation-sidebar">
+            <div className="cas-conversation-sidebar-header">
+              <strong>{copy.savedConversations}</strong>
+              <button
+                aria-label={copy.targetClose}
+                className="cas-link-button"
+                data-test="cas-sidebar-close"
+                onClick={() => setShowConversationSidebar(false)}
+                type="button"
+              >
+                {copy.targetClose}
+              </button>
+            </div>
+            <button className="cas-conversation-new" data-test="cas-sidebar-new-chat" onClick={startNewConversation} type="button">
+              <NewChatIcon />
+              <span>{copy.newChat}</span>
+            </button>
+            <label className="cas-conversation-search">
+              <span>{copy.searchConversations}</span>
+              <input
+                aria-label={copy.searchConversations}
+                data-test="cas-sidebar-search"
+                onChange={(event) => setConversationSearch(event.currentTarget.value)}
+                value={conversationSearch}
+              />
+            </label>
+            <div className="cas-conversation-list" data-test="cas-saved-conversation-list">
+              {visibleSavedConversations.length === 0 ? (
+                <div className="cas-conversation-empty">{copy.noSavedConversations}</div>
+              ) : (
+                visibleSavedConversations.map((conversation) => (
+                  <div className="cas-conversation-row" key={conversation.id}>
+                    <button
+                      className="cas-conversation-item"
+                      data-active={activeSavedConversationId === conversation.id}
+                      data-test="cas-saved-conversation"
+                      onClick={() => loadSavedConversation(conversation)}
+                      title={conversation.title}
+                      type="button"
+                    >
+                      <strong>{conversation.title}</strong>
+                      <span>{targetDisplay(conversation.target, copy)}</span>
+                      <span>
+                        {copy.modeLabels[conversation.chat_mode]} · {conversationTimeLabel(conversation.updated_at, language)}
+                      </span>
+                    </button>
+                    <button
+                      aria-label={`${copy.deleteConversation}: ${conversation.title}`}
+                      className="cas-conversation-delete"
+                      data-test="cas-delete-conversation"
+                      onClick={() => deleteSavedConversation(conversation.id)}
+                      title={copy.deleteConversation}
+                      type="button"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="cas-conversation-footer">
+              <span>{copy.autoSaved}</span>
+              <button className="cas-link-button" onClick={openTutorial} type="button">
+                {copy.settings}
+              </button>
+            </div>
+          </aside>
+        ) : (
+          <div aria-label={copy.savedConversations} className="cas-conversation-wing-rail" data-test="cas-sidebar-rail">
+            <button
+              aria-label={copy.savedConversations}
+              className="cas-sidebar-rail-button"
+              data-test="cas-sidebar-open"
+              onClick={() => setShowConversationSidebar(true)}
+              title={copy.savedConversations}
+              type="button"
+            >
+              <ConversationSidebarIcon />
+            </button>
+            <span />
+            <button
+              aria-label={copy.newChat}
+              className="cas-sidebar-rail-button"
+              data-test="cas-sidebar-new-chat-collapsed"
+              onClick={startNewConversation}
+              title={copy.newChat}
+              type="button"
+            >
+              <NewChatIcon />
+            </button>
+          </div>
+        )}
+        <section aria-label="Cywell AI Sentinel" className="cas-panel" data-test="cas-launcher-panel" role="dialog">
           <header className="cas-panel-header">
             <SentinelIcon />
             <div className="cas-panel-title">
@@ -4893,101 +4961,6 @@ export function CASLauncher() {
             </div>
           </header>
 
-          <div className="cas-panel-workspace" data-sidebar-open={showConversationSidebar ? "true" : "false"}>
-            {showConversationSidebar ? (
-              <aside aria-label={copy.savedConversations} className="cas-conversation-sidebar" data-test="cas-conversation-sidebar">
-                <div className="cas-conversation-sidebar-header">
-                  <strong>{copy.savedConversations}</strong>
-                  <button
-                    aria-label={copy.targetClose}
-                    className="cas-link-button"
-                    data-test="cas-sidebar-close"
-                    onClick={() => setShowConversationSidebar(false)}
-                    type="button"
-                  >
-                    {copy.targetClose}
-                  </button>
-                </div>
-                <button className="cas-conversation-new" data-test="cas-sidebar-new-chat" onClick={startNewConversation} type="button">
-                  <NewChatIcon />
-                  <span>{copy.newChat}</span>
-                </button>
-                <label className="cas-conversation-search">
-                  <span>{copy.searchConversations}</span>
-                  <input
-                    aria-label={copy.searchConversations}
-                    data-test="cas-sidebar-search"
-                    onChange={(event) => setConversationSearch(event.currentTarget.value)}
-                    value={conversationSearch}
-                  />
-                </label>
-                <div className="cas-conversation-list" data-test="cas-saved-conversation-list">
-                  {visibleSavedConversations.length === 0 ? (
-                    <div className="cas-conversation-empty">{copy.noSavedConversations}</div>
-                  ) : (
-                    visibleSavedConversations.map((conversation) => (
-                      <div className="cas-conversation-row" key={conversation.id}>
-                        <button
-                          className="cas-conversation-item"
-                          data-active={activeSavedConversationId === conversation.id}
-                          data-test="cas-saved-conversation"
-                          onClick={() => loadSavedConversation(conversation)}
-                          title={conversation.title}
-                          type="button"
-                        >
-                          <strong>{conversation.title}</strong>
-                          <span>{targetDisplay(conversation.target, copy)}</span>
-                          <span>
-                            {copy.modeLabels[conversation.chat_mode]} · {conversationTimeLabel(conversation.updated_at, language)}
-                          </span>
-                        </button>
-                        <button
-                          aria-label={`${copy.deleteConversation}: ${conversation.title}`}
-                          className="cas-conversation-delete"
-                          data-test="cas-delete-conversation"
-                          onClick={() => deleteSavedConversation(conversation.id)}
-                          title={copy.deleteConversation}
-                          type="button"
-                        >
-                          x
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-                <div className="cas-conversation-footer">
-                  <span>{copy.autoSaved}</span>
-                  <button className="cas-link-button" onClick={openTutorial} type="button">
-                    {copy.settings}
-                  </button>
-                </div>
-              </aside>
-            ) : (
-              <div aria-label={copy.savedConversations} className="cas-sidebar-rail" data-test="cas-sidebar-rail">
-                <button
-                  aria-label={copy.savedConversations}
-                  className="cas-sidebar-rail-button"
-                  data-test="cas-sidebar-open"
-                  onClick={() => setShowConversationSidebar(true)}
-                  title={copy.savedConversations}
-                  type="button"
-                >
-                  <ConversationSidebarIcon />
-                </button>
-                <span />
-                <button
-                  aria-label={copy.newChat}
-                  className="cas-sidebar-rail-button"
-                  data-test="cas-sidebar-new-chat-collapsed"
-                  onClick={startNewConversation}
-                  title={copy.newChat}
-                  type="button"
-                >
-                  <NewChatIcon />
-                </button>
-              </div>
-            )}
-            <div className="cas-panel-main">
           <div className="cas-panel-body" data-target-open={showTargetControls ? "true" : "false"}>
             <div
               className="cas-status-row"
@@ -5317,8 +5290,6 @@ export function CASLauncher() {
               />
             )}
           </div>
-            </div>
-          </div>
           {showTutorial && (
             <TutorialOverlay
               copy={copy}
@@ -5329,6 +5300,7 @@ export function CASLauncher() {
             />
           )}
         </section>
+        </>
       )}
       <button
         aria-label="Cywell AI Sentinel"
