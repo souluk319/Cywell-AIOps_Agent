@@ -522,6 +522,86 @@ export async function collectOpenShiftEvidence(input = {}, options = {}) {
   return finalizeEvidenceCollection(input, collection, options);
 }
 
+export async function collectOpenShiftTargets(input = {}, options = {}) {
+  const config = options.config ?? getEvidenceConfig();
+  const currentNamespace = input.namespace ?? input.scope?.namespaces?.[0] ?? "default";
+  const missing = [];
+  const targets = new Map();
+  const addTarget = (target = {}) => {
+    const namespace = String(target.namespace ?? "").trim();
+    const kind = String(target.kind ?? "").trim();
+    const name = String(target.name ?? "").trim();
+    if (!namespace || !kind || !name) return;
+    targets.set(`${namespace}::${kind}::${name}`, { namespace, kind, name });
+  };
+
+  addTarget({ namespace: currentNamespace, kind: "ClusterVersion", name: "version" });
+
+  if (config.provider === "none") {
+    return {
+      mode: "target_catalog",
+      targets: [...targets.values()],
+      missing: [missingItem("openshift_api", "CAS_EVIDENCE_PROVIDER=none")]
+    };
+  }
+
+  const authorization = options.authorization;
+  if (!authorization?.startsWith("Bearer ")) {
+    return {
+      mode: "target_catalog",
+      targets: [...targets.values()],
+      missing: [missingItem("openshift_api", "missing user bearer token for target catalog")]
+    };
+  }
+
+  const requestOptions = {
+    authorization,
+    config,
+    transport: options.transport
+  };
+
+  async function getList(type, path) {
+    try {
+      const response = await kubeJson(path, requestOptions);
+      if (response.statusCode >= 200 && response.statusCode < 300 && response.json) {
+        return response.json.items ?? [];
+      }
+      missing.push(missingItem(type, `OpenShift API HTTP ${response.statusCode} for ${path}`));
+    } catch (error) {
+      missing.push(missingItem(type, error?.message ?? `OpenShift API error for ${path}`));
+    }
+    return [];
+  }
+
+  const namespaces = await getList("namespace", "/api/v1/namespaces?limit=80");
+  const namespaceNames = namespaces.map((item) => item.metadata?.name).filter(Boolean);
+  const selectedNamespaces = [...new Set([currentNamespace, ...namespaceNames])].slice(0, 24);
+
+  await Promise.all(
+    selectedNamespaces.map(async (namespace) => {
+      const namespacePath = encodeURIComponent(namespace);
+      const [pods, deployments] = await Promise.all([
+        getList("pod", `/api/v1/namespaces/${namespacePath}/pods?limit=100`),
+        getList("deployment", `/apis/apps/v1/namespaces/${namespacePath}/deployments?limit=80`)
+      ]);
+      for (const pod of pods) addTarget({ namespace, kind: "Pod", name: pod.metadata?.name });
+      for (const deployment of deployments) addTarget({ namespace, kind: "Deployment", name: deployment.metadata?.name });
+    })
+  );
+
+  return {
+    mode: "target_catalog",
+    targets: [...targets.values()].sort((left, right) => {
+      const namespaceOrder = left.namespace.localeCompare(right.namespace);
+      if (namespaceOrder !== 0) return namespaceOrder;
+      const kindOrder = left.kind.localeCompare(right.kind);
+      if (kindOrder !== 0) return kindOrder;
+      return left.name.localeCompare(right.name);
+    }),
+    missing
+  };
+}
+
 export async function collectOpenShiftOverview(input = {}, options = {}) {
   const config = options.config ?? getEvidenceConfig();
   const namespace = input.namespace ?? input.scope?.namespaces?.[0] ?? "default";

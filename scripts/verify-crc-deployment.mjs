@@ -230,6 +230,23 @@ if (consolePod) {
       overview.stderr || overview.stdout
     );
 
+    const targetsCode = [
+      "const https=require('https');",
+      `const token=Buffer.from('${tokenB64}','base64').toString('utf8');`,
+      "const req=https.request('https://127.0.0.1:9443/api/aiops/targets?namespace=default',{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${token}`,accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,count:j.targets?.length||0,kinds:[...new Set((j.targets||[]).map(t=>t.kind))],sample:(j.targets||[]).slice(0,5)}));});});",
+      "req.on('error',e=>{console.error(e.message);process.exit(1);});req.end();"
+    ].join("");
+    const targets = execNode(consolePod.metadata.name, targetsCode, 60000);
+    expect(
+      "runtime:targets-through-plugin",
+      targets.ok &&
+        targets.stdout.includes("target_catalog") &&
+        targets.stdout.includes("\"count\":") &&
+        targets.stdout.includes("ClusterVersion"),
+      "console plugin forwards user token and CAS target catalog returns selectable analysis targets",
+      targets.stderr || targets.stdout
+    );
+
     const simulationsCode = [
       "const https=require('https');",
       "https.get('https://127.0.0.1:9443/api/aiops/simulations',{rejectUnauthorized:false,headers:{accept:'application/json'}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const j=JSON.parse(b);console.log(JSON.stringify({status:r.statusCode,mode:j.mode,count:j.scenarios?.length||0,first:j.scenarios?.[0]?.id,actions:j.scenarios?.[0]?.remediations?.length||0,learning:Boolean(j.scenarios?.[0]?.learning?.objective),cases:(j.scenarios||[]).map(s=>s.id).slice(-4)}));});}).on('error',e=>{console.error(e.message);process.exit(1);});"

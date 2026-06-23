@@ -187,6 +187,12 @@ type QueryTarget = {
   name: string;
 };
 
+type TargetCatalog = {
+  mode?: string;
+  targets?: QueryTarget[];
+  missing?: MissingEvidence[];
+};
+
 type StreamEvent = {
   event: string;
   data: unknown;
@@ -512,8 +518,8 @@ const languageCopy: Record<
       },
       {
         id: "actions",
-        title: "5. 다음 행동은 안전한 확인부터 갑니다",
-        body: "CAS v0.1.1은 읽기 전용입니다. 링크가 안전하지 않거나 문서 경로가 없으면 바로 열지 않고 CAS 질문으로 바꿉니다.",
+        title: "5. 다음 확인은 안전한 질문부터 갑니다",
+        body: "CAS v0.1.1은 읽기 전용입니다. 화면을 바로 이동시키지 않고 CAS가 확인 절차와 콘솔 위치를 먼저 설명합니다.",
         hint: "실제 변경, 재시작, scale, patch는 승인 이후의 별도 절차입니다.",
         view: "actions"
       },
@@ -536,7 +542,7 @@ const languageCopy: Record<
       chat: "채팅",
       cockpit: "상황",
       evidence: "근거",
-      actions: "다음 행동",
+      actions: "다음 확인",
       simulation: "시뮬레이션"
     },
     viewsNavLabel: "AI Sentinel 화면",
@@ -579,11 +585,11 @@ const languageCopy: Record<
     evidenceTimeline: "OpenShift 이벤트 흐름",
     signals: "신호",
     noTimelineEvidence: "아직 타임라인 증적이 없습니다.",
-    actionQueue: "다음 행동",
-    actionCount: "개 조치",
+    actionQueue: "다음 확인",
+    actionCount: "개 항목",
     run: "실행",
     open: "열기",
-    noActions: "아직 추천 행동이 없습니다.",
+    noActions: "아직 추천 확인 항목이 없습니다.",
     runRcaTargets: "원인 분석 대상",
     noRcaTargets: "현재 실행 가능한 원인 분석 대상이 없습니다.",
     evidenceSummary: (evidence, causes, missing) => `근거 ${evidence}개 · 원인 후보 ${causes}개 · 부족한 증적 ${missing}개`,
@@ -682,8 +688,8 @@ const languageCopy: Record<
       },
       {
         id: "actions",
-        title: "5. Next Actions stay safe",
-        body: "CAS v0.1.1 is read-only. Unsafe or unknown links become CAS guidance questions instead of broken links.",
+        title: "5. Next Checks stay safe",
+        body: "CAS v0.1.1 is read-only. It asks CAS for safe checks and Console locations instead of moving the browser directly.",
         hint: "Mutating actions require a separate approved change workflow.",
         view: "actions"
       },
@@ -706,7 +712,7 @@ const languageCopy: Record<
       chat: "Chat",
       cockpit: "Situation",
       evidence: "Grounds",
-      actions: "Next Actions",
+      actions: "Next Checks",
       simulation: "Simulation"
     },
     viewsNavLabel: "AI Sentinel views",
@@ -749,11 +755,11 @@ const languageCopy: Record<
     evidenceTimeline: "OpenShift Event Flow",
     signals: "signals",
     noTimelineEvidence: "No timeline evidence yet.",
-    actionQueue: "Next Actions",
-    actionCount: "actions",
+    actionQueue: "Next Checks",
+    actionCount: "checks",
     run: "Run",
     open: "Open",
-    noActions: "No recommended actions yet.",
+    noActions: "No recommended checks yet.",
     runRcaTargets: "Cause Analysis Targets",
     noRcaTargets: "No cause analysis targets are available.",
     evidenceSummary: (evidence, causes, missing) => `${evidence} evidence · ${causes} cause candidates · ${missing} missing evidence`,
@@ -2111,8 +2117,17 @@ const styles = `
   min-width: 0;
 }
 
-.cas-target-field input {
+.cas-target-field input,
+.cas-target-field select {
+  background: #fff;
+  border: 1px solid #8a96a3;
+  border-radius: 2px;
+  color: var(--cas-text);
+  font: inherit;
+  height: 31px;
   min-width: 0;
+  padding: 3px 6px;
+  width: 100%;
 }
 
 .cas-target-field span {
@@ -2591,6 +2606,55 @@ function displayActionLabel(action: OverviewAction, language: Language) {
   const openMatch = label.match(/^Open (.+) in Console$/);
   if (openMatch) return `콘솔에서 ${openMatch[1]} 열기`;
   return label;
+}
+
+function targetKey(target: QueryTarget) {
+  return `${target.namespace}::${target.kind}::${target.name}`;
+}
+
+function collectTargetOptions(
+  overview: OverviewResult | null,
+  simulations: SimulationScenario[],
+  current: QueryTarget,
+  catalogTargets: QueryTarget[] = []
+) {
+  const options = new Map<string, QueryTarget>();
+  const add = (target: Partial<QueryTarget> | undefined) => {
+    const namespace = String(target?.namespace ?? "").trim();
+    const kind = String(target?.kind ?? "").trim();
+    const name = String(target?.name ?? "").trim();
+    if (!namespace || !kind || !name) return;
+    const normalized = { namespace, kind, name };
+    options.set(targetKey(normalized), normalized);
+  };
+
+  add(current);
+  add({ namespace: "default", kind: "ClusterVersion", name: "version" });
+  for (const target of catalogTargets) add(target);
+  for (const workload of overview?.risk_workloads ?? []) add(workload);
+  for (const scenario of simulations) add(scenario.target);
+
+  return [...options.values()].sort((left, right) => {
+    const namespaceOrder = left.namespace.localeCompare(right.namespace);
+    if (namespaceOrder !== 0) return namespaceOrder;
+    const kindOrder = left.kind.localeCompare(right.kind);
+    if (kindOrder !== 0) return kindOrder;
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function uniqueTargetValues(options: QueryTarget[], key: keyof QueryTarget) {
+  return [...new Set(options.map((option) => option[key]).filter(Boolean))].sort((left, right) => left.localeCompare(right));
+}
+
+function matchingNames(options: QueryTarget[], namespace: string, kind: string) {
+  const exact = uniqueTargetValues(
+    options.filter((option) => option.namespace === namespace && option.kind === kind),
+    "name"
+  );
+  if (exact.length > 0) return exact;
+  const namespaceMatches = uniqueTargetValues(options.filter((option) => option.namespace === namespace), "name");
+  return namespaceMatches.length > 0 ? namespaceMatches : uniqueTargetValues(options, "name");
 }
 
 function formatTimelineTime(value?: string) {
@@ -3131,19 +3195,16 @@ function OverviewCockpit({
                 const canOpenConsole = action.type === "console_link" && isOpenShiftConsoleHref(action.href);
                 const actionLabel = displayActionLabel(action, language);
                 const fallbackQuestion =
-                  action.question ?? `다음 행동 "${action.label}"을 수행하기 위한 안전한 확인 절차와 콘솔 위치를 알려줘.`;
+                  action.question ??
+                  (canOpenConsole
+                    ? `다음 확인 "${action.label}"을 위한 안전한 확인 절차와 콘솔 위치(${action.href})를 알려줘. 브라우저 이동은 하지 말고 단계별로 설명해줘.`
+                    : `다음 확인 "${action.label}"을 위한 안전한 확인 절차와 콘솔 위치를 알려줘.`);
                 return (
                   <div className="cas-action-row" key={`${action.type}-${action.label}`}>
                     <span title={actionLabel}>{actionLabel}</span>
-                    {canOpenConsole ? (
-                      <a className="cas-link-button" href={action.href} rel="noreferrer">
-                        {copy.open}
-                      </a>
-                    ) : (
-                      <button className="cas-link-button" disabled={isRunning} onClick={() => onRunQuestion(fallbackQuestion)} type="button">
-                        {copy.run}
-                      </button>
-                    )}
+                    <button className="cas-link-button" disabled={isRunning} onClick={() => onRunQuestion(fallbackQuestion)} type="button">
+                      {copy.run}
+                    </button>
                   </div>
                 );
               })}
@@ -3502,6 +3563,8 @@ export function CASLauncher() {
   const [copiedMessageId, setCopiedMessageId] = React.useState<string | null>(null);
   const [overviewStatus, setOverviewStatus] = React.useState<"idle" | "loading" | "ready" | "degraded">("idle");
   const [overview, setOverview] = React.useState<OverviewResult | null>(null);
+  const [targetCatalog, setTargetCatalog] = React.useState<TargetCatalog | null>(null);
+  const [targetCatalogStatus, setTargetCatalogStatus] = React.useState<"idle" | "loading" | "ready" | "degraded">("idle");
   const [simulationStatus, setSimulationStatus] = React.useState<"idle" | "loading" | "ready" | "degraded">("idle");
   const [simulations, setSimulations] = React.useState<SimulationScenario[]>([]);
   const [selectedSimulationId, setSelectedSimulationId] = React.useState<string | null>(null);
@@ -3524,6 +3587,66 @@ export function CASLauncher() {
       : brainStatus.state === "checking"
       ? copy.statusChecking
       : copy.statusDegraded;
+  const targetOptions = React.useMemo(
+    () =>
+      collectTargetOptions(overview, simulations, {
+        namespace: namespace || "default",
+        kind: resourceKind || "Pod",
+        name: resourceName || "version"
+      }, targetCatalog?.targets ?? []),
+    [namespace, overview, resourceKind, resourceName, simulations, targetCatalog]
+  );
+  const namespaceOptions = React.useMemo(() => uniqueTargetValues(targetOptions, "namespace"), [targetOptions]);
+  const kindOptions = React.useMemo(() => uniqueTargetValues(targetOptions, "kind"), [targetOptions]);
+  const nameOptions = React.useMemo(() => matchingNames(targetOptions, namespace, resourceKind), [namespace, resourceKind, targetOptions]);
+
+  const selectTarget = React.useCallback((target: QueryTarget) => {
+    setNamespace(target.namespace);
+    setResourceKind(target.kind);
+    setResourceName(target.name);
+  }, []);
+
+  const selectNamespace = React.useCallback(
+    (nextNamespace: string) => {
+      const nextTarget =
+        targetOptions.find((option) => option.namespace === nextNamespace && option.kind === resourceKind) ??
+        targetOptions.find((option) => option.namespace === nextNamespace);
+      if (nextTarget) {
+        selectTarget(nextTarget);
+        return;
+      }
+      setNamespace(nextNamespace);
+    },
+    [resourceKind, selectTarget, targetOptions]
+  );
+
+  const selectKind = React.useCallback(
+    (nextKind: string) => {
+      const nextTarget =
+        targetOptions.find((option) => option.namespace === namespace && option.kind === nextKind) ??
+        targetOptions.find((option) => option.kind === nextKind);
+      if (nextTarget) {
+        selectTarget(nextTarget);
+        return;
+      }
+      setResourceKind(nextKind);
+    },
+    [namespace, selectTarget, targetOptions]
+  );
+
+  const selectName = React.useCallback(
+    (nextName: string) => {
+      const nextTarget =
+        targetOptions.find((option) => option.namespace === namespace && option.kind === resourceKind && option.name === nextName) ??
+        targetOptions.find((option) => option.name === nextName);
+      if (nextTarget) {
+        selectTarget(nextTarget);
+        return;
+      }
+      setResourceName(nextName);
+    },
+    [namespace, resourceKind, selectTarget, targetOptions]
+  );
 
   const applyTutorialStep = React.useCallback(
     (stepIndex: number) => {
@@ -3604,7 +3727,13 @@ export function CASLauncher() {
   const closeTutorial = React.useCallback(() => {
     markTutorialSeen();
     setShowTutorial(false);
-  }, []);
+    setActiveView("chat");
+    setShowTargetControls(false);
+    setShowSuggestions(false);
+    setShowModeMenu(false);
+    autoScrollRef.current = true;
+    void refreshBrainStatus();
+  }, [refreshBrainStatus]);
 
   const nextTutorialStep = React.useCallback(() => {
     if (tutorialStepIndex >= copy.tutorialSteps.length - 1) {
@@ -3634,6 +3763,22 @@ export function CASLauncher() {
     }
   }, [namespace]);
 
+  const refreshTargetCatalog = React.useCallback(async () => {
+    setTargetCatalogStatus("loading");
+    try {
+      const response = await fetch(`${API_BASE}/api/aiops/targets?namespace=${encodeURIComponent(namespace || "default")}`, {
+        credentials: "same-origin",
+        headers: gatewayHeaders({ accept: "application/json" })
+      });
+      const body = (await response.json()) as TargetCatalog;
+      setTargetCatalog(body);
+      setTargetCatalogStatus(response.ok && body.mode === "target_catalog" ? "ready" : "degraded");
+    } catch {
+      setTargetCatalog(null);
+      setTargetCatalogStatus("degraded");
+    }
+  }, [namespace]);
+
   const refreshSimulations = React.useCallback(async () => {
     setSimulationStatus("loading");
     try {
@@ -3657,6 +3802,10 @@ export function CASLauncher() {
   React.useEffect(() => {
     if (isOpen && simulationStatus === "idle") void refreshSimulations();
   }, [isOpen, refreshSimulations, simulationStatus]);
+
+  React.useEffect(() => {
+    if (isOpen && showTargetControls) void refreshTargetCatalog();
+  }, [isOpen, refreshTargetCatalog, showTargetControls]);
 
   React.useEffect(() => {
     if (isOpen && activeView === "chat" && autoScrollRef.current) {
@@ -3689,10 +3838,13 @@ export function CASLauncher() {
   const openView = React.useCallback(
     (view: ActiveView) => {
       setActiveView(view);
-      if (view === "simulation" && simulationStatus === "idle") {
+      setShowTargetControls(false);
+      setShowSuggestions(false);
+      setShowModeMenu(false);
+      if (view === "simulation" && simulationStatus !== "loading") {
         void refreshSimulations();
       }
-      if (view !== "chat" && view !== "simulation" && overviewStatus === "idle") {
+      if (view !== "chat" && view !== "simulation" && overviewStatus !== "loading") {
         void refreshOverview();
       }
     },
@@ -4070,7 +4222,11 @@ export function CASLauncher() {
                       className="cas-view-button"
                       data-active={activeView === view}
                       data-test={`cas-view-${view}`}
-                      onClick={() => openView(view)}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        openView(view);
+                      }}
                       title={copy.viewLabels[view]}
                       type="button"
                     >
@@ -4082,7 +4238,11 @@ export function CASLauncher() {
                         className="cas-view-button"
                         data-test="cas-new-chat"
                         disabled={isRunning}
-                        onClick={resetConversation}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          resetConversation();
+                        }}
                         title={copy.newChat}
                         type="button"
                       >
@@ -4097,7 +4257,11 @@ export function CASLauncher() {
                 className="cas-view-button"
                 data-active={showTargetControls}
                 data-test="cas-target-toggle"
-                onClick={() => setShowTargetControls((current) => !current)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setShowTargetControls((current) => !current);
+                }}
                 title={`${copy.targetPrefix}: ${targetSummary}`}
                 type="button"
               >
@@ -4108,7 +4272,11 @@ export function CASLauncher() {
                 className="cas-view-button"
                 data-active={showTutorial}
                 data-test="cas-tutorial-toggle"
-                onClick={openTutorial}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openTutorial();
+                }}
                 title={copy.tutorialLabel}
                 type="button"
               >
@@ -4119,14 +4287,27 @@ export function CASLauncher() {
                 className="cas-view-button cas-language-toggle"
                 data-language={language}
                 data-test="cas-language-toggle"
-                onClick={toggleLanguage}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  toggleLanguage();
+                }}
                 title={copy.languageTitle}
                 type="button"
               >
                 <GlobeIcon />
                 <span>{language === "ko" ? "한" : "EN"}</span>
               </button>
-              <button aria-label={copy.closeLabel} className="cas-close" onClick={() => setIsOpen(false)} type="button">
+              <button
+                aria-label={copy.closeLabel}
+                className="cas-close"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setIsOpen(false);
+                }}
+                type="button"
+              >
                 x
               </button>
             </div>
@@ -4150,6 +4331,15 @@ export function CASLauncher() {
                     <div className="cas-target-current">
                       {copy.targetCurrent}: {targetSummary}
                     </div>
+                    <div className="cas-target-current">
+                      {targetCatalogStatus === "loading"
+                        ? language === "ko"
+                          ? "대상 목록 확인 중"
+                          : "Loading target list"
+                        : language === "ko"
+                          ? `${targetOptions.length}개 대상 선택 가능`
+                          : `${targetOptions.length} targets available`}
+                    </div>
                   </div>
                   <button
                     className="cas-link-button"
@@ -4162,30 +4352,48 @@ export function CASLauncher() {
                 <div className="cas-fields">
                   <label className="cas-target-field">
                     <span>{copy.targetNamespace}</span>
-                    <input
+                    <select
                       aria-label={copy.targetNamespace}
-                      onChange={(event) => setNamespace(event.currentTarget.value)}
-                      placeholder="default"
+                      data-test="cas-target-namespace-select"
+                      onChange={(event) => selectNamespace(event.currentTarget.value)}
                       value={namespace}
-                    />
+                    >
+                      {namespaceOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label className="cas-target-field">
                     <span>{copy.targetKind}</span>
-                    <input
+                    <select
                       aria-label={copy.targetKind}
-                      onChange={(event) => setResourceKind(event.currentTarget.value)}
-                      placeholder="Pod"
+                      data-test="cas-target-kind-select"
+                      onChange={(event) => selectKind(event.currentTarget.value)}
                       value={resourceKind}
-                    />
+                    >
+                      {kindOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label className="cas-target-field">
                     <span>{copy.targetName}</span>
-                    <input
+                    <select
                       aria-label={copy.targetName}
-                      onChange={(event) => setResourceName(event.currentTarget.value)}
-                      placeholder="resource-name"
+                      data-test="cas-target-name-select"
+                      onChange={(event) => selectName(event.currentTarget.value)}
                       value={resourceName}
-                    />
+                    >
+                      {nameOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 </div>
                 <div className="cas-target-actions">

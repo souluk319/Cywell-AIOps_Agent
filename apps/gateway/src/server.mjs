@@ -4,7 +4,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { PRODUCT } from "../../../packages/contracts/src/index.js";
 import { createMockOomKilledRun } from "./mockRca.mjs";
 import { checkLightspeedReadiness, createLightspeedBackedRun, getBrainConfig } from "./lightspeedBrain.mjs";
-import { collectOpenShiftOverview, enrichInputWithOpenShiftEvidence, getEvidenceConfig } from "./openshiftEvidence.mjs";
+import { collectOpenShiftOverview, collectOpenShiftTargets, enrichInputWithOpenShiftEvidence, getEvidenceConfig } from "./openshiftEvidence.mjs";
 import { getMetricConfig } from "./metricAdapter.mjs";
 import { getRunbookConfig } from "./runbookAdapter.mjs";
 import { enrichInputWithSimulation, listSimulationScenarios } from "./simulationLab.mjs";
@@ -142,6 +142,24 @@ const requestHandler = async (request, response) => {
         }
       );
       sendJson(response, 200, overview);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/aiops/targets") {
+      const namespace = url.searchParams.get("namespace") || "default";
+      const catalog = await collectOpenShiftTargets(
+        {
+          scope: {
+            cluster: "local-cluster",
+            namespaces: [namespace]
+          }
+        },
+        {
+          authorization: request.headers.authorization,
+          config: evidenceConfig
+        }
+      );
+      sendJson(response, 200, catalog);
       return;
     }
 

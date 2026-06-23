@@ -3,6 +3,7 @@ import {
   buildOpenShiftEvidenceContext,
   collectOpenShiftOverview,
   collectOpenShiftEvidence,
+  collectOpenShiftTargets,
   enrichInputWithOpenShiftEvidence
 } from "../apps/gateway/src/openshiftEvidence.mjs";
 import { collectMetricEvidence } from "../apps/gateway/src/metricAdapter.mjs";
@@ -122,6 +123,46 @@ const transport = async (url) => {
             }
           }
         ]
+      })
+    };
+  }
+  if (path === "/api/v1/namespaces?limit=80") {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        items: [{ metadata: { name: "default" } }, { metadata: { name: "komsco-batch" } }]
+      })
+    };
+  }
+  if (path === "/api/v1/namespaces/default/pods?limit=100") {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        items: [{ metadata: { name: "api-7c8d9" } }, { metadata: { name: "worker-pending" } }]
+      })
+    };
+  }
+  if (path === "/apis/apps/v1/namespaces/default/deployments?limit=80") {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        items: [{ metadata: { name: "api" } }]
+      })
+    };
+  }
+  if (path === "/api/v1/namespaces/komsco-batch/pods?limit=100") {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        items: [{ metadata: { name: "settlement-worker-28477112-qx4kp" } }]
+      })
+    };
+  }
+  if (path === "/apis/apps/v1/namespaces/komsco-batch/deployments?limit=80") {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        items: [{ metadata: { name: "settlement-worker" } }]
       })
     };
   }
@@ -403,6 +444,33 @@ expect(
   "overview:critical-missing-degrades",
   degradedOverview.health?.risk === "unknown" && degradedOverview.health?.score === 0,
   "overview degrades instead of reporting healthy when pod/event evidence is unavailable"
+);
+
+const targets = await collectOpenShiftTargets(
+  {
+    scope: { cluster: "local-cluster", namespaces: ["default"] }
+  },
+  {
+    authorization: "Bearer test-token",
+    config,
+    transport
+  }
+);
+expect("targets:mode", targets.mode === "target_catalog", "target catalog endpoint contract mode is target_catalog");
+expect(
+  "targets:pod",
+  targets.targets?.some((item) => item.namespace === "komsco-batch" && item.kind === "Pod"),
+  "target catalog includes Pod options from OpenShift API"
+);
+expect(
+  "targets:deployment",
+  targets.targets?.some((item) => item.kind === "Deployment" && item.name === "settlement-worker"),
+  "target catalog includes Deployment options from OpenShift API"
+);
+expect(
+  "targets:clusterversion",
+  targets.targets?.some((item) => item.kind === "ClusterVersion" && item.name === "version"),
+  "target catalog includes ClusterVersion/version fallback"
 );
 
 const failures = checks.filter((check) => check.status === "FAIL");

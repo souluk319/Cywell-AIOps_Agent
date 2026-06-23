@@ -77,6 +77,12 @@ expectText(
   "launcher loads the CAS overview cockpit endpoint"
 );
 expectText(
+  "console-chat:targets",
+  launcherSource,
+  "/api/aiops/targets",
+  "launcher loads target catalog options for the analysis target selector"
+);
+expectText(
   "console-simulation:catalog",
   launcherSource,
   "/api/aiops/simulations",
@@ -322,8 +328,8 @@ expectText(
 expectText(
   "console-chat:korean-next-actions-label",
   launcherSource,
-  "다음 행동",
-  "launcher includes Korean Next Actions label for header view functions"
+  "다음 확인",
+  "launcher labels the former Next Actions surface as Next Checks in Korean"
 );
 expectText(
   "console-simulation:korean-label",
@@ -503,6 +509,12 @@ expectText(
   "fallbackQuestion",
   "unknown action hrefs become CAS guidance questions instead of broken links"
 );
+rejectText(
+  "console-actions:no-direct-href-navigation",
+  launcherSource,
+  "href={action.href}",
+  "Next Actions do not navigate the browser to unverified Console routes"
+);
 expectText(
   "console-actions:localized-labels",
   launcherSource,
@@ -516,10 +528,40 @@ expectText(
   "target namespace/resource controls are hidden behind a header icon"
 );
 expectText(
+  "console-chat:target-namespace-select",
+  launcherSource,
+  "data-test=\"cas-target-namespace-select\"",
+  "target namespace is selected from known options instead of raw typing only"
+);
+expectText(
+  "console-chat:target-kind-select",
+  launcherSource,
+  "data-test=\"cas-target-kind-select\"",
+  "target kind is selected from known options instead of raw typing only"
+);
+expectText(
+  "console-chat:target-name-select",
+  launcherSource,
+  "data-test=\"cas-target-name-select\"",
+  "target name is selected from known options instead of raw typing only"
+);
+expectText(
   "console-chat:target-layout-row",
   launcherSource,
   "data-target-open={showTargetControls ? \"true\" : \"false\"}",
   "panel body switches layout when target settings are open"
+);
+expectText(
+  "console-chat:view-switch-closes-target",
+  launcherSource,
+  "setShowTargetControls(false);",
+  "switching header views closes target settings so panels are not hidden behind the target editor"
+);
+expectText(
+  "console-tutorial:close-recovers-chat",
+  launcherSource,
+  "setActiveView(\"chat\");",
+  "finishing or skipping the tutorial returns the user to a connected chat baseline"
 );
 expectText(
   "console-chat:target-title",

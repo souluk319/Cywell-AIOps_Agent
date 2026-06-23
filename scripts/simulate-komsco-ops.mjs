@@ -211,7 +211,7 @@ function brainTransportFor(scenario) {
       hasCustomerContext
         ? "고객 지식 코퍼스가 프롬프트에 포함되어 서비스 특성, 운영 정책, 안전한 다음 확인 순서를 함께 반영했습니다."
         : "고객 지식 코퍼스가 프롬프트에 충분히 포함되지 않았습니다.",
-      "안전한 다음 행동은 pod 상태, 이벤트, previous log, metric, runbook 근거를 재확인하고 변경 작업은 승인 절차로 분리하는 것입니다."
+      "안전한 다음 확인은 pod 상태, 이벤트, previous log, metric, runbook 근거를 재확인하고 변경 작업은 승인 절차로 분리하는 것입니다."
     ].join(" ");
 
     return {
