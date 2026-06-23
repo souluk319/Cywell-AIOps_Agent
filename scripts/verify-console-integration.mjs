@@ -226,26 +226,32 @@ rejectText(
 expectText(
   "console-chat:conversation-sidebar-collapse-control",
   launcherSource,
-  'data-test="cas-sidebar-collapse"',
-  "launcher exposes a dedicated conversation wing collapse control"
+  'data-test="cas-sidebar-toggle"',
+  "launcher exposes one internal sidebar toggle in the preserved panel header"
 );
-expectText(
-  "console-chat:conversation-sidebar-rail",
+rejectText(
+  "console-chat:no-collapsed-sidebar-rail",
   launcherSource,
   'data-test="cas-sidebar-rail"',
-  "launcher exposes a collapsed rail for reopening conversation history"
+  "collapsed state does not leave an external sidebar rail visible"
+);
+expectText(
+  "console-chat:conversation-sidebar-default-collapsed",
+  launcherSource,
+  "function shouldOpenConversationWingByDefault() {\n  return false;",
+  "conversation sidebar starts collapsed by default"
 );
 expectText(
   "console-chat:conversation-sidebar-expand-icon",
   launcherSource,
   "function ExpandRightIcon",
-  "collapsed conversation rail uses an explicit expand icon"
+  "internal sidebar toggle uses an explicit expand icon"
 );
 expectText(
   "console-chat:conversation-sidebar-collapse-icon",
   launcherSource,
   "function CollapseLeftIcon",
-  "expanded conversation wing uses an explicit collapse icon"
+  "internal sidebar toggle uses an explicit collapse icon"
 );
 expectText(
   "console-chat:internal-thread-scroll",
@@ -1182,6 +1188,18 @@ expectText(
   launcherBundle,
   "cas-conversation-sidebar",
   "built launcher bundle contains the external conversation sidebar marker"
+);
+expectText(
+  "console-chat:bundle-sidebar-toggle",
+  launcherBundle,
+  "cas-sidebar-toggle",
+  "built launcher bundle contains the internal sidebar toggle"
+);
+rejectText(
+  "console-chat:bundle-no-collapsed-sidebar-rail",
+  launcherBundle,
+  "cas-sidebar-rail",
+  "built launcher bundle does not contain a visible collapsed sidebar rail"
 );
 rejectText(
   "console-chat:bundle-no-panel-workspace",

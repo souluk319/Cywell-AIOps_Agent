@@ -97,31 +97,9 @@ ${styles}
     <main class="fake-content"><section class="fake-card"><h1>Cluster dashboard</h1><p>CAS is opened from the AI launcher position and overlays the native console without a full-screen route.</p></section></main>
   </div>
 </div>
-<div class="cas-launcher-root" data-test="cas-launcher-root" data-wing="open">
-<aside aria-label="대화 기록" class="cas-conversation-wing" data-test="cas-conversation-sidebar">
-  <div class="cas-wing-top">
-    <div class="cas-wing-title">
-      <svg aria-hidden="true" viewBox="0 0 24 24" role="img"><path d="M4.5 6h11.8v8.2H8.6l-4.1 3.1V6Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"></path><path d="M18.5 8.5h1.2v8.2h-7.6L9.8 18.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></svg>
-      <strong>대화</strong>
-    </div>
-    <button aria-label="새 대화" class="cas-wing-icon-button" data-primary="true" data-test="cas-sidebar-new-chat" type="button">+</button>
-    <button aria-label="대화 기록 접기" class="cas-wing-icon-button cas-wing-close" data-test="cas-sidebar-collapse" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" role="img"><path d="M15 6 9 12l6 6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg></button>
-  </div>
-  <label class="cas-wing-search"><span class="cas-visually-hidden">대화 검색</span><input aria-label="대화 검색" data-test="cas-sidebar-search" placeholder="대화 검색" type="search"></label>
-  <div class="cas-wing-list" data-test="cas-sidebar-conversation-list">
-    <div class="cas-wing-item" data-active="true">
-      <button class="cas-wing-item-main" type="button"><strong>ClusterVersion 상태</strong><span>default · ClusterVersion/version</span><span>방금 전</span></button>
-      <button aria-label="대화 삭제" type="button">x</button>
-    </div>
-    <div class="cas-wing-item">
-      <button class="cas-wing-item-main" type="button"><strong>Warning 이벤트 점검</strong><span>komsco-batch · Pod/settlement-worker</span><span>어제</span></button>
-      <button aria-label="대화 삭제" type="button">x</button>
-    </div>
-  </div>
-  <div class="cas-wing-footer"><span>자동 저장 · 2/30</span><button aria-label="설정" class="cas-wing-icon-button" type="button">◎</button></div>
-</aside>
+<div class="cas-launcher-root" data-test="cas-launcher-root" data-wing="collapsed">
 <section aria-label="Cywell AI Sentinel" class="cas-panel" data-test="cas-launcher-panel" role="dialog">
-  <header class="cas-panel-header">${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>KOMSCO EDITION</span></div><div class="cas-header-tools"><nav aria-label="AI Sentinel 화면" class="cas-view-switcher" data-test="cas-view-switcher"><button aria-label="채팅" class="cas-view-button" data-active="true" type="button">C</button><button aria-label="상황" class="cas-view-button" type="button">S</button><button aria-label="근거" class="cas-view-button" type="button">G</button><button aria-label="다음 확인" class="cas-view-button" type="button">N</button></nav><button aria-label="대상 설정" class="cas-view-button" data-test="cas-target-toggle" type="button">◎</button><button aria-label="튜토리얼 보기" class="cas-view-button" data-test="cas-tutorial-toggle" type="button">?</button><button aria-label="언어: 한국어. 영어로 전환" class="cas-view-button cas-language-toggle" data-language="ko" data-test="cas-language-toggle" type="button">${globe}<span>한</span></button><button aria-label="AI Sentinel 닫기" class="cas-close" type="button">x</button></div></header>
+  <header class="cas-panel-header"><button aria-label="대화 기록 펼치기" class="cas-panel-sidebar-toggle" data-active="false" data-test="cas-sidebar-toggle" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" role="img"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg></button>${icon}<div class="cas-panel-title"><strong>Cywell AI Sentinel</strong><span>KOMSCO EDITION</span></div><div class="cas-header-tools"><nav aria-label="AI Sentinel 화면" class="cas-view-switcher" data-test="cas-view-switcher"><button aria-label="채팅" class="cas-view-button" data-active="true" type="button">C</button><button aria-label="상황" class="cas-view-button" type="button">S</button><button aria-label="근거" class="cas-view-button" type="button">G</button><button aria-label="다음 확인" class="cas-view-button" type="button">N</button></nav><button aria-label="대상 설정" class="cas-view-button" data-test="cas-target-toggle" type="button">◎</button><button aria-label="튜토리얼 보기" class="cas-view-button" data-test="cas-tutorial-toggle" type="button">?</button><button aria-label="언어: 한국어. 영어로 전환" class="cas-view-button cas-language-toggle" data-language="ko" data-test="cas-language-toggle" type="button">${globe}<span>한</span></button><button aria-label="AI Sentinel 닫기" class="cas-close" type="button">x</button></div></header>
   <div class="cas-panel-body" data-target-open="true">
     <div class="cas-status-row" data-test="cas-brain-status" title="openshift-lightspeed · OpenShift Lightspeed readiness 확인됨"><span class="cas-status-light" data-state="ready"></span><span class="cas-status-label">연결됨</span></div>
     <div class="cas-target-popover" data-test="cas-target-fields">
@@ -170,6 +148,7 @@ ${styles}
 function runQa() {
   const panelElement = document.querySelector(".cas-panel");
   const sidebar = document.querySelector("[data-test='cas-conversation-sidebar']");
+  const sidebarToggle = document.querySelector("[data-test='cas-sidebar-toggle']");
   const header = document.querySelector(".cas-panel-header");
   const panel = panelElement.getBoundingClientRect();
   const panelStyle = getComputedStyle(panelElement);
@@ -194,17 +173,21 @@ function runQa() {
   const maxTextareaHeight = innerWidth <= 620 ? 98 : 98;
   const maxComposerHeight = innerWidth <= 620 ? 112 : 116;
   const desktopLayout = innerWidth >= 960;
-  const sidebarSibling = Boolean(sidebar && sidebar.parentElement === panelElement.parentElement && !panelElement.contains(sidebar));
+  const sidebarHiddenWhenCollapsed = !sidebar && Boolean(sidebarToggle);
+  const sidebarSibling = sidebarHiddenWhenCollapsed || Boolean(sidebar && sidebar.parentElement === panelElement.parentElement && !panelElement.contains(sidebar));
   const noPanelWorkspace = !document.querySelector(".cas-panel-workspace, .cas-panel-split, .cas-panel-fullscreen, [data-test='cas-panel-workspace']");
-  const sidebarVisibleOnDesktop = !desktopLayout || Boolean(sidebar && sidebarStyle.display !== "none" && sidebarRect.width >= 160 && sidebarRect.height >= 120);
-  const wingRightEdgeAttachedToPanel = !desktopLayout || Boolean(sidebarRect && Math.abs(sidebarRect.right - panel.left) <= 2);
-  const panelDockedLeftRadiusFlush =
+  const sidebarVisibleOnDesktop = !desktopLayout || sidebarHiddenWhenCollapsed || Boolean(sidebar && sidebarStyle.display !== "none" && sidebarRect.width >= 160 && sidebarRect.height >= 120);
+  const wingRightEdgeAttachedToPanel = !desktopLayout || sidebarHiddenWhenCollapsed || Boolean(sidebarRect && Math.abs(sidebarRect.right - panel.left) <= 2);
+  const panelLeftRadiusRestored =
     !desktopLayout ||
-    (parseFloat(panelStyle.borderTopLeftRadius) <= 0.5 && parseFloat(panelStyle.borderBottomLeftRadius) <= 0.5);
+    (sidebarHiddenWhenCollapsed
+      ? parseFloat(panelStyle.borderTopLeftRadius) >= 7 && parseFloat(panelStyle.borderBottomLeftRadius) >= 7
+      : parseFloat(panelStyle.borderTopLeftRadius) <= 0.5 && parseFloat(panelStyle.borderBottomLeftRadius) <= 0.5);
   const panelWidthPreserved = !desktopLayout || Math.abs(panel.width - 560) <= 2;
-  const compactConversationRows = conversationItems.length > 0 && conversationItems.every((item) => item.height <= 72);
+  const compactConversationRows = conversationItems.length === 0 || conversationItems.every((item) => item.height <= 72);
   const duplicateHeaderConversationControls = [...header.querySelectorAll("button,a,[role='button']")].filter((el) => {
     const marker = String(el.getAttribute("data-test") || "").toLowerCase();
+    if (marker.includes("cas-sidebar-toggle")) return false;
     const label = String((el.getAttribute("aria-label") || "") + " " + (el.getAttribute("title") || "") + " " + (el.textContent || "")).toLowerCase();
     return (
       marker.includes("cas-conversation-list") ||
@@ -237,10 +220,11 @@ function runQa() {
     documentOverflowX: document.documentElement.scrollWidth > innerWidth + 1,
     panelInViewport: panel.left >= -1 && panel.right <= innerWidth + 1 && panel.top >= -1 && panel.bottom <= innerHeight + 1,
     sidebarSibling,
+    sidebarHiddenWhenCollapsed,
     noPanelWorkspace,
     sidebarVisibleOnDesktop,
     wingRightEdgeAttachedToPanel,
-    panelDockedLeftRadiusFlush,
+    panelLeftRadiusRestored,
     panelLeftRadii: {
       top: panelStyle.borderTopLeftRadius,
       bottom: panelStyle.borderBottomLeftRadius
@@ -268,7 +252,7 @@ function runQa() {
     textareaFixedHeight: textarea.clientHeight >= minTextareaHeight && textarea.clientHeight <= maxTextareaHeight,
     horizontalOverflowItems: bad
   };
-  result.pass = !result.documentOverflowX && result.panelInViewport && result.sidebarSibling && result.noPanelWorkspace && result.sidebarVisibleOnDesktop && result.wingRightEdgeAttachedToPanel && result.panelDockedLeftRadiusFlush && result.panelWidthPreserved && result.compactConversationRows && result.headerNoDuplicateConversationIcon && result.panelHeightStable && result.chatThreadOwnsScroll && result.chatThreadHasSpace && result.targetCardVisible && result.targetDoesNotOverlapThread && result.suggestionHidden && result.modeInsideComposer && result.modeDropdownClosed && result.compactComposer && result.textareaFixedHeight && bad.length === 0;
+  result.pass = !result.documentOverflowX && result.panelInViewport && result.sidebarSibling && result.sidebarHiddenWhenCollapsed && result.noPanelWorkspace && result.sidebarVisibleOnDesktop && result.wingRightEdgeAttachedToPanel && result.panelLeftRadiusRestored && result.panelWidthPreserved && result.compactConversationRows && result.headerNoDuplicateConversationIcon && result.panelHeightStable && result.chatThreadOwnsScroll && result.chatThreadHasSpace && result.targetCardVisible && result.targetDoesNotOverlapThread && result.suggestionHidden && result.modeInsideComposer && result.modeDropdownClosed && result.compactComposer && result.textareaFixedHeight && bad.length === 0;
   document.body.setAttribute("data-qa-pass", String(result.pass));
   document.getElementById("qa-result").textContent = JSON.stringify(result, null, 2);
 }
@@ -316,9 +300,14 @@ record(
   "source renders the conversation sidebar outside cas-panel"
 );
 record(
-  "visual:source:conversation-sidebar-rail",
-  launcherSource.includes('data-test="cas-sidebar-rail"'),
-  "source exposes a collapsed rail for reopening conversation history"
+  "visual:source:no-collapsed-sidebar-rail",
+  !launcherSource.includes('data-test="cas-sidebar-rail"'),
+  "source does not leave a visible external rail when the conversation sidebar is collapsed"
+);
+record(
+  "visual:source:conversation-sidebar-default-collapsed",
+  launcherSource.includes("function shouldOpenConversationWingByDefault() {\n  return false;"),
+  "source starts the conversation sidebar collapsed by default"
 );
 record(
   "visual:source:conversation-auto-save",
@@ -382,7 +371,12 @@ if (chromePath) {
         `expected panel width 560, got ${result.panel.width}`
       );
       record(
-        "visual:desktop:wing-visible",
+        "visual:desktop:sidebar-hidden-when-collapsed",
+        result.sidebarHiddenWhenCollapsed,
+        `sidebar=${JSON.stringify(result.sidebar)}`
+      );
+      record(
+        "visual:desktop:sidebar-contract",
         result.sidebarVisibleOnDesktop,
         `sidebar=${JSON.stringify(result.sidebar)}`
       );
@@ -393,10 +387,10 @@ if (chromePath) {
         `expected sidebar right edge to attach to panel left edge: panelLeft=${result.panel.left} sidebar=${JSON.stringify(result.sidebar)}`
       );
       record(
-        "visual:desktop:docked-panel-left-radius-flush",
-        result.panelDockedLeftRadiusFlush,
+        "visual:desktop:collapsed-panel-left-radius-restored",
+        result.panelLeftRadiusRestored,
         `panelLeftRadii=${JSON.stringify(result.panelLeftRadii)}`,
-        `panel keeps rounded left corners while docked: ${JSON.stringify(result.panelLeftRadii)}`
+        `panel left corners do not match collapsed/open state: ${JSON.stringify(result.panelLeftRadii)}`
       );
     }
     record(

@@ -924,8 +924,7 @@ const styles = `
   width: 26px;
 }
 
-.cas-conversation-wing,
-.cas-conversation-wing-rail {
+.cas-conversation-wing {
   bottom: calc(var(--pf-t--global--spacer--2xl, 48px) + var(--pf-t--global--spacer--lg, 24px) + 10px);
   height: min(760px, calc(100vh - 112px));
   max-height: min(760px, calc(100vh - 112px));
@@ -947,20 +946,6 @@ const styles = `
   overflow: hidden;
   padding: 10px;
   width: 244px;
-}
-
-.cas-conversation-wing-rail {
-  align-items: center;
-  background: var(--cas-soft);
-  border: 1px solid var(--cas-line);
-  border-radius: 8px 0 0 8px;
-  border-right: 0;
-  box-shadow: var(--pf-t--global--box-shadow--lg, 0 18px 44px rgba(3, 22, 30, 0.14));
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  justify-items: center;
-  padding: 9px 6px;
-  width: 42px;
 }
 
 .cas-wing-top,
@@ -1161,8 +1146,7 @@ const styles = `
   z-index: calc(var(--pf-t--global--z-index--md, 300) + 1);
 }
 
-.cas-launcher-root[data-wing="open"] .cas-panel,
-.cas-launcher-root[data-wing="rail"] .cas-panel {
+.cas-launcher-root[data-wing="open"] .cas-panel {
   border-bottom-left-radius: 0;
   border-top-left-radius: 0;
 }
@@ -1175,6 +1159,35 @@ const styles = `
   gap: 6px;
   min-height: 63px;
   padding: 12px;
+}
+
+.cas-panel-sidebar-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--cas-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 24px;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.cas-panel-sidebar-toggle:hover,
+.cas-panel-sidebar-toggle:focus,
+.cas-panel-sidebar-toggle[data-active="true"] {
+  background: var(--cas-soft-strong);
+  border-color: rgba(8, 127, 140, 0.22);
+  color: var(--cas-accent-strong);
+  outline: 0;
+}
+
+.cas-panel-sidebar-toggle svg {
+  height: 14px;
+  width: 14px;
 }
 
 .cas-header-tools {
@@ -2496,16 +2509,6 @@ const styles = `
     width: auto;
   }
 
-  .cas-conversation-wing-rail {
-    border-radius: 8px;
-    border-right: 1px solid var(--cas-line);
-    bottom: calc(var(--pf-t--global--spacer--2xl, 48px) + 30px);
-    height: 42px;
-    left: 8px;
-    right: auto;
-    width: 42px;
-  }
-
   .cas-panel {
     bottom: calc(var(--pf-t--global--spacer--2xl, 48px) + 22px);
     height: min(720px, calc(100vh - 86px));
@@ -2942,11 +2945,7 @@ function conversationTimeLabel(value: string) {
 }
 
 function shouldOpenConversationWingByDefault() {
-  try {
-    return typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 function pickQuestionSuggestions(language: Language, count = RECOMMENDED_QUESTION_COUNT) {
@@ -4836,11 +4835,11 @@ export function CASLauncher() {
   );
 
   return (
-    <div className="cas-launcher-root" data-test="cas-launcher-root" data-wing={showConversationWing ? "open" : "rail"}>
+    <div className="cas-launcher-root" data-test="cas-launcher-root" data-wing={showConversationWing ? "open" : "collapsed"}>
       <style>{styles}</style>
       {isOpen && (
         <>
-        {showConversationWing ? (
+        {showConversationWing && (
           <aside aria-label={copy.conversationSidebar} className="cas-conversation-wing" data-test="cas-conversation-sidebar">
             <div className="cas-wing-top">
               <div className="cas-wing-title">
@@ -4858,16 +4857,6 @@ export function CASLauncher() {
                 type="button"
               >
                 <NewChatIcon />
-              </button>
-              <button
-                aria-label={copy.collapseConversationSidebar}
-                className="cas-wing-icon-button cas-wing-close"
-                data-test="cas-sidebar-collapse"
-                onClick={() => setShowConversationWing(false)}
-                title={copy.collapseConversationSidebar}
-                type="button"
-              >
-                <CollapseLeftIcon />
               </button>
             </div>
             <label className="cas-wing-search">
@@ -4920,26 +4909,20 @@ export function CASLauncher() {
               </button>
             </div>
           </aside>
-        ) : (
-          <div aria-label={copy.conversationSidebar} className="cas-conversation-wing-rail" data-test="cas-sidebar-rail">
-            <button
-              aria-label={copy.expandConversationSidebar}
-              className="cas-wing-icon-button"
-              data-primary="true"
-              onClick={() => setShowConversationWing(true)}
-              title={copy.expandConversationSidebar}
-              type="button"
-            >
-              <ExpandRightIcon />
-            </button>
-            <span />
-            <button aria-label={copy.settings} className="cas-wing-icon-button" title={copy.settings} type="button">
-              <SettingsIcon />
-            </button>
-          </div>
         )}
         <section aria-label="Cywell AI Sentinel" className="cas-panel" data-test="cas-launcher-panel" role="dialog">
           <header className="cas-panel-header">
+            <button
+              aria-label={showConversationWing ? copy.collapseConversationSidebar : copy.expandConversationSidebar}
+              className="cas-panel-sidebar-toggle"
+              data-active={showConversationWing}
+              data-test="cas-sidebar-toggle"
+              onClick={() => setShowConversationWing((value) => !value)}
+              title={showConversationWing ? copy.collapseConversationSidebar : copy.expandConversationSidebar}
+              type="button"
+            >
+              {showConversationWing ? <CollapseLeftIcon /> : <ExpandRightIcon />}
+            </button>
             <SentinelIcon />
             <div className="cas-panel-title">
               <strong>Cywell AI Sentinel</strong>
