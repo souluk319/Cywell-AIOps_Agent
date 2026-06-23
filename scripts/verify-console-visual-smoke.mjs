@@ -97,7 +97,7 @@ ${styles}
     <main class="fake-content"><section class="fake-card"><h1>Cluster dashboard</h1><p>CAS is opened from the AI launcher position and overlays the native console without a full-screen route.</p></section></main>
   </div>
 </div>
-<div class="cas-launcher-root" data-test="cas-launcher-root">
+<div class="cas-launcher-root" data-test="cas-launcher-root" data-wing="open">
 <aside aria-label="대화 기록" class="cas-conversation-wing" data-test="cas-conversation-sidebar">
   <div class="cas-wing-top">
     <div class="cas-wing-title">
@@ -172,6 +172,7 @@ function runQa() {
   const sidebar = document.querySelector("[data-test='cas-conversation-sidebar']");
   const header = document.querySelector(".cas-panel-header");
   const panel = panelElement.getBoundingClientRect();
+  const panelStyle = getComputedStyle(panelElement);
   const sidebarRect = sidebar ? sidebar.getBoundingClientRect() : null;
   const sidebarStyle = sidebar ? getComputedStyle(sidebar) : null;
   const conversationItems = [...document.querySelectorAll(".cas-wing-item")].map((item) => item.getBoundingClientRect());
@@ -197,6 +198,9 @@ function runQa() {
   const noPanelWorkspace = !document.querySelector(".cas-panel-workspace, .cas-panel-split, .cas-panel-fullscreen, [data-test='cas-panel-workspace']");
   const sidebarVisibleOnDesktop = !desktopLayout || Boolean(sidebar && sidebarStyle.display !== "none" && sidebarRect.width >= 160 && sidebarRect.height >= 120);
   const wingRightEdgeAttachedToPanel = !desktopLayout || Boolean(sidebarRect && Math.abs(sidebarRect.right - panel.left) <= 2);
+  const panelDockedLeftRadiusFlush =
+    !desktopLayout ||
+    (parseFloat(panelStyle.borderTopLeftRadius) <= 0.5 && parseFloat(panelStyle.borderBottomLeftRadius) <= 0.5);
   const panelWidthPreserved = !desktopLayout || Math.abs(panel.width - 560) <= 2;
   const compactConversationRows = conversationItems.length > 0 && conversationItems.every((item) => item.height <= 72);
   const duplicateHeaderConversationControls = [...header.querySelectorAll("button,a,[role='button']")].filter((el) => {
@@ -236,6 +240,11 @@ function runQa() {
     noPanelWorkspace,
     sidebarVisibleOnDesktop,
     wingRightEdgeAttachedToPanel,
+    panelDockedLeftRadiusFlush,
+    panelLeftRadii: {
+      top: panelStyle.borderTopLeftRadius,
+      bottom: panelStyle.borderBottomLeftRadius
+    },
     panelWidthPreserved,
     compactConversationRows,
     conversationItemHeights: conversationItems.map((item) => Math.round(item.height)),
@@ -259,7 +268,7 @@ function runQa() {
     textareaFixedHeight: textarea.clientHeight >= minTextareaHeight && textarea.clientHeight <= maxTextareaHeight,
     horizontalOverflowItems: bad
   };
-  result.pass = !result.documentOverflowX && result.panelInViewport && result.sidebarSibling && result.noPanelWorkspace && result.sidebarVisibleOnDesktop && result.wingRightEdgeAttachedToPanel && result.panelWidthPreserved && result.compactConversationRows && result.headerNoDuplicateConversationIcon && result.panelHeightStable && result.chatThreadOwnsScroll && result.chatThreadHasSpace && result.targetCardVisible && result.targetDoesNotOverlapThread && result.suggestionHidden && result.modeInsideComposer && result.modeDropdownClosed && result.compactComposer && result.textareaFixedHeight && bad.length === 0;
+  result.pass = !result.documentOverflowX && result.panelInViewport && result.sidebarSibling && result.noPanelWorkspace && result.sidebarVisibleOnDesktop && result.wingRightEdgeAttachedToPanel && result.panelDockedLeftRadiusFlush && result.panelWidthPreserved && result.compactConversationRows && result.headerNoDuplicateConversationIcon && result.panelHeightStable && result.chatThreadOwnsScroll && result.chatThreadHasSpace && result.targetCardVisible && result.targetDoesNotOverlapThread && result.suggestionHidden && result.modeInsideComposer && result.modeDropdownClosed && result.compactComposer && result.textareaFixedHeight && bad.length === 0;
   document.body.setAttribute("data-qa-pass", String(result.pass));
   document.getElementById("qa-result").textContent = JSON.stringify(result, null, 2);
 }
@@ -382,6 +391,12 @@ if (chromePath) {
         result.wingRightEdgeAttachedToPanel,
         `panelLeft=${result.panel.left} sidebarRight=${result.sidebar?.right}`,
         `expected sidebar right edge to attach to panel left edge: panelLeft=${result.panel.left} sidebar=${JSON.stringify(result.sidebar)}`
+      );
+      record(
+        "visual:desktop:docked-panel-left-radius-flush",
+        result.panelDockedLeftRadiusFlush,
+        `panelLeftRadii=${JSON.stringify(result.panelLeftRadii)}`,
+        `panel keeps rounded left corners while docked: ${JSON.stringify(result.panelLeftRadii)}`
       );
     }
     record(

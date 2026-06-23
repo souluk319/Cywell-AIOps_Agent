@@ -1161,6 +1161,12 @@ const styles = `
   z-index: calc(var(--pf-t--global--z-index--md, 300) + 1);
 }
 
+.cas-launcher-root[data-wing="open"] .cas-panel,
+.cas-launcher-root[data-wing="rail"] .cas-panel {
+  border-bottom-left-radius: 0;
+  border-top-left-radius: 0;
+}
+
 .cas-panel-header {
   align-items: center;
   border-bottom: 1px solid var(--cas-line);
@@ -4830,7 +4836,7 @@ export function CASLauncher() {
   );
 
   return (
-    <div className="cas-launcher-root" data-test="cas-launcher-root">
+    <div className="cas-launcher-root" data-test="cas-launcher-root" data-wing={showConversationWing ? "open" : "rail"}>
       <style>{styles}</style>
       {isOpen && (
         <>
