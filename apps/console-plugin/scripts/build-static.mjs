@@ -3,7 +3,7 @@ import { copyFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const files = ["index.html", "styles.css", "app.js", "workbench.html", "workbench.css", "workbench.js"];
+const files = ["index.html", "styles.css", "app.js"];
 const here = fileURLToPath(new URL(".", import.meta.url));
 const sourceDir = resolve(here, "../src/static");
 const distDir = resolve(here, "../dist");
