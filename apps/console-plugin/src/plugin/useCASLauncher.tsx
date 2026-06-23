@@ -3,6 +3,8 @@ import * as React from "react";
 const API_BASE = "/api/proxy/plugin/cywell-ai-sentinel/cas-api";
 const CSRF_COOKIE_NAME = "csrf-token";
 const TUTORIAL_STORAGE_KEY = "cas:onboarding:v0.1.1";
+const CONVERSATION_STORAGE_KEY = "cas:conversations:v0.1.2";
+const MAX_SAVED_CONVERSATIONS = 30;
 
 type CauseCandidate = {
   cause: string;
@@ -80,6 +82,17 @@ type ChatMessage = {
     scenarioId: string;
     actionId?: string;
   };
+};
+
+type SavedConversation = {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  conversation_id?: string | null;
+  target: QueryTarget;
+  chat_mode: ChatMode;
+  messages: ChatMessage[];
 };
 
 type OverviewAction = {
@@ -342,6 +355,14 @@ const languageCopy: Record<
     sendLabel: string;
     stopLabel: string;
     newChat: string;
+    conversationSidebar: string;
+    savedConversations: string;
+    searchConversations: string;
+    noSavedConversations: string;
+    deleteConversation: string;
+    settings: string;
+    autoSaved: string;
+    untitledConversation: string;
     recommendationMeta: string;
     openCockpit: string;
     scrollBottom: string;
@@ -448,6 +469,14 @@ const languageCopy: Record<
     sendLabel: "질의 전송",
     stopLabel: "분석 중지",
     newChat: "새 대화",
+    conversationSidebar: "대화",
+    savedConversations: "저장된 대화",
+    searchConversations: "대화 검색",
+    noSavedConversations: "저장된 대화가 없습니다.",
+    deleteConversation: "삭제",
+    settings: "설정",
+    autoSaved: "자동 저장",
+    untitledConversation: "새 대화",
     recommendationMeta: "자주 확인 5개 · Enter 전송",
     openCockpit: "상황 열기",
     scrollBottom: "아래로",
@@ -496,7 +525,7 @@ const languageCopy: Record<
         id: "chat",
         title: "1. 먼저 채팅에서 시작합니다",
         body: "CAS는 Lightspeed 위치를 대체하는 AI 관제 챗봇입니다. 질문하면 Gateway가 OpenShift 증적, Metric, Runbook을 모아 답변합니다.",
-        hint: "왼쪽 첫 아이콘은 채팅, 바로 옆 아이콘은 새 대화입니다.",
+        hint: "저장된 대화와 새 대화는 왼쪽 사이드바에서 관리합니다.",
         view: "chat"
       },
       {
@@ -619,6 +648,14 @@ const languageCopy: Record<
     sendLabel: "Send question",
     stopLabel: "Stop analysis",
     newChat: "New chat",
+    conversationSidebar: "Chats",
+    savedConversations: "Saved chats",
+    searchConversations: "Search chats",
+    noSavedConversations: "No saved chats yet.",
+    deleteConversation: "Delete",
+    settings: "Settings",
+    autoSaved: "Auto-saved",
+    untitledConversation: "New chat",
     recommendationMeta: "5 frequent checks · Enter to send",
     openCockpit: "Open Situation",
     scrollBottom: "Bottom",
@@ -667,7 +704,7 @@ const languageCopy: Record<
         id: "chat",
         title: "1. Start in Chat",
         body: "CAS replaces the Lightspeed position as an AI operations chatbot. It gathers OpenShift evidence, metrics, and runbooks through the Gateway.",
-        hint: "The first icon is Chat. The icon next to it starts a new conversation.",
+        hint: "Saved chats and new chats live in the left sidebar.",
         view: "chat"
       },
       {
@@ -884,6 +921,241 @@ const styles = `
   right: var(--pf-t--global--spacer--lg, 24px);
   width: min(560px, calc(100vw - 32px));
   z-index: calc(var(--pf-t--global--z-index--md, 300) + 1);
+}
+
+.cas-panel[data-sidebar-open="false"] {
+  width: min(604px, calc(100vw - 32px));
+}
+
+.cas-panel[data-sidebar-open="true"] {
+  width: min(820px, calc(100vw - 32px));
+}
+
+.cas-panel-workspace {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 44px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.cas-panel-workspace[data-sidebar-open="true"] {
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+
+.cas-panel-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.cas-sidebar-rail {
+  background: var(--cas-soft);
+  border-right: 1px solid var(--cas-line);
+  display: grid;
+  gap: 8px;
+  grid-template-rows: auto 1fr auto;
+  min-height: 0;
+  padding: 9px 7px;
+}
+
+.cas-sidebar-rail-button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 6px;
+  color: var(--cas-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 29px;
+  justify-content: center;
+  padding: 0;
+  width: 29px;
+}
+
+.cas-sidebar-rail-button:hover,
+.cas-sidebar-rail-button:focus {
+  border-color: rgba(8, 127, 140, 0.36);
+  color: var(--cas-accent-strong);
+  outline: 2px solid rgba(8, 127, 140, 0.14);
+  outline-offset: 1px;
+}
+
+.cas-sidebar-rail-button svg {
+  height: 16px;
+  width: 16px;
+}
+
+.cas-conversation-sidebar {
+  background: var(--cas-soft);
+  border-right: 1px solid var(--cas-line);
+  display: grid;
+  gap: 10px;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  min-height: 0;
+  min-width: 0;
+  padding: 12px;
+}
+
+.cas-conversation-sidebar-header,
+.cas-conversation-footer {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.cas-conversation-sidebar-header strong {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.cas-conversation-new {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 6px;
+  color: var(--cas-ink);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 7px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.cas-conversation-new:hover,
+.cas-conversation-new:focus {
+  border-color: rgba(8, 127, 140, 0.36);
+  color: var(--cas-accent-strong);
+  outline: 2px solid rgba(8, 127, 140, 0.14);
+  outline-offset: 1px;
+}
+
+.cas-conversation-new svg {
+  flex: 0 0 16px;
+  height: 16px;
+  width: 16px;
+}
+
+.cas-conversation-search {
+  display: grid;
+  gap: 5px;
+}
+
+.cas-conversation-search span {
+  color: var(--cas-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cas-conversation-search input {
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 5px;
+  color: var(--cas-ink);
+  font: inherit;
+  font-size: 12px;
+  min-height: 30px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+.cas-conversation-list {
+  align-content: start;
+  display: grid;
+  gap: 6px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.cas-conversation-empty {
+  border: 1px dashed var(--cas-line);
+  border-radius: 6px;
+  color: var(--cas-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px;
+}
+
+.cas-conversation-row {
+  align-items: stretch;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.cas-conversation-item {
+  background: #fff;
+  border: 1px solid var(--cas-line);
+  border-radius: 6px;
+  color: var(--cas-ink);
+  cursor: pointer;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  text-align: left;
+}
+
+.cas-conversation-item:hover,
+.cas-conversation-item:focus,
+.cas-conversation-item[data-active="true"] {
+  border-color: rgba(8, 127, 140, 0.36);
+  outline: 2px solid rgba(8, 127, 140, 0.12);
+  outline-offset: 1px;
+}
+
+.cas-conversation-item strong,
+.cas-conversation-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cas-conversation-item strong {
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.cas-conversation-item span {
+  color: var(--cas-muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.cas-conversation-delete {
+  align-self: start;
+  background: transparent;
+  border: 0;
+  color: var(--cas-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  height: 26px;
+  padding: 0 4px;
+}
+
+.cas-conversation-delete:hover,
+.cas-conversation-delete:focus {
+  color: var(--cas-danger);
+  text-decoration: underline;
+}
+
+.cas-conversation-footer {
+  border-top: 1px solid var(--cas-line);
+  color: var(--cas-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  padding-top: 9px;
 }
 
 .cas-panel-header {
@@ -2213,6 +2485,33 @@ const styles = `
     width: auto;
   }
 
+  .cas-panel[data-sidebar-open="true"] {
+    width: auto;
+  }
+
+  .cas-panel[data-sidebar-open="false"] {
+    width: auto;
+  }
+
+  .cas-panel-workspace[data-sidebar-open="true"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .cas-panel-workspace[data-sidebar-open="false"] {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .cas-conversation-sidebar {
+    border-bottom: 1px solid var(--cas-line);
+    border-right: 0;
+    max-height: 238px;
+  }
+
+  .cas-sidebar-rail {
+    padding: 9px 4px;
+  }
+
   .cas-launcher-button {
     bottom: 12px;
     right: 12px;
@@ -2416,6 +2715,15 @@ function NewChatIcon() {
   );
 }
 
+function ConversationSidebarIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+      <path d="M5 5h14v14H5z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="2" />
+      <path d="M9 5v14M12 9h4M12 12.5h3" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
 function TargetIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
@@ -2505,6 +2813,92 @@ function markTutorialSeen() {
     if (typeof window !== "undefined") window.localStorage.setItem(TUTORIAL_STORAGE_KEY, "seen");
   } catch {
     // Ignore storage failures; the tutorial can simply show again.
+  }
+}
+
+function readSavedConversations(): SavedConversation[] {
+  try {
+    if (typeof window === "undefined") return [];
+    const raw = window.localStorage.getItem(CONVERSATION_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item === "object" && typeof item.id === "string")
+      .map((item) => {
+        const candidate = item as Partial<SavedConversation>;
+        const target = candidate.target ?? { namespace: "default", kind: "ClusterVersion", name: "version" };
+        return {
+          id: String(candidate.id),
+          title: String(candidate.title || "New chat"),
+          created_at: String(candidate.created_at || new Date().toISOString()),
+          updated_at: String(candidate.updated_at || candidate.created_at || new Date().toISOString()),
+          conversation_id: candidate.conversation_id ?? null,
+          target: {
+            namespace: String(target.namespace || "default"),
+            kind: String(target.kind || "ClusterVersion"),
+            name: String(target.name || "version")
+          },
+          chat_mode: candidate.chat_mode === "troubleshooting" ? "troubleshooting" : "ask",
+          messages: Array.isArray(candidate.messages)
+            ? candidate.messages.filter((message) => {
+                if (!message || typeof message !== "object") return false;
+                const role = (message as { role?: unknown }).role;
+                const content = (message as { content?: unknown }).content;
+                return (role === "user" || role === "assistant" || role === "system") && typeof content === "string";
+              }) as ChatMessage[]
+            : []
+        };
+      })
+      .filter((conversation) => conversation.messages.length > 0)
+      .slice(0, MAX_SAVED_CONVERSATIONS);
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedConversations(conversations: SavedConversation[]) {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(CONVERSATION_STORAGE_KEY, JSON.stringify(conversations.slice(0, MAX_SAVED_CONVERSATIONS)));
+  } catch {
+    // Browser storage can be disabled; chat should still work.
+  }
+}
+
+function conversationTitle(messages: ChatMessage[], target: QueryTarget, copy: (typeof languageCopy)[Language]) {
+  const firstQuestion = messages.find((message) => message.role === "user" && message.content.trim())?.content.trim();
+  const rawTitle = firstQuestion || targetDisplay(target, copy) || copy.untitledConversation;
+  return rawTitle.replace(/\s+/g, " ").slice(0, 54);
+}
+
+function conversationSearchText(conversation: SavedConversation, copy: (typeof languageCopy)[Language]) {
+  return [
+    conversation.title,
+    targetDisplay(conversation.target, copy),
+    conversation.chat_mode,
+    ...conversation.messages.slice(-4).map((message) => message.content)
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function conversationTimeLabel(value: string, language: Language) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(language === "ko" ? "ko-KR" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function shouldOpenConversationSidebarByDefault() {
+  try {
+    return typeof window === "undefined" || window.matchMedia("(min-width: 621px)").matches;
+  } catch {
+    return true;
   }
 }
 
@@ -3645,6 +4039,10 @@ export function CASLauncher() {
   const [showSuggestions, setShowSuggestions] = React.useState(false);
   const [showModeMenu, setShowModeMenu] = React.useState(false);
   const [showTargetControls, setShowTargetControls] = React.useState(false);
+  const [showConversationSidebar, setShowConversationSidebar] = React.useState(() => shouldOpenConversationSidebarByDefault());
+  const [savedConversations, setSavedConversations] = React.useState<SavedConversation[]>(() => readSavedConversations());
+  const [conversationSearch, setConversationSearch] = React.useState("");
+  const [activeSavedConversationId, setActiveSavedConversationId] = React.useState<string | null>(null);
   const [showTutorial, setShowTutorial] = React.useState(false);
   const [tutorialStepIndex, setTutorialStepIndex] = React.useState(0);
   const [namespace, setNamespace] = React.useState("default");
@@ -3694,6 +4092,19 @@ export function CASLauncher() {
   const namespaceOptions = React.useMemo(() => uniqueTargetValues(targetOptions, "namespace"), [targetOptions]);
   const kindOptions = React.useMemo(() => matchingKinds(targetOptions, namespace), [namespace, targetOptions]);
   const nameOptions = React.useMemo(() => matchingNames(targetOptions, namespace, resourceKind), [namespace, resourceKind, targetOptions]);
+  const visibleSavedConversations = React.useMemo(() => {
+    const needle = conversationSearch.trim().toLowerCase();
+    if (!needle) return savedConversations;
+    return savedConversations.filter((conversation) => conversationSearchText(conversation, copy).includes(needle));
+  }, [conversationSearch, copy, savedConversations]);
+
+  const persistSavedConversations = React.useCallback((updater: (current: SavedConversation[]) => SavedConversation[]) => {
+    setSavedConversations((current) => {
+      const next = updater(current).slice(0, MAX_SAVED_CONVERSATIONS);
+      writeSavedConversations(next);
+      return next;
+    });
+  }, []);
 
   const selectTarget = React.useCallback((target: QueryTarget) => {
     setNamespace(target.namespace);
@@ -3911,6 +4322,46 @@ export function CASLauncher() {
       });
     }
   }, [activeView, isOpen, messages]);
+
+  React.useEffect(() => {
+    if (!isOpen || messages.length === 0 || !messages.some((message) => message.role === "user")) return;
+    const timer = window.setTimeout(() => {
+      const now = new Date().toISOString();
+      const id = activeSavedConversationId ?? createMessageId("conversation");
+      const target = {
+        namespace: namespace || "default",
+        kind: resourceKind || "Resource",
+        name: resourceName || "name"
+      };
+      if (!activeSavedConversationId) setActiveSavedConversationId(id);
+      persistSavedConversations((current) => {
+        const existing = current.find((conversation) => conversation.id === id);
+        const nextConversation: SavedConversation = {
+          id,
+          title: conversationTitle(messages, target, copy),
+          created_at: existing?.created_at ?? now,
+          updated_at: now,
+          conversation_id: conversationId,
+          target,
+          chat_mode: chatMode,
+          messages
+        };
+        return [nextConversation, ...current.filter((conversation) => conversation.id !== id)];
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeSavedConversationId,
+    chatMode,
+    conversationId,
+    copy,
+    isOpen,
+    messages,
+    namespace,
+    persistSavedConversations,
+    resourceKind,
+    resourceName
+  ]);
 
   const handleChatScroll = React.useCallback(() => {
     const thread = chatThreadRef.current;
@@ -4305,11 +4756,55 @@ export function CASLauncher() {
     setMessages([]);
   }, [language, rotateQuestionSuggestions]);
 
+  const startNewConversation = React.useCallback(() => {
+    resetConversation();
+    setActiveSavedConversationId(null);
+    setShowConversationSidebar(true);
+  }, [resetConversation]);
+
+  const loadSavedConversation = React.useCallback((conversation: SavedConversation) => {
+    abortControllerRef.current?.abort();
+    setConversationId(conversation.conversation_id ?? null);
+    setIsRunning(false);
+    setCopiedMessageId(null);
+    setActiveView("chat");
+    setChatMode(conversation.chat_mode);
+    setNamespace(conversation.target.namespace);
+    setResourceKind(conversation.target.kind);
+    setResourceName(conversation.target.name);
+    setQuestion("");
+    setShowTargetControls(false);
+    setShowSuggestions(false);
+    setShowModeMenu(false);
+    setSelectedSimulationId(null);
+    setActiveSavedConversationId(conversation.id);
+    setMessages(conversation.messages);
+    autoScrollRef.current = true;
+    setShowScrollBottom(false);
+    window.setTimeout(scrollToBottom, 0);
+  }, [scrollToBottom]);
+
+  const deleteSavedConversation = React.useCallback(
+    (conversationIdToDelete: string) => {
+      persistSavedConversations((current) => current.filter((conversation) => conversation.id !== conversationIdToDelete));
+      if (activeSavedConversationId === conversationIdToDelete) {
+        setActiveSavedConversationId(null);
+      }
+    },
+    [activeSavedConversationId, persistSavedConversations]
+  );
+
   return (
     <div className="cas-launcher-root" data-test="cas-launcher-root">
       <style>{styles}</style>
       {isOpen && (
-        <section aria-label="Cywell AI Sentinel" className="cas-panel" data-test="cas-launcher-panel" role="dialog">
+        <section
+          aria-label="Cywell AI Sentinel"
+          className="cas-panel"
+          data-sidebar-open={showConversationSidebar ? "true" : "false"}
+          data-test="cas-launcher-panel"
+          role="dialog"
+        >
           <header className="cas-panel-header">
             <SentinelIcon />
             <div className="cas-panel-title">
@@ -4319,40 +4814,22 @@ export function CASLauncher() {
             <div className="cas-header-tools">
               <nav aria-label={copy.viewsNavLabel} className="cas-view-switcher" data-test="cas-view-switcher">
                 {(["chat", "cockpit", "evidence", "actions", "simulation"] as ActiveView[]).map((view) => (
-                  <React.Fragment key={view}>
-                    <button
-                      aria-label={copy.viewLabels[view]}
-                      className="cas-view-button"
-                      data-active={activeView === view}
-                      data-test={`cas-view-${view}`}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        openView(view);
-                      }}
-                      title={copy.viewLabels[view]}
-                      type="button"
-                    >
-                      <ViewIcon view={view} />
-                    </button>
-                    {view === "chat" && (
-                      <button
-                        aria-label={copy.newChat}
-                        className="cas-view-button"
-                        data-test="cas-new-chat"
-                        disabled={isRunning}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          resetConversation();
-                        }}
-                        title={copy.newChat}
-                        type="button"
-                      >
-                        <NewChatIcon />
-                      </button>
-                    )}
-                  </React.Fragment>
+                  <button
+                    aria-label={copy.viewLabels[view]}
+                    className="cas-view-button"
+                    data-active={activeView === view}
+                    data-test={`cas-view-${view}`}
+                    key={view}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      openView(view);
+                    }}
+                    title={copy.viewLabels[view]}
+                    type="button"
+                  >
+                    <ViewIcon view={view} />
+                  </button>
                 ))}
               </nav>
               <button
@@ -4416,6 +4893,101 @@ export function CASLauncher() {
             </div>
           </header>
 
+          <div className="cas-panel-workspace" data-sidebar-open={showConversationSidebar ? "true" : "false"}>
+            {showConversationSidebar ? (
+              <aside aria-label={copy.savedConversations} className="cas-conversation-sidebar" data-test="cas-conversation-sidebar">
+                <div className="cas-conversation-sidebar-header">
+                  <strong>{copy.savedConversations}</strong>
+                  <button
+                    aria-label={copy.targetClose}
+                    className="cas-link-button"
+                    data-test="cas-sidebar-close"
+                    onClick={() => setShowConversationSidebar(false)}
+                    type="button"
+                  >
+                    {copy.targetClose}
+                  </button>
+                </div>
+                <button className="cas-conversation-new" data-test="cas-sidebar-new-chat" onClick={startNewConversation} type="button">
+                  <NewChatIcon />
+                  <span>{copy.newChat}</span>
+                </button>
+                <label className="cas-conversation-search">
+                  <span>{copy.searchConversations}</span>
+                  <input
+                    aria-label={copy.searchConversations}
+                    data-test="cas-sidebar-search"
+                    onChange={(event) => setConversationSearch(event.currentTarget.value)}
+                    value={conversationSearch}
+                  />
+                </label>
+                <div className="cas-conversation-list" data-test="cas-saved-conversation-list">
+                  {visibleSavedConversations.length === 0 ? (
+                    <div className="cas-conversation-empty">{copy.noSavedConversations}</div>
+                  ) : (
+                    visibleSavedConversations.map((conversation) => (
+                      <div className="cas-conversation-row" key={conversation.id}>
+                        <button
+                          className="cas-conversation-item"
+                          data-active={activeSavedConversationId === conversation.id}
+                          data-test="cas-saved-conversation"
+                          onClick={() => loadSavedConversation(conversation)}
+                          title={conversation.title}
+                          type="button"
+                        >
+                          <strong>{conversation.title}</strong>
+                          <span>{targetDisplay(conversation.target, copy)}</span>
+                          <span>
+                            {copy.modeLabels[conversation.chat_mode]} · {conversationTimeLabel(conversation.updated_at, language)}
+                          </span>
+                        </button>
+                        <button
+                          aria-label={`${copy.deleteConversation}: ${conversation.title}`}
+                          className="cas-conversation-delete"
+                          data-test="cas-delete-conversation"
+                          onClick={() => deleteSavedConversation(conversation.id)}
+                          title={copy.deleteConversation}
+                          type="button"
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="cas-conversation-footer">
+                  <span>{copy.autoSaved}</span>
+                  <button className="cas-link-button" onClick={openTutorial} type="button">
+                    {copy.settings}
+                  </button>
+                </div>
+              </aside>
+            ) : (
+              <div aria-label={copy.savedConversations} className="cas-sidebar-rail" data-test="cas-sidebar-rail">
+                <button
+                  aria-label={copy.savedConversations}
+                  className="cas-sidebar-rail-button"
+                  data-test="cas-sidebar-open"
+                  onClick={() => setShowConversationSidebar(true)}
+                  title={copy.savedConversations}
+                  type="button"
+                >
+                  <ConversationSidebarIcon />
+                </button>
+                <span />
+                <button
+                  aria-label={copy.newChat}
+                  className="cas-sidebar-rail-button"
+                  data-test="cas-sidebar-new-chat-collapsed"
+                  onClick={startNewConversation}
+                  title={copy.newChat}
+                  type="button"
+                >
+                  <NewChatIcon />
+                </button>
+              </div>
+            )}
+            <div className="cas-panel-main">
           <div className="cas-panel-body" data-target-open={showTargetControls ? "true" : "false"}>
             <div
               className="cas-status-row"
@@ -4744,6 +5316,8 @@ export function CASLauncher() {
                 isRunning={isRunning}
               />
             )}
+          </div>
+            </div>
           </div>
           {showTutorial && (
             <TutorialOverlay

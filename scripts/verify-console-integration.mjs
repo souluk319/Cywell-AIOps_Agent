@@ -245,12 +245,41 @@ expectText(
   "data-test=\"cas-view-switcher\"",
   "launcher exposes header icon view switching"
 );
-expectOrder(
-  "console-chat:new-chat-adjacent-to-chat",
+rejectText(
+  "console-chat:no-header-new-chat",
   launcherSource,
-  ["data-test={`cas-view-${view}`}", "view === \"chat\" &&", "data-test=\"cas-new-chat\""],
-  "new chat action is rendered immediately after the chat icon",
-  "new chat must sit next to chat, not after unrelated dashboard views"
+  "data-test=\"cas-new-chat\"",
+  "new chat is owned by the left conversation sidebar, not the header"
+);
+expectText(
+  "console-chat:conversation-sidebar",
+  launcherSource,
+  "data-test=\"cas-conversation-sidebar\"",
+  "conversation history is rendered in the left sidebar"
+);
+expectText(
+  "console-chat:sidebar-new-chat",
+  launcherSource,
+  "data-test=\"cas-sidebar-new-chat\"",
+  "new chat action lives inside the conversation sidebar"
+);
+expectText(
+  "console-chat:sidebar-search",
+  launcherSource,
+  "data-test=\"cas-sidebar-search\"",
+  "conversation sidebar supports saved chat search"
+);
+expectText(
+  "console-chat:conversation-storage",
+  launcherSource,
+  "CONVERSATION_STORAGE_KEY",
+  "conversation history is persisted in browser storage"
+);
+expectText(
+  "console-chat:sidebar-rail",
+  launcherSource,
+  "data-test=\"cas-sidebar-rail\"",
+  "collapsed conversation sidebar uses a left rail instead of a header icon"
 );
 expectText(
   "console-chat:language-toggle",
@@ -636,10 +665,10 @@ expectText(
   "target settings has an explicit apply action"
 );
 expectText(
-  "console-chat:new-chat-header",
+  "console-chat:new-chat-sidebar",
   launcherSource,
-  "data-test=\"cas-new-chat\"",
-  "new chat is a header icon instead of a full-width footer control"
+  "data-test=\"cas-sidebar-new-chat\"",
+  "new chat is a sidebar action instead of a footer or header control"
 );
 rejectText(
   "console-chat:no-footer-toolbar",
@@ -998,8 +1027,8 @@ expectText(
 expectText(
   "console-chat:bundle-new-chat",
   launcherBundle,
-  "cas-new-chat",
-  "built launcher bundle contains header new-chat action"
+  "cas-sidebar-new-chat",
+  "built launcher bundle contains sidebar new-chat action"
 );
 expectText(
   "console-chat:bundle-target-fields",
