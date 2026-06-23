@@ -83,10 +83,12 @@ type ChatMessage = {
 };
 
 type OverviewAction = {
+  id?: string;
   label: string;
   type: "cas_query" | "console_link";
   question?: string;
   href?: string;
+  target?: QueryTarget;
 };
 
 type RiskWorkload = {
@@ -2502,11 +2504,6 @@ function markTutorialSeen() {
   }
 }
 
-function isOpenShiftConsoleHref(value?: string) {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return false;
-  return value.startsWith("/k8s/") || value.startsWith("/search") || value.startsWith("/monitoring");
-}
-
 function pickQuestionSuggestions(language: Language, count = RECOMMENDED_QUESTION_COUNT) {
   const pool = [...OCP_AIOPS_QUESTION_BANK[language]];
   for (let index = pool.length - 1; index > 0; index -= 1) {
@@ -2600,12 +2597,24 @@ function scoreLabel(value?: number) {
 function displayActionLabel(action: OverviewAction, language: Language) {
   const label = action.label ?? "";
   if (language !== "ko") return label;
-  if (label === "Review namespace events") return "Namespace 이벤트 확인";
-  if (label.startsWith("Review runbook:")) return label.replace("Review runbook:", "Runbook 확인:");
-  if (label.startsWith("Run RCA for ")) return label.replace("Run RCA for ", "RCA 실행: ");
+  if (label === "Namespace event check") return "Namespace 이벤트 확인";
+  if (label === "ClusterVersion check") return "ClusterVersion 확인";
+  if (label.startsWith("Runbook check:")) return label.replace("Runbook check:", "Runbook 확인:");
+  if (label.startsWith("RCA check:")) return label.replace("RCA check:", "RCA 확인:");
+  if (label.startsWith("Event check:")) return label.replace("Event check:", "이벤트 확인:");
+  if (label.startsWith("Metric check:")) return label.replace("Metric check:", "Metric 확인:");
   const openMatch = label.match(/^Open (.+) in Console$/);
   if (openMatch) return `콘솔에서 ${openMatch[1]} 열기`;
   return label;
+}
+
+function executableActionQuestion(action: OverviewAction, language: Language) {
+  if (action.question) return action.question;
+  const label = displayActionLabel(action, language);
+  if (action.target) {
+    return `${action.target.namespace} namespace의 ${action.target.kind}/${action.target.name}에 대해 "${label}" 항목을 실제 증거 기준으로 확인해줘.`;
+  }
+  return `"${label}" 항목을 현재 OpenShift 증거, Metric, Runbook 근거 기준으로 확인해줘.`;
 }
 
 function targetKey(target: QueryTarget) {
@@ -2960,7 +2969,7 @@ function OverviewCockpit({
   activeView: Exclude<ActiveView, "chat" | "simulation">;
   copy: (typeof languageCopy)[Language];
   onRefresh: () => void;
-  onRunQuestion: (question: string, resourceName?: string) => void;
+  onRunQuestion: (question: string, resourceName?: string, namespace?: string, resourceKind?: string, modeOverride?: ChatMode) => void;
   onSelectWorkload: (workload: RiskWorkload) => void;
   isRunning: boolean;
 }) {
@@ -3192,17 +3201,21 @@ function OverviewCockpit({
             </div>
             <div className="cas-action-list">
               {actions.slice(0, 6).map((action) => {
-                const canOpenConsole = action.type === "console_link" && isOpenShiftConsoleHref(action.href);
                 const actionLabel = displayActionLabel(action, language);
-                const fallbackQuestion =
-                  action.question ??
-                  (canOpenConsole
-                    ? `다음 확인 "${action.label}"을 위한 안전한 확인 절차와 콘솔 위치(${action.href})를 알려줘. 브라우저 이동은 하지 말고 단계별로 설명해줘.`
-                    : `다음 확인 "${action.label}"을 위한 안전한 확인 절차와 콘솔 위치를 알려줘.`);
+                const runQuestion = executableActionQuestion(action, language);
                 return (
-                  <div className="cas-action-row" key={`${action.type}-${action.label}`}>
+                  <div className="cas-action-row" key={action.id ?? `${action.type}-${action.label}`}>
                     <span title={actionLabel}>{actionLabel}</span>
-                    <button className="cas-link-button" disabled={isRunning} onClick={() => onRunQuestion(fallbackQuestion)} type="button">
+                    <button
+                      className="cas-link-button"
+                      data-test="cas-next-check-run"
+                      disabled={isRunning}
+                      onClick={() =>
+                        onRunQuestion(runQuestion, action.target?.name, action.target?.namespace, action.target?.kind, "troubleshooting")
+                      }
+                      title={runQuestion}
+                      type="button"
+                    >
                       {copy.run}
                     </button>
                   </div>
@@ -4131,13 +4144,19 @@ export function CASLauncher() {
   );
 
   const runOverviewQuestion = React.useCallback(
-    (nextQuestion: string, nextResourceName?: string, nextNamespace?: string, nextResourceKind?: string) => {
+    (
+      nextQuestion: string,
+      nextResourceName?: string,
+      nextNamespace?: string,
+      nextResourceKind?: string,
+      modeOverride?: ChatMode
+    ) => {
       setQuestion(nextQuestion);
       if (nextResourceName) setResourceName(nextResourceName);
       if (nextNamespace) setNamespace(nextNamespace);
       if (nextResourceKind) setResourceKind(nextResourceKind);
       setActiveView("chat");
-      void submitQuestion(nextQuestion, nextResourceName, nextNamespace, nextResourceKind);
+      void submitQuestion(nextQuestion, nextResourceName, nextNamespace, nextResourceKind, undefined, undefined, modeOverride);
     },
     [submitQuestion]
   );
@@ -4182,7 +4201,7 @@ export function CASLauncher() {
         language === "en"
           ? `Analyze the root cause for ${workload.kind} ${workload.name} in namespace ${workload.namespace}.`
           : `${workload.namespace} namespace ${workload.name} ${workload.kind} 원인 분석해줘`;
-      runOverviewQuestion(nextQuestion, workload.name, workload.namespace, workload.kind);
+      runOverviewQuestion(nextQuestion, workload.name, workload.namespace, workload.kind, "troubleshooting");
     },
     [language, runOverviewQuestion]
   );

@@ -492,10 +492,10 @@ expectText(
   "long Next Actions labels are clamped instead of stretching cards"
 );
 expectText(
-  "console-actions:safe-console-href",
+  "console-actions:executable-question",
   launcherSource,
-  "isOpenShiftConsoleHref(action.href)",
-  "Next Actions only open known OpenShift console hrefs"
+  "executableActionQuestion(action, language)",
+  "Next Checks execute a concrete CAS question instead of acting as display-only rows"
 );
 rejectText(
   "console-actions:no-events-href",
@@ -504,10 +504,22 @@ rejectText(
   "Next Actions do not treat CRC-fragile Events routes as direct links"
 );
 expectText(
-  "console-actions:fallback-question",
+  "console-actions:targeted-run",
   launcherSource,
-  "fallbackQuestion",
-  "unknown action hrefs become CAS guidance questions instead of broken links"
+  "action.target?.name, action.target?.namespace, action.target?.kind",
+  "Next Checks pass their target into the chat query"
+);
+expectText(
+  "console-actions:troubleshooting-run",
+  launcherSource,
+  "\"troubleshooting\"",
+  "Next Checks run in Troubleshooting mode by default"
+);
+expectText(
+  "console-actions:run-button-test-id",
+  launcherSource,
+  "data-test=\"cas-next-check-run\"",
+  "Next Checks expose an executable run button for visual and E2E checks"
 );
 rejectText(
   "console-actions:no-direct-href-navigation",

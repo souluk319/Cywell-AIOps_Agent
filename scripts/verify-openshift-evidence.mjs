@@ -402,8 +402,18 @@ expect("overview:timeline", overview.evidence_timeline?.some((item) => item.summ
 expect("overview:actions", overview.actions?.some((item) => item.type === "cas_query"), "overview includes a Run RCA action");
 expect(
   "overview:events-query-action",
-  overview.actions?.some((item) => item.type === "cas_query" && item.label === "Review namespace events"),
+  overview.actions?.some((item) => item.type === "cas_query" && item.label === "Namespace event check"),
   "overview namespace events action becomes CAS guidance instead of a fragile console route"
+);
+expect(
+  "overview:actions-targeted",
+  overview.actions?.every((item) => item.type !== "cas_query" || (item.question && item.target?.namespace && item.target?.kind && item.target?.name)),
+  "overview CAS query actions carry executable questions and analysis targets"
+);
+expect(
+  "overview:metric-check-action",
+  overview.actions?.some((item) => item.type === "cas_query" && String(item.id ?? "").startsWith("check:metrics:")),
+  "overview exposes a metric-focused next check for the top risky workload"
 );
 expect(
   "overview:no-events-404-link",
@@ -411,7 +421,7 @@ expect(
   "overview does not emit OpenShift Events routes that 404 in CRC 4.20"
 );
 expect("overview:no-runbook-404-link", !overview.actions?.some((item) => String(item.href ?? "").startsWith("/docs/")), "overview does not emit runbook links to missing in-console docs routes");
-expect("overview:runbook-query-action", overview.actions?.some((item) => item.type === "cas_query" && String(item.label ?? "").startsWith("Review runbook:")), "overview runbook actions are CAS guidance queries instead of broken links");
+expect("overview:runbook-query-action", overview.actions?.some((item) => item.type === "cas_query" && String(item.label ?? "").startsWith("Runbook check:")), "overview runbook actions are CAS guidance queries instead of broken links");
 expect("overview:metric-group", overview.evidence_groups?.metric?.length >= 1, "overview includes metric evidence group");
 expect("overview:runbook-group", overview.evidence_groups?.runbook?.length >= 1, "overview includes runbook evidence group");
 expect("overview:evidence-status", overview.evidence_status?.some((item) => item.type === "runbook" && item.status === "collected"), "overview exposes evidence_status");
@@ -457,6 +467,11 @@ const targets = await collectOpenShiftTargets(
   }
 );
 expect("targets:mode", targets.mode === "target_catalog", "target catalog endpoint contract mode is target_catalog");
+expect(
+  "targets:namespace",
+  targets.targets?.some((item) => item.kind === "Namespace" && item.name === "komsco-batch"),
+  "target catalog includes Namespace options for namespace-level checks"
+);
 expect(
   "targets:pod",
   targets.targets?.some((item) => item.namespace === "komsco-batch" && item.kind === "Pod"),

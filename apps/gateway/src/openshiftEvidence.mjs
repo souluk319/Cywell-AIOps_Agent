@@ -288,34 +288,86 @@ function topRcaCandidate(riskWorkloads = [], timeline = []) {
   };
 }
 
+function actionTargetFromWorkload(workload) {
+  if (!workload?.namespace || !workload?.kind || !workload?.name) return undefined;
+  return {
+    namespace: workload.namespace,
+    kind: workload.kind,
+    name: workload.name
+  };
+}
+
+function namespaceTarget(namespace) {
+  return {
+    namespace,
+    kind: "Namespace",
+    name: namespace
+  };
+}
+
 function overviewActionQueue(namespace, topWorkload) {
   const actions = [];
   if (topWorkload) {
+    const target = actionTargetFromWorkload(topWorkload);
+    const resource = `${topWorkload.kind}/${topWorkload.name}`;
     actions.push({
-      label: `Run RCA for ${topWorkload.name}`,
+      id: `check:rca:${topWorkload.namespace}:${topWorkload.kind}:${topWorkload.name}`,
+      label: `RCA check: ${resource}`,
       type: "cas_query",
-      question: `${topWorkload.namespace} namespace ${topWorkload.name} ${topWorkload.kind} 원인 분석해줘`
+      target,
+      question: `${topWorkload.namespace} namespace의 ${resource} 상태, 최근 Warning 이벤트, 재시작, 로그, 메트릭 근거를 연결해서 원인 후보와 다음 확인 순서를 알려줘.`
     });
     actions.push({
-      label: `Open ${topWorkload.kind} in Console`,
-      type: "console_link",
-      href: consoleHrefFor(topWorkload)
+      id: `check:events:${topWorkload.namespace}:${topWorkload.kind}:${topWorkload.name}`,
+      label: `Event check: ${topWorkload.name}`,
+      type: "cas_query",
+      target,
+      question: `${topWorkload.namespace} namespace의 ${resource}와 관련된 최근 Warning 이벤트를 기준으로 readiness, scheduling, image, probe 문제 가능성을 구분해줘.`
+    });
+    actions.push({
+      id: `check:metrics:${topWorkload.namespace}:${topWorkload.kind}:${topWorkload.name}`,
+      label: `Metric check: ${topWorkload.name}`,
+      type: "cas_query",
+      target,
+      question: `${topWorkload.namespace} namespace의 ${resource} 재시작 증가, 메모리 사용량, 메모리 limit 근거를 기준으로 리소스 병목 가능성을 확인해줘.`
     });
   }
   actions.push({
-    label: "Review namespace events",
+    id: `check:namespace-events:${namespace}`,
+    label: "Namespace event check",
     type: "cas_query",
-    question: `${namespace} namespace의 최근 Warning 이벤트를 기준으로 장애 가능성과 안전한 확인 절차를 알려줘.`
+    target: namespaceTarget(namespace),
+    question: `${namespace} namespace의 최근 Warning 이벤트, Pending Pod, 재시작 증가를 한 번에 확인해서 지금 우선 봐야 할 장애 후보를 정리해줘.`
+  });
+  actions.push({
+    id: "check:cluster-version",
+    label: "ClusterVersion check",
+    type: "cas_query",
+    target: {
+      namespace: "default",
+      kind: "ClusterVersion",
+      name: "version"
+    },
+    question: "ClusterVersion/version 상태와 최근 조건을 기준으로 클러스터 자체 이상 징후가 있는지 확인해줘."
   });
   return actions;
 }
 
-function runbookActions(runbookEvidence = []) {
+function runbookActions(runbookEvidence = [], namespace = "default", topWorkload) {
+  const target = actionTargetFromWorkload(topWorkload) ?? namespaceTarget(namespace);
   return runbookEvidence.slice(0, 3).map((item) => ({
-    label: `Review runbook: ${item.summary}`,
+    id: `check:runbook:${item.id}`,
+    label: `Runbook check: ${compactRunbookLabel(item.summary)}`,
     type: "cas_query",
-    question: `Runbook 근거 ${item.id} (${item.summary})를 기준으로 현재 상황에서 안전한 확인 절차를 요약해줘.`
+    target,
+    question: `Runbook 근거 ${item.id} (${item.summary})를 현재 OpenShift/Metric 증거와 연결해서 원인 후보, 확인 순서, 사람이 실행해도 안전한 다음 확인 항목으로 정리해줘.`
   }));
+}
+
+function compactRunbookLabel(summary = "") {
+  const text = String(summary || "Runbook").replace(/\s+/g, " ").trim();
+  const title = text.split(":")[0]?.trim() || text;
+  return truncate(title, 76);
 }
 
 function timelineEvidence(timeline = []) {
@@ -576,6 +628,9 @@ export async function collectOpenShiftTargets(input = {}, options = {}) {
   const namespaces = await getList("namespace", "/api/v1/namespaces?limit=80");
   const namespaceNames = namespaces.map((item) => item.metadata?.name).filter(Boolean);
   const selectedNamespaces = [...new Set([currentNamespace, ...namespaceNames])].slice(0, 24);
+  for (const namespace of selectedNamespaces) {
+    addTarget({ namespace, kind: "Namespace", name: namespace });
+  }
 
   await Promise.all(
     selectedNamespaces.map(async (namespace) => {
@@ -780,7 +835,7 @@ export async function collectOpenShiftOverview(input = {}, options = {}) {
     evidence_timeline: timeline,
     evidence_groups: groupedEvidence,
     evidence_status: overviewEvidenceStatus,
-    actions: [...overviewActionQueue(namespace, topWorkload), ...runbookActions(runbookOverview.evidence ?? [])],
+    actions: [...overviewActionQueue(namespace, topWorkload), ...runbookActions(runbookOverview.evidence ?? [], namespace, topWorkload)],
     missing: overviewMissing
   });
 }
