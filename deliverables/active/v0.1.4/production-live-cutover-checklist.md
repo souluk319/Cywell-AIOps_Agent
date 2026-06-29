@@ -37,7 +37,7 @@ These values must come from the target environment. Do not commit any secret val
   - `CAS_PBS_SOURCE_HEAD=<approved full 40-character PBS git commit>`
   - `npm run verify:release:source-pinning` must write `test-results/cas-pbs-source-contract-pinned.json`
   - the PBS checkout must be clean, its `remote.origin.url` must match the approved PBS GitHub host/repository, `git fetch --prune origin` must succeed, at least one fetched `origin/*` branch must contain the pinned SHA, and the pinned contract file hash set must match the expected PBS runtime/API contract files
-  - current v0.1.4 source-pin candidate: `https://github.com/souluk319/PBS_DEV_Part3.git`, branch `kugnus/cywell-v0.1.4-source-contract`, SHA `0c6b23c46acb6d3a7d87f416b6512d23f53a8c3b`
+  - current v0.1.4 source-pin candidate: `https://github.com/souluk319/PBS_DEV_Part3.git`, branch `kugnus/cywell-v0.1.4-source-contract`, SHA `47c03c47cabf2fb1181fe44d9810c0feef086d6f`
   - current PBS branch includes `deploy/openshift-cywell-v014` for the real `playbookstudio` namespace and `playbookstudio-runtime` Service contract; apply it on the PBS side and stamp `PLAYBOOKSTUDIO_SOURCE_HEAD` with the same approved full SHA before running Cywell live preflight
 - Expected live cluster identity for live-ready cutover bundling:
   - `CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON={"server":"https://api...:6443","namespace":"cywell-ai-sentinel","namespaceUid":"...","infrastructureName":"..."}`
@@ -137,7 +137,7 @@ Run these before applying live manifests:
 ```powershell
 npm run verify
 npm run render:pbs:live-prereqs
-$env:CAS_PBS_SOURCE_HEAD="0c6b23c46acb6d3a7d87f416b6512d23f53a8c3b"
+$env:CAS_PBS_SOURCE_HEAD="47c03c47cabf2fb1181fe44d9810c0feef086d6f"
 $env:CAS_PBS_SOURCE_DIR="F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone"
 npm run verify:release:source-pinning
 npm run verify:deploy:manifests
@@ -150,7 +150,7 @@ node ./scripts/render-pbs-cutover-bundle.mjs --require-live-ready
 Required result:
 
 - `verify` passes.
-- `verify:release:source-pinning` passes against the pinned PBS source checkout before live feature parity is claimed. For the current v0.1.4 candidate this has passed against `0c6b23c46acb6d3a7d87f416b6512d23f53a8c3b`, but rerun it close to cutover if evidence freshness windows expire. `CAS_PBS_SOURCE_HEAD` must be the approved full PBS git SHA, the PBS checkout must be clean, and dirty PBS source is not acceptable for live cutover.
+- `verify:release:source-pinning` passes against the pinned PBS source checkout before live feature parity is claimed. For the current v0.1.4 candidate this has passed against `47c03c47cabf2fb1181fe44d9810c0feef086d6f`, but rerun it close to cutover if evidence freshness windows expire. `CAS_PBS_SOURCE_HEAD` must be the approved full PBS git SHA, the PBS checkout must be clean, and dirty PBS source is not acceptable for live cutover.
 - `verify:pbs:live-prereqs` passes as a renderer self-test and writes `test-results/cas-pbs-live-prereqs-self-test.json`.
 - `render:pbs:live-prereqs` writes the real reviewed live prereq manifests, generated `pbs-live-site` overlay, redacted summary, and `test-results/cas-pbs-live-prereqs-render.json`.
 - `verify:deploy:manifests` passes.

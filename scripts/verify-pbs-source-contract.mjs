@@ -31,8 +31,16 @@ const evidencePath = requireCleanSource && requireExpectedHead ? pinnedEvidenceP
 const checks = [];
 const contractFiles = [
   "deploy/Dockerfile",
+  "deploy/openshift-cywell-v014/kustomization.yaml",
+  "deploy/openshift-cywell-v014/runtime-service.yaml",
+  "deploy/openshift-cywell-v014/runtime-contract-patch.yaml",
+  "deploy/openshift-cywell-v014/runtime-tls-patch.yaml",
+  "deploy/openshift-cywell-v014/configmap-runtime-patch.yaml",
+  "deploy/openshift-cywell-v014/lightspeed-networkpolicy-patch.yaml",
+  "deploy/openshift-cywell-v014/terminal-broker-subject-patch.yaml",
   "docker-compose.yml",
   "src/play_book_studio/config/settings.py",
+  "src/play_book_studio/http/server.py",
   "src/play_book_studio/http/public_chat_gateway.py",
   "src/play_book_studio/http/server_handler_factory.py",
   "src/play_book_studio/http/server_handler_base.py",
@@ -175,8 +183,16 @@ function hasAll(text, values) {
 
 function sourceContractChecks(root) {
   const dockerfile = readRequired(root, "deploy/Dockerfile");
+  const overlayKustomization = readRequired(root, "deploy/openshift-cywell-v014/kustomization.yaml");
+  const overlayRuntimeService = readRequired(root, "deploy/openshift-cywell-v014/runtime-service.yaml");
+  const overlayRuntimeContractPatch = readRequired(root, "deploy/openshift-cywell-v014/runtime-contract-patch.yaml");
+  const overlayRuntimeTlsPatch = readRequired(root, "deploy/openshift-cywell-v014/runtime-tls-patch.yaml");
+  const overlayConfigMapRuntimePatch = readRequired(root, "deploy/openshift-cywell-v014/configmap-runtime-patch.yaml");
+  const overlayLightspeedNetworkPolicyPatch = readRequired(root, "deploy/openshift-cywell-v014/lightspeed-networkpolicy-patch.yaml");
+  const overlayTerminalBrokerSubjectPatch = readRequired(root, "deploy/openshift-cywell-v014/terminal-broker-subject-patch.yaml");
   const compose = readRequired(root, "docker-compose.yml");
   const settings = readRequired(root, "src/play_book_studio/config/settings.py");
+  const serverEntry = readRequired(root, "src/play_book_studio/http/server.py");
   const publicChatGateway = readRequired(root, "src/play_book_studio/http/public_chat_gateway.py");
   const serverFactory = readRequired(root, "src/play_book_studio/http/server_handler_factory.py");
   const serverHandlerBase = readRequired(root, "src/play_book_studio/http/server_handler_base.py");
@@ -225,6 +241,83 @@ function sourceContractChecks(root) {
     "PBS-Dev3 compose must keep the database/migration contract explicit for Cywell live cutover"
   );
   expect(
+    "pbs-source:openshift-overlay:runtime-service",
+    hasAll(overlayRuntimeService, [
+      "name: playbookstudio-runtime",
+      "namespace: playbookstudio",
+      "service.beta.openshift.io/serving-cert-secret-name: playbookstudio-runtime-tls",
+      "name: https-runtime",
+      "port: 8765"
+    ]),
+    "PBS-Dev3 Cywell overlay exposes playbookstudio-runtime as an HTTPS serving-cert Service on port 8765",
+    "PBS-Dev3 Cywell overlay must expose playbookstudio-runtime with an OpenShift serving cert on port 8765"
+  );
+  expect(
+    "pbs-source:openshift-overlay:runtime-labels",
+    hasAll(overlayRuntimeContractPatch, [
+      "app.kubernetes.io/name: playbookstudio",
+      "app.kubernetes.io/component: runtime"
+    ]),
+    "PBS-Dev3 Cywell overlay stamps the runtime workload and Service with the Cywell selector labels",
+    "PBS-Dev3 Cywell overlay must stamp runtime selector labels used by Cywell live preflight"
+  );
+  expect(
+    "pbs-source:openshift-overlay:runtime-tls",
+    hasAll(overlayRuntimeTlsPatch, [
+      "PBS_RUNTIME_TLS_CERT_FILE",
+      "PBS_RUNTIME_TLS_KEY_FILE",
+      "/etc/pki/playbookstudio-runtime/tls.crt",
+      "/etc/pki/playbookstudio-runtime/tls.key",
+      "scheme: HTTPS",
+      "secretName: playbookstudio-runtime-tls"
+    ]),
+    "PBS-Dev3 Cywell overlay mounts the serving cert and probes the runtime over HTTPS",
+    "PBS-Dev3 Cywell overlay must mount the serving cert and probe the runtime over HTTPS"
+  );
+  expect(
+    "pbs-source:openshift-overlay:runtime-namespace-config",
+    hasAll(overlayConfigMapRuntimePatch, ["OCP_DEFAULT_NAMESPACE: playbookstudio"]) &&
+      hasAll(overlayTerminalBrokerSubjectPatch, ["namespace: playbookstudio"]),
+    "PBS-Dev3 Cywell overlay moves runtime namespace defaults and terminal broker subject to playbookstudio",
+    "PBS-Dev3 Cywell overlay must point runtime namespace defaults and terminal broker subject at playbookstudio"
+  );
+  expect(
+    "pbs-source:openshift-overlay:lightspeed-networkpolicy",
+    hasAll(overlayLightspeedNetworkPolicyPatch, [
+      "namespace: openshift-lightspeed",
+      "kubernetes.io/metadata.name: playbookstudio",
+      "port: 8443"
+    ]),
+    "PBS-Dev3 Cywell overlay keeps the Lightspeed ingress NetworkPolicy in openshift-lightspeed and allows playbookstudio",
+    "PBS-Dev3 Cywell overlay must not render the Lightspeed NetworkPolicy into the PBS namespace"
+  );
+  expect(
+    "pbs-source:openshift-overlay:kustomization",
+    hasAll(overlayKustomization, [
+      "../openshift",
+      "runtime-service.yaml",
+      "runtime-tls-patch.yaml",
+      "lightspeed-networkpolicy-patch.yaml",
+      "terminal-broker-subject-patch.yaml"
+    ]) && !/^namespace:\s+playbookstudio\s*$/m.test(overlayKustomization),
+    "PBS-Dev3 Cywell overlay patches PBS workload namespaces without globally rewriting the Lightspeed NetworkPolicy namespace",
+    "PBS-Dev3 Cywell overlay must not use a global namespace transform that rewrites the Lightspeed NetworkPolicy namespace"
+  );
+  expect(
+    "pbs-source:runtime:https-server",
+    hasAll(serverEntry, [
+      "ssl.SSLContext",
+      "PBS runtime TLS requires both PBS_RUNTIME_TLS_CERT_FILE and PBS_RUNTIME_TLS_KEY_FILE",
+      "context.load_cert_chain",
+      "context.wrap_socket",
+      "settings.runtime_tls_cert_file",
+      "settings.runtime_tls_key_file",
+      'backend_url = f"{scheme}://{host}:{port}"'
+    ]),
+    "PBS-Dev3 runtime can serve HTTPS when the OpenShift serving cert files are mounted",
+    "PBS-Dev3 runtime must serve HTTPS when the Cywell overlay mounts serving cert files"
+  );
+  expect(
     "pbs-source:route:health",
     serverFactory.includes('request_path == "/api/health"'),
     "PBS-Dev3 serves GET /api/health",
@@ -253,6 +346,8 @@ function sourceContractChecks(root) {
     serverFactory.includes("PUBLIC_CHAT_PATHS") &&
       serverFactory.includes("_handle_public_chat_gateway") &&
       publicChatGateway.includes('PUBLIC_CHAT_PATH = "/api/public/chat"') &&
+      publicChatGateway.includes('PUBLIC_CHAT_STREAM_PATH = "/api/public/chat/stream"') &&
+      publicChatGateway.includes("PUBLIC_CHAT_PATHS = {PUBLIC_CHAT_PATH, PUBLIC_CHAT_STREAM_PATH}") &&
       publicChatGateway.includes("def authenticate_public_chat(") &&
       publicChatGateway.includes("def run_public_chat("),
     "PBS-Dev3 serves the public chat gateway through an explicit guarded route",
@@ -287,10 +382,12 @@ function sourceContractChecks(root) {
       "PBS_PUBLIC_CHAT_RATE_LIMIT_PER_MINUTE",
       "PBS_PUBLIC_CHAT_MAX_CONCURRENT",
       "PBS_PUBLIC_CHAT_MAX_BODY_BYTES",
-      "PBS_PUBLIC_CHAT_OWNER_USER_ID"
+      "PBS_PUBLIC_CHAT_OWNER_USER_ID",
+      "PBS_RUNTIME_TLS_CERT_FILE",
+      "PBS_RUNTIME_TLS_KEY_FILE"
     ]),
-    "PBS-Dev3 settings expose the public chat gateway runtime controls",
-    "PBS-Dev3 settings must expose the public chat gateway runtime controls"
+    "PBS-Dev3 settings expose the public chat gateway and runtime TLS controls",
+    "PBS-Dev3 settings must expose the public chat gateway and runtime TLS controls"
   );
   expect(
     "pbs-source:route:attachment-transcribe-boundary",
@@ -377,6 +474,95 @@ CMD ["python", "-m", "play_book_studio.cli", "ui", "--no-browser", "--host", "0.
 `
   );
   await write(
+    "deploy/openshift-cywell-v014/kustomization.yaml",
+    `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../openshift
+  - runtime-service.yaml
+patches:
+  - path: runtime-tls-patch.yaml
+  - path: lightspeed-networkpolicy-patch.yaml
+  - path: terminal-broker-subject-patch.yaml
+`
+  );
+  await write(
+    "deploy/openshift-cywell-v014/runtime-service.yaml",
+    `apiVersion: v1
+kind: Service
+metadata:
+  name: playbookstudio-runtime
+  namespace: playbookstudio
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: playbookstudio-runtime-tls
+spec:
+  ports:
+    - name: https-runtime
+      port: 8765
+`
+  );
+  await write(
+    "deploy/openshift-cywell-v014/runtime-contract-patch.yaml",
+    `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels:
+    app.kubernetes.io/name: playbookstudio
+    app.kubernetes.io/component: runtime
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: playbookstudio
+        app.kubernetes.io/component: runtime
+`
+  );
+  await write(
+    "deploy/openshift-cywell-v014/runtime-tls-patch.yaml",
+    `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          env:
+            - name: PBS_RUNTIME_TLS_CERT_FILE
+              value: /etc/pki/playbookstudio-runtime/tls.crt
+            - name: PBS_RUNTIME_TLS_KEY_FILE
+              value: /etc/pki/playbookstudio-runtime/tls.key
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+      volumes:
+        - name: runtime-tls
+          secret:
+            secretName: playbookstudio-runtime-tls
+`
+  );
+  await write("deploy/openshift-cywell-v014/configmap-runtime-patch.yaml", "kind: ConfigMap\nmetadata:\n  name: playbookstudio-config\ndata:\n  OCP_DEFAULT_NAMESPACE: playbookstudio\n");
+  await write(
+    "deploy/openshift-cywell-v014/lightspeed-networkpolicy-patch.yaml",
+    `apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-pbs-to-lightspeed-app-server
+  namespace: openshift-lightspeed
+spec:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: playbookstudio
+      ports:
+        - port: 8443
+`
+  );
+  await write("deploy/openshift-cywell-v014/terminal-broker-subject-patch.yaml", "kind: ClusterRoleBinding\nmetadata:\n  name: pbs-terminal-broker\nsubjects:\n  - namespace: playbookstudio\n");
+  await write(
     "docker-compose.yml",
     `services:
   postgres:
@@ -420,12 +606,28 @@ PBS_PUBLIC_CHAT_RATE_LIMIT_PER_MINUTE = "PBS_PUBLIC_CHAT_RATE_LIMIT_PER_MINUTE"
 PBS_PUBLIC_CHAT_MAX_CONCURRENT = "PBS_PUBLIC_CHAT_MAX_CONCURRENT"
 PBS_PUBLIC_CHAT_MAX_BODY_BYTES = "PBS_PUBLIC_CHAT_MAX_BODY_BYTES"
 PBS_PUBLIC_CHAT_OWNER_USER_ID = "PBS_PUBLIC_CHAT_OWNER_USER_ID"
+PBS_RUNTIME_TLS_CERT_FILE = "PBS_RUNTIME_TLS_CERT_FILE"
+PBS_RUNTIME_TLS_KEY_FILE = "PBS_RUNTIME_TLS_KEY_FILE"
+`
+  );
+  await write(
+    "src/play_book_studio/http/server.py",
+    `import ssl
+def _configure_runtime_tls(server, settings):
+  context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+  context.load_cert_chain(certfile=settings.runtime_tls_cert_file, keyfile=settings.runtime_tls_key_file)
+  server.socket = context.wrap_socket(server.socket, server_side=True)
+  raise ValueError("PBS runtime TLS requires both PBS_RUNTIME_TLS_CERT_FILE and PBS_RUNTIME_TLS_KEY_FILE")
+def serve(host, port, settings):
+  backend_url = f"{scheme}://{host}:{port}"
 `
   );
   await write(
     "src/play_book_studio/http/public_chat_gateway.py",
     `import hmac
 PUBLIC_CHAT_PATH = "/api/public/chat"
+PUBLIC_CHAT_STREAM_PATH = "/api/public/chat/stream"
+PUBLIC_CHAT_PATHS = {PUBLIC_CHAT_PATH, PUBLIC_CHAT_STREAM_PATH}
 pbs_public_chat_enabled = False
 pbs_public_chat_api_keys = ()
 public_chat_disabled = "public_chat_disabled"
