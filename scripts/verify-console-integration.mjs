@@ -1,7 +1,44 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
 const checks = [];
+const evidencePath = "test-results/cas-console-integration.json";
+
+function git(args) {
+  const result = spawnSync("git", args, { encoding: "utf8", timeout: 10000, windowsHide: true });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function writeEvidence() {
+  const status = checks.some((check) => check.status === "FAIL") ? "FAIL" : "PASS";
+  const statusShort = git(["status", "--short"]);
+  mkdirSync("test-results", { recursive: true });
+  writeFileSync(
+    evidencePath,
+    `${JSON.stringify(
+      {
+        checkedAt: new Date().toISOString(),
+        branch: git(["branch", "--show-current"]),
+        head: git(["rev-parse", "--short", "HEAD"]),
+        fullHead: git(["rev-parse", "HEAD"]),
+        treeStatus: statusShort ? "dirty" : "clean",
+        statusShort,
+        status,
+        summary: {
+          total: checks.length,
+          passed: checks.filter((check) => check.status === "PASS").length,
+          failed: checks.filter((check) => check.status === "FAIL").length
+        },
+        checks
+      },
+      null,
+      2
+    )}\n`
+  );
+  console.log(`Evidence: ${evidencePath}`);
+}
 
 function record(status, id, detail) {
   checks.push({ status, id, detail });
@@ -758,6 +795,7 @@ expectText(
 );
 
 const failures = checks.filter((check) => check.status === "FAIL");
+writeEvidence();
 if (failures.length > 0) {
   console.error(`Console integration verification failed with ${failures.length} failures.`);
   process.exitCode = 1;

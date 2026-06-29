@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 
@@ -9,16 +10,56 @@ const root = resolve(".");
 const distDir = resolve(root, "apps/console-plugin/dist");
 const requireBrowser = process.argv.includes("--require-browser");
 const calls = [];
+const checks = [];
 const failures = [];
 const pageErrors = [];
+const evidencePath = "test-results/cas-console-launcher-dom.json";
 let passCount = 0;
+
+function git(args) {
+  const result = spawnSync("git", args, { encoding: "utf8", timeout: 10000, windowsHide: true });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function writeEvidence() {
+  const status = checks.some((check) => check.status === "FAIL") ? "FAIL" : "PASS";
+  const statusShort = git(["status", "--short"]);
+  mkdirSync("test-results", { recursive: true });
+  writeFileSync(
+    evidencePath,
+    `${JSON.stringify(
+      {
+        checkedAt: new Date().toISOString(),
+        branch: git(["branch", "--show-current"]),
+        head: git(["rev-parse", "--short", "HEAD"]),
+        fullHead: git(["rev-parse", "HEAD"]),
+        treeStatus: statusShort ? "dirty" : "clean",
+        statusShort,
+        status,
+        summary: {
+          total: checks.length,
+          passed: checks.filter((check) => check.status === "PASS").length,
+          failed: checks.filter((check) => check.status === "FAIL").length
+        },
+        requireBrowser,
+        checks
+      },
+      null,
+      2
+    )}\n`
+  );
+  console.log(`Evidence: ${evidencePath}`);
+}
 
 function expect(id, condition, passDetail, failDetail = passDetail) {
   if (condition) {
     passCount += 1;
+    checks.push({ status: "PASS", id, detail: passDetail });
     console.log(`[PASS] ${id}: ${passDetail}`);
   } else {
-    failures.push({ id, detail: failDetail });
+    const failure = { id, detail: failDetail };
+    failures.push(failure);
+    checks.push({ status: "FAIL", ...failure });
     console.log(`[FAIL] ${id}: ${failDetail}`);
   }
 }
@@ -370,8 +411,10 @@ async function run() {
     );
     expect("console-launcher-dom:browser-errors", pageErrors.length === 0, "browser reports no console errors or uncaught page errors", JSON.stringify(pageErrors));
   } catch (error) {
-    failures.push({ id: "console-launcher-dom:smoke", detail: error instanceof Error ? error.message : String(error) });
-    console.log(`[FAIL] console-launcher-dom:smoke: ${error instanceof Error ? error.message : String(error)}`);
+    const detail = error instanceof Error ? error.message : String(error);
+    failures.push({ id: "console-launcher-dom:smoke", detail });
+    checks.push({ status: "FAIL", id: "console-launcher-dom:smoke", detail });
+    console.log(`[FAIL] console-launcher-dom:smoke: ${detail}`);
   } finally {
     if (browser) await browser.close();
     serverHandle.server.close();
@@ -381,9 +424,12 @@ async function run() {
 try {
   await run();
 } catch (error) {
-  failures.push({ id: "console-launcher-dom:setup", detail: error instanceof Error ? error.message : String(error) });
+  const detail = error instanceof Error ? error.message : String(error);
+  failures.push({ id: "console-launcher-dom:setup", detail });
+  checks.push({ status: "FAIL", id: "console-launcher-dom:setup", detail });
 }
 
+writeEvidence();
 if (failures.length > 0) {
   console.error(`Console launcher DOM verification failed with ${failures.length} failures.`);
   process.exit(1);

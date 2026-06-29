@@ -62,11 +62,22 @@ function yamlString(value) {
   return JSON.stringify(String(value ?? ""));
 }
 
-function readEnvOrFile(env, valueName, fileName) {
+function readEnvOrFile(env, valueName, fileName, inputErrors = []) {
   const direct = String(env[valueName] ?? "").trim();
   if (direct) return direct;
   const file = String(env[fileName] ?? "").trim();
-  if (file && existsSync(file)) return readFileSync(file, "utf8").trim();
+  if (file) {
+    if (!existsSync(file)) {
+      inputErrors.push(`${fileName} points to a missing file: ${file}`);
+      return "";
+    }
+    try {
+      return readFileSync(file, "utf8").trim();
+    } catch (error) {
+      inputErrors.push(`${fileName} is not readable: ${error instanceof Error ? error.message : String(error)}`);
+      return "";
+    }
+  }
   return "";
 }
 
@@ -244,15 +255,16 @@ function deriveDatabaseUrl(env, values, targetNamespace) {
 }
 
 function buildInputs(env = process.env) {
+  const inputErrors = [];
   const targetNamespace = env.CAS_PBS_LIVE_NAMESPACE || "cywell-ai-sentinel";
-  const token = readEnvOrFile(env, "CAS_PBS_BEARER_TOKEN", "CAS_PBS_BEARER_TOKEN_FILE") || String(env.CAS_PBS_API_KEY ?? "").trim();
-  const ownerHmacSecret = readEnvOrFile(env, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "CAS_KNOWLEDGE_OWNER_HMAC_SECRET_FILE");
-  const customerAccessText = readEnvOrFile(env, "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON", "CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE");
+  const token = readEnvOrFile(env, "CAS_PBS_BEARER_TOKEN", "CAS_PBS_BEARER_TOKEN_FILE", inputErrors) || String(env.CAS_PBS_API_KEY ?? "").trim();
+  const ownerHmacSecret = readEnvOrFile(env, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "CAS_KNOWLEDGE_OWNER_HMAC_SECRET_FILE", inputErrors);
+  const customerAccessText = readEnvOrFile(env, "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON", "CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE", inputErrors);
   const customerAccess = parseCustomerAccessPolicy(customerAccessText);
   const postgresValues = {
     database: String(env.CAS_KNOWLEDGE_POSTGRES_DB ?? "").trim(),
     username: String(env.CAS_KNOWLEDGE_POSTGRES_USER ?? "").trim(),
-    password: String(env.CAS_KNOWLEDGE_POSTGRES_PASSWORD ?? "").trim(),
+    password: readEnvOrFile(env, "CAS_KNOWLEDGE_POSTGRES_PASSWORD", "CAS_KNOWLEDGE_POSTGRES_PASSWORD_FILE", inputErrors),
     databaseUrl: ""
   };
   postgresValues.databaseUrl = deriveDatabaseUrl(env, postgresValues, targetNamespace);
@@ -263,12 +275,13 @@ function buildInputs(env = process.env) {
     ownerHmacSecret,
     customerAccess,
     customerAccessText,
-    postgresValues
+    postgresValues,
+    inputErrors
   };
 }
 
 function validateInputs(inputs) {
-  const errors = [];
+  const errors = [...(inputs.inputErrors ?? [])];
   if (!tokenLooksUsable(inputs.token)) errors.push("CAS_PBS_BEARER_TOKEN or CAS_PBS_BEARER_TOKEN_FILE must contain non-placeholder token material with at least 20 non-whitespace characters");
   if (!hmacSecretLooksUsable(inputs.ownerHmacSecret)) errors.push("CAS_KNOWLEDGE_OWNER_HMAC_SECRET or CAS_KNOWLEDGE_OWNER_HMAC_SECRET_FILE must contain non-placeholder HMAC material with at least 32 non-whitespace characters");
   if (valueLooksPlaceholder(inputs.serviceOwner)) errors.push("CAS_KNOWLEDGE_SERVICE_OWNER must be set to a non-placeholder service owner");
@@ -453,7 +466,7 @@ function inputTemplateFiles(targetNamespace = namespace) {
     "1. Store the PBS bearer token in `pbs-live-token.txt`.",
     "2. Store the Gateway -> Knowledge Engine owner HMAC secret in `cas-owner-hmac-secret.txt`.",
     "3. Review and replace `customer-access.example.json` with explicit owners/users/groups to customer workspace mappings.",
-    "4. Set a live Postgres password from the target secret manager.",
+    "4. Store the live Postgres password in `cas-knowledge-postgres-password.txt`.",
     "5. Run `set-pbs-live-prereqs.template.ps1` after replacing placeholder paths and values.",
     "",
     "The renderer rejects wildcard/default ACLs, placeholder values, short tokens, weak HMAC material, and Postgres URLs that do not match the DB Secret fields.",
@@ -469,9 +482,12 @@ function inputTemplateFiles(targetNamespace = namespace) {
     '$env:CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE="C:\\secure-handoff\\customer-access.json"',
     '$env:CAS_KNOWLEDGE_POSTGRES_DB="cas_knowledge_live"',
     '$env:CAS_KNOWLEDGE_POSTGRES_USER="cas_knowledge_live"',
-    '$env:CAS_KNOWLEDGE_POSTGRES_PASSWORD="<replace-with-secret-manager-value>"',
-    `$env:CAS_KNOWLEDGE_POSTGRES_DATABASE_URL="postgresql://cas_knowledge_live:<url-encoded-password>@cas-knowledge-postgres.${targetNamespace}.svc.cluster.local:5432/cas_knowledge_live"`,
+    '$env:CAS_KNOWLEDGE_POSTGRES_PASSWORD_FILE="C:\\secure-handoff\\cas-knowledge-postgres-password.txt"',
+    '# Optional override only if the service DNS/database contract differs from the standard pbs-live site.',
+    `# $env:CAS_KNOWLEDGE_POSTGRES_DATABASE_URL="postgresql://cas_knowledge_live:<url-encoded-password>@cas-knowledge-postgres.${targetNamespace}.svc.cluster.local:5432/cas_knowledge_live"`,
+    '$env:CAS_PBS_LIVE_PREREQS_OUT_DIR="C:\\secure-handoff\\pbs-live-prereqs"',
     "",
+    "npm run verify:pbs:live-prereqs:inputs",
     "npm run render:pbs:live-prereqs",
     ""
   ].join("\n");
@@ -493,7 +509,8 @@ function inputTemplateFiles(targetNamespace = namespace) {
     "set-pbs-live-prereqs.template.ps1": powershell,
     "customer-access.example.json": `${customerAccess}\n`,
     "pbs-live-token.txt.example": "<replace-with-approved-pbs-bearer-token>\n",
-    "cas-owner-hmac-secret.txt.example": "<replace-with-approved-32-plus-character-hmac-secret>\n"
+    "cas-owner-hmac-secret.txt.example": "<replace-with-approved-32-plus-character-hmac-secret>\n",
+    "cas-knowledge-postgres-password.txt.example": "<replace-with-approved-live-postgres-password>\n"
   };
 }
 
@@ -566,8 +583,8 @@ function recordInputValidationEvidence(inputs, errors, outputDir, evidencePath =
       "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON or CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE",
       "CAS_KNOWLEDGE_POSTGRES_DB",
       "CAS_KNOWLEDGE_POSTGRES_USER",
-      "CAS_KNOWLEDGE_POSTGRES_PASSWORD",
-      "CAS_KNOWLEDGE_POSTGRES_DATABASE_URL"
+      "CAS_KNOWLEDGE_POSTGRES_PASSWORD or CAS_KNOWLEDGE_POSTGRES_PASSWORD_FILE",
+      "CAS_KNOWLEDGE_POSTGRES_DATABASE_URL optional override; derived from DB/USER/PASSWORD_FILE by default"
     ]
   }, evidencePath);
 }
@@ -710,6 +727,12 @@ function selfTest() {
     record(validateInputs(nonStringAcl).some((error) => error.includes("customer access policy")) ? "PASS" : "FAIL", "pbs-live-prereqs:non-string-acl-rejected", "non-string customer ACL entries are rejected");
     const mismatch = buildInputs({ ...sampleEnv(), CAS_KNOWLEDGE_POSTGRES_DATABASE_URL: "postgresql://wrong:wrong@cas-knowledge-postgres.cywell-ai-sentinel.svc.cluster.local:5432/wrong" });
     record(validateInputs(mismatch).some((error) => error.includes("credentials/database")) ? "PASS" : "FAIL", "pbs-live-prereqs:db-url-mismatch-rejected", "database-url must match individual DB Secret fields");
+    const missingInputFile = buildInputs({ ...sampleEnv(), CAS_PBS_BEARER_TOKEN: "", CAS_PBS_BEARER_TOKEN_FILE: join(tmp, "missing-token.txt") });
+    record(
+      validateInputs(missingInputFile).some((error) => error.includes("CAS_PBS_BEARER_TOKEN_FILE points to a missing file")) ? "PASS" : "FAIL",
+      "pbs-live-prereqs:missing-input-file-reported",
+      "missing *_FILE inputs report the exact missing file variable instead of collapsing to a generic empty secret"
+    );
     const emptyErrors = validateInputs(buildInputs({}));
     record(
       emptyErrors.includes("CAS_KNOWLEDGE_POSTGRES_DB must be non-placeholder") &&
@@ -724,9 +747,12 @@ function selfTest() {
     const templateFiles = writeInputTemplate(templateDir);
     const templateText = templateFiles.map((file) => readFileSync(file, "utf8")).join("\n");
     record(
-      templateFiles.length === 5 &&
+      templateFiles.length === 6 &&
         templateText.includes("CAS_PBS_BEARER_TOKEN_FILE") &&
         templateText.includes("CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE") &&
+        templateText.includes("CAS_KNOWLEDGE_POSTGRES_PASSWORD_FILE") &&
+        templateText.includes("CAS_PBS_LIVE_PREREQS_OUT_DIR") &&
+        templateText.includes("verify:pbs:live-prereqs:inputs") &&
         !templateText.includes("live-token-") &&
         !templateText.includes("LivePg-")
         ? "PASS"

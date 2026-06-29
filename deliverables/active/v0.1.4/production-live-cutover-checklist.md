@@ -96,10 +96,10 @@ $env:CAS_KNOWLEDGE_SERVICE_OWNER="cas-pbs-live"
 $env:CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE="C:\secure-handoff\customer-access.json"
 $env:CAS_KNOWLEDGE_POSTGRES_DB="cas_knowledge_live"
 $env:CAS_KNOWLEDGE_POSTGRES_USER="cas_knowledge_live"
-$env:CAS_KNOWLEDGE_POSTGRES_PASSWORD="<from-secret-manager>"
-$env:CAS_KNOWLEDGE_POSTGRES_DATABASE_URL="postgresql://cas_knowledge_live:<url-encoded-password>@cas-knowledge-postgres.cywell-ai-sentinel.svc.cluster.local:5432/cas_knowledge_live"
+$env:CAS_KNOWLEDGE_POSTGRES_PASSWORD_FILE="C:\secure-handoff\cas-knowledge-postgres-password.txt"
 $env:CAS_PBS_LIVE_PREREQS_OUT_DIR="C:\secure-handoff\pbs-live-prereqs"
 
+npm run verify:pbs:live-prereqs:inputs
 npm run render:pbs:live-prereqs
 
 oc diff -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-pbs-auth.secret.yaml"
@@ -116,6 +116,8 @@ oc apply -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-knowledge-live-config.configm
 # Required before applying pbs-live workloads: prevent fallback to CRC/dev DB credentials.
 oc delete secret cas-knowledge-postgres -n cywell-ai-sentinel --ignore-not-found=true
 ```
+
+The renderer derives `CAS_KNOWLEDGE_POSTGRES_DATABASE_URL` from `CAS_KNOWLEDGE_POSTGRES_DB`, `CAS_KNOWLEDGE_POSTGRES_USER`, `CAS_KNOWLEDGE_POSTGRES_PASSWORD_FILE`, and `CAS_PBS_LIVE_NAMESPACE` unless an explicit `CAS_KNOWLEDGE_POSTGRES_DATABASE_URL` override is set. Use the override only for a reviewed non-standard service DNS contract.
 
 Strict live preflight compares the live cluster Secret values back to the redacted hashes in `test-results/cas-pbs-live-prereqs-render.json` and `$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\pbs-live-prereqs.summary.json`. If an operator changes `cas-pbs-auth`, `cas-knowledge-internal-auth`, or `cas-knowledge-postgres-live` outside this renderer, `cluster:live-prereq-secret-hash-binding` must fail until the approved renderer is rerun and the changed manifests are reviewed.
 
@@ -143,6 +145,7 @@ Run these before applying live manifests:
 
 ```powershell
 npm run verify
+npm run verify:pbs:live-prereqs:inputs
 npm run render:pbs:live-prereqs
 $env:CAS_PBS_SOURCE_HEAD="6604777abb9e6bd44a83c6a12f36e31ac396489e"
 $env:CAS_PBS_SOURCE_DIR="F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone"
@@ -157,6 +160,7 @@ node ./scripts/render-pbs-cutover-bundle.mjs
 Required result:
 
 - `verify` passes.
+- `verify:pbs:live-prereqs:inputs` passes before writing real Secret manifests; this validates the secure handoff files and the derived Postgres URL contract without creating YAML.
 - `verify:release:source-pinning` passes against the pinned PBS source checkout before live feature parity is claimed. For the current v0.1.4 candidate this has passed against `6604777abb9e6bd44a83c6a12f36e31ac396489e`, but rerun it close to cutover if evidence freshness windows expire. `CAS_PBS_SOURCE_HEAD` must be the approved full PBS git SHA, the PBS checkout must be clean, and dirty PBS source is not acceptable for live cutover.
 - `verify:pbs:live-prereqs` passes as a renderer self-test and writes `test-results/cas-pbs-live-prereqs-self-test.json`.
 - `render:pbs:live-prereqs` writes the real reviewed live prereq manifests, generated `pbs-live-site` overlay, redacted summary, and `test-results/cas-pbs-live-prereqs-render.json`; `CAS_PBS_LIVE_PREREQS_OUT_DIR` must point outside the repository for real Secret output.

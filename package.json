@@ -45,6 +45,7 @@
     "verify:release:pbs-live": "npm run verify:release:source-pinning && npm run verify:pbs:preflight:live:site:preapply && npm run verify:pbs:preflight:live:site && node ./scripts/verify-pbs-live-smoke.mjs --cutover --cluster && node ./scripts/render-pbs-cutover-bundle.mjs --require-live-ready",
     "render:pbs:live-prereqs": "node ./scripts/render-pbs-live-prereqs.mjs",
     "render:pbs:live-prereqs:template": "node ./scripts/render-pbs-live-prereqs.mjs --write-input-template",
+    "verify:pbs:live-prereqs:inputs": "node ./scripts/render-pbs-live-prereqs.mjs --validate-only",
     "verify:pbs:live-prereqs": "node ./scripts/render-pbs-live-prereqs.mjs --self-test",
     "render:pbs:cutover-bundle": "node ./scripts/render-pbs-cutover-bundle.mjs",
     "verify:pbs:cutover-bundle": "node ./scripts/render-pbs-cutover-bundle.mjs --self-test",

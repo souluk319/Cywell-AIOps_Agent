@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { access, readFile } from "node:fs/promises";
-import { constants } from "node:fs";
+import { constants, mkdirSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 
@@ -9,6 +10,7 @@ const checks = [];
 const calls = [];
 const root = process.cwd();
 const distDir = resolve(root, "apps/console-plugin/dist");
+const evidencePath = "test-results/cas-console-topology-dom.json";
 const requireBrowser =
   process.argv.includes("--require-browser") ||
   ["1", "true", "yes", "y", "on"].includes(String(process.env.CAS_TOPOLOGY_DOM_REQUIRE_BROWSER ?? "").toLowerCase());
@@ -17,6 +19,48 @@ function record(status, id, detail, evidence) {
   checks.push({ status, id, detail, evidence });
   console.log(`[${status}] ${id}: ${detail}`);
   if (evidence) console.log(evidence);
+}
+
+function git(args) {
+  const result = spawnSync("git", args, { encoding: "utf8", timeout: 10000, windowsHide: true });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function writeEvidence() {
+  const hardFailures = checks.filter((check) => check.status === "FAIL");
+  const status =
+    hardFailures.length > 0 || (requireBrowser && checks.some((check) => check.status === "SKIP"))
+      ? "FAIL"
+      : checks.every((check) => check.status === "SKIP")
+        ? "SKIP"
+        : "PASS";
+  const statusShort = git(["status", "--short"]);
+  mkdirSync("test-results", { recursive: true });
+  writeFileSync(
+    evidencePath,
+    `${JSON.stringify(
+      {
+        checkedAt: new Date().toISOString(),
+        branch: git(["branch", "--show-current"]),
+        head: git(["rev-parse", "--short", "HEAD"]),
+        fullHead: git(["rev-parse", "HEAD"]),
+        treeStatus: statusShort ? "dirty" : "clean",
+        statusShort,
+        status,
+        summary: {
+          total: checks.length,
+          passed: checks.filter((check) => check.status === "PASS").length,
+          skipped: checks.filter((check) => check.status === "SKIP").length,
+          failed: hardFailures.length
+        },
+        requireBrowser,
+        checks
+      },
+      null,
+      2
+    )}\n`
+  );
+  console.log(`Evidence: ${evidencePath}`);
 }
 
 function pass(id, detail) {
@@ -1529,6 +1573,7 @@ try {
 }
 
 const failures = checks.filter((check) => check.status === "FAIL");
+writeEvidence();
 if (failures.length > 0) {
   console.error(`Console topology DOM verification failed with ${failures.length} failures.`);
   process.exitCode = 1;

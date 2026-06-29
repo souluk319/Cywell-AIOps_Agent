@@ -37,6 +37,7 @@ const files = [
   "scripts/render-pbs-cutover-bundle.mjs",
   "scripts/verify-pbs-source-contract.mjs",
   "scripts/verify-console-launcher-dom.mjs",
+  "scripts/verify-console-topology-dom.mjs",
   "scripts/verify-console-integration.mjs",
   "apps/gateway/src/server.mjs",
   "apps/knowledge-engine/src/cas_knowledge_engine/engine.py",
@@ -1410,6 +1411,8 @@ for (const file of files) {
         text.includes('"render:pbs:live-prereqs"') &&
         text.includes('"render:pbs:live-prereqs:template"') &&
         text.includes("--write-input-template") &&
+        text.includes('"verify:pbs:live-prereqs:inputs"') &&
+        text.includes("--validate-only") &&
         text.includes("render-pbs-live-prereqs.mjs") &&
         text.includes('"verify:pbs:live-prereqs"') &&
         text.includes("--self-test") &&
@@ -1533,6 +1536,8 @@ for (const file of files) {
         "pbs-live-prereqs:validation-contract",
         text.includes("tokenLooksUsable") &&
           text.includes("hmacSecretLooksUsable") &&
+          text.includes("CAS_KNOWLEDGE_POSTGRES_PASSWORD_FILE") &&
+          text.includes("inputErrors") &&
           text.includes("customerAccessPolicyIsConcrete") &&
           text.includes("databaseUrlMatchesSecret") &&
           text.includes("customerIsString") &&
@@ -1574,12 +1579,17 @@ for (const file of files) {
           text.includes("repo-raw-output-rejected") &&
           text.includes("repo-root-output-rejected") &&
           text.includes("bad-owner-hmac-rejected") &&
+          text.includes("CAS_KNOWLEDGE_POSTGRES_PASSWORD_FILE") &&
+          text.includes("inputErrors") &&
+          text.includes("CAS_PBS_LIVE_PREREQS_OUT_DIR") &&
+          text.includes("verify:pbs:live-prereqs:inputs") &&
           text.includes("wildcard-acl-rejected") &&
           text.includes("string-wildcard-acl-rejected") &&
           text.includes("string-grant-acl-rejected") &&
           text.includes("broad-group-acl-rejected") &&
           text.includes("non-string-acl-rejected") &&
           text.includes("db-url-mismatch-rejected") &&
+          text.includes("missing-input-file-reported") &&
           text.includes("input-error-env-names") &&
           text.includes("input-template") &&
           text.includes("redacted-summary"),
@@ -1767,9 +1777,24 @@ for (const file of files) {
           text.includes("console-launcher-dom:no-duplicate-after-remount") &&
           text.includes("/api/aiops/brainz") &&
           text.includes("/api/aiops/query") &&
-          text.includes("console-launcher-dom:conversation-preserved"),
-        "CAS launcher browser harness checks provider rendering, native Lightspeed suppression, bottom-right button, query flow, and conversation preservation",
-        "CAS launcher browser harness must verify the runtime launcher, not only source/bundle strings"
+          text.includes("console-launcher-dom:conversation-preserved") &&
+          text.includes("cas-console-launcher-dom.json") &&
+          text.includes("writeEvidence"),
+        "CAS launcher browser harness checks provider rendering, native Lightspeed suppression, bottom-right button, query flow, conversation preservation, and writes durable evidence",
+        "CAS launcher browser harness must verify the runtime launcher and write durable evidence, not only source/bundle strings"
+      );
+    }
+    if (file.includes("verify-console-topology-dom")) {
+      expect(
+        "console-topology-dom:evidence-contract",
+          text.includes("console-topology-dom:corpus-reports-browser-flow") &&
+          text.includes("console-topology-dom:pbs-rich-sidechannels") &&
+          text.includes("console-topology-dom:dense-node-index") &&
+          text.includes("assertViewportLayout(page, { width: 390") &&
+          text.includes("cas-console-topology-dom.json") &&
+          text.includes("writeEvidence"),
+        "console topology browser harness verifies customer data, RAG/wiki lineage topology, responsive dense graph behavior, and writes durable evidence",
+        "console topology browser harness must keep rich DOM coverage and write durable evidence"
       );
     }
     if (file.includes("verify-console-integration")) {
@@ -1778,9 +1803,11 @@ for (const file of files) {
         text.includes("console-chat:no-modal-launcher-api") &&
           text.includes("console-chat:provider-renders-launcher") &&
           text.includes("CASContextProvider.tsx") &&
-          text.includes("<CASLauncher />"),
-        "console integration verification rejects modal-mounted launchers and requires provider-rendered CAS launcher",
-        "console integration verification must prove the CAS launcher is provider-rendered, not modal-mounted"
+          text.includes("<CASLauncher />") &&
+          text.includes("cas-console-integration.json") &&
+          text.includes("writeEvidence"),
+        "console integration verification rejects modal-mounted launchers, requires provider-rendered CAS launcher, and writes durable evidence",
+        "console integration verification must prove the CAS launcher is provider-rendered, not modal-mounted, and write durable evidence"
       );
     }
     if (file.includes("CASContextProvider.tsx")) {
