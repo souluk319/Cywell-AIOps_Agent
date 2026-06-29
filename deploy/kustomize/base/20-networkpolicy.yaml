@@ -52,18 +52,6 @@ spec:
         - protocol: TCP
           port: 5353
     - to:
-        - ipBlock:
-            cidr: 10.217.4.1/32
-      ports:
-        - protocol: TCP
-          port: 443
-    - to:
-        - ipBlock:
-            cidr: 192.168.126.11/32
-      ports:
-        - protocol: TCP
-          port: 6443
-    - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: openshift-lightspeed

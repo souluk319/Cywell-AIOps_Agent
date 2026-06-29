@@ -36,11 +36,12 @@ def resolve_owner_id(headers: Any) -> str | None:
         return None
     owner_id = str(value).strip()
     secret = os.environ.get("CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "").strip()
-    if secret:
-        signature = str(headers.get("x-cas-owner-signature") or "").strip()
-        expected = hmac.new(secret.encode("utf-8"), owner_id.encode("utf-8"), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(signature, expected):
-            return None
+    if not secret:
+        return None
+    signature = str(headers.get("x-cas-owner-signature") or "").strip()
+    expected = hmac.new(secret.encode("utf-8"), owner_id.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
     if owner_id:
         return owner_id
     return None

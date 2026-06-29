@@ -401,23 +401,27 @@ try {
     });
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
+    const initialTopologyLoad = page.waitForResponse(
+      (response) => response.url().includes("/api/knowledge/topology?customer_id=default") && response.status() === 200
+    );
     await page.goto(`${serverHandle.url}/cywell/topology`, { waitUntil: "networkidle" });
     await page.waitForSelector('[data-test="cas-knowledge-panel-topology"]', { timeout: 15000 });
+    await initialTopologyLoad;
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 4);
     expect("console-topology-dom:route", true, "topology route mounts in a real browser");
     expect(
-      "console-topology-dom:empty-state",
-      (await page.locator('[data-test="cas-topology-dashboard"]').innerText()).includes("Topology data will render"),
-      "initial topology panel renders an empty dashboard state"
+      "console-topology-dom:auto-load",
+      calls.some((call) => call.method === "GET" && call.path === "/api/knowledge/topology" && call.query?.customer_id === "default"),
+      "topology route auto-loads the selected customer topology on entry"
     );
 
-    await page.getByLabel("Customer ID").fill("acme-topology");
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=acme-topology") && response.status() === 200),
-      page.locator('[data-test="cas-knowledge-topology"]').click()
+      page.getByLabel("Customer ID").fill("acme-topology")
     ]);
     await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 4);
 
-    const topologyCall = calls.find((call) => call.method === "GET" && call.path === "/api/knowledge/topology");
+    const topologyCall = [...calls].reverse().find((call) => call.method === "GET" && call.path === "/api/knowledge/topology");
     expect(
       "console-topology-dom:customer-query",
       topologyCall?.query?.customer_id === "acme-topology",
@@ -519,6 +523,15 @@ try {
       (await page.locator('[data-test="cas-topology-node"]').count()) === 7 &&
         (await page.locator('[data-test="cas-topology-visible-count"]').innerText()) === "Showing 7 of 28 nodes",
       "dense topology caps canvas nodes and reports total visible count"
+    );
+    await page.locator('[data-test="cas-topology-node-search"]').fill("Dense Customer Topology Node 27");
+    await page.locator('[data-test="cas-topology-node-index-item"]').filter({ hasText: "Dense Customer Topology Node 27" }).click();
+    const denseInspectorText = await page.locator('[data-test="cas-topology-inspector"]').innerText();
+    expect(
+      "console-topology-dom:dense-node-index",
+      denseInspectorText.includes("Dense Customer Topology Node 27") && denseInspectorText.includes("dense-node-27"),
+      "dense topology exposes hidden canvas nodes through searchable node index",
+      denseInspectorText
     );
     await assertViewportLayout(page, { width: 390, height: 844 }, "dense-topology");
 

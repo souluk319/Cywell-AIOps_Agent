@@ -8,6 +8,7 @@ const overlay = overlayArg === "pbs-shadow" ? "pbs-shadow" : "pbs-live";
 const overlayPath = `deploy/kustomize/overlays/${overlay}`;
 const requireCluster = process.argv.includes("--require-cluster") || envBool("CAS_PBS_PREFLIGHT_REQUIRE_CLUSTER");
 const requireSecret = process.argv.includes("--require-secret") || envBool("CAS_PBS_PREFLIGHT_REQUIRE_SECRET");
+const skipApplied = process.argv.includes("--skip-applied") || envBool("CAS_PBS_PREFLIGHT_SKIP_APPLIED");
 const checkedAt = new Date().toISOString();
 const checks = [];
 
@@ -182,6 +183,7 @@ function writeEvidence(status) {
         overlay,
         requireCluster,
         requireSecret,
+        skipApplied,
         summary: {
           total: checks.length,
           passed: checks.filter((check) => check.status === "PASS").length,
@@ -242,6 +244,39 @@ function workloadEnvValue(workload, name, containerName) {
 function workloadEnvSecretRef(workload, name, secretName, key, containerName) {
   const ref = workloadEnv(workload, name, containerName).valueFrom?.secretKeyRef;
   return ref?.name === secretName && ref?.key === key && ref?.optional !== true;
+}
+
+function selectorMatchesGateway(selector = {}) {
+  const labels = selector.matchLabels ?? {};
+  return labels["app.kubernetes.io/name"] === "cywell-ai-sentinel" && labels["app.kubernetes.io/component"] === "gateway";
+}
+
+function networkPolicyAllowsAnyIp(policy, ips, ports) {
+  const spec = JSON.stringify(policy?.spec ?? {});
+  return ips.some((ip) => spec.includes(`${ip}/32`) || spec.includes(`"cidr":"${ip}`)) && ports.some((port) => spec.includes(`"port":${port}`));
+}
+
+function collectKubernetesApiTargets() {
+  const targets = [];
+  const service = getJson("cluster:kubernetes-api-service", ["get", "service", "-n", "default", "kubernetes"]);
+  if (service?.spec?.clusterIP && service.spec.clusterIP !== "None") targets.push({ ip: service.spec.clusterIP, port: 443, source: "service" });
+  const endpoints = getJson("cluster:kubernetes-api-endpoints", ["get", "endpoints", "-n", "default", "kubernetes"]);
+  for (const subset of endpoints?.subsets ?? []) {
+    const ports = (subset.ports ?? []).map((port) => Number(port.port)).filter(Boolean);
+    for (const address of subset.addresses ?? []) {
+      if (!address.ip) continue;
+      for (const port of ports.length ? ports : [6443]) targets.push({ ip: address.ip, port, source: "endpoint" });
+    }
+  }
+  return targets;
+}
+
+function firstContainerImage(workload) {
+  return workload.match(/^\s*image:\s*([^\s]+)\s*$/m)?.[1] ?? "";
+}
+
+function pinnedProductionImage(image) {
+  return image.includes("@sha256:") || /^image-registry\.openshift-image-registry\.svc:5000\/cywell-ai-sentinel\/[^:]+:v0\.1\.4$/.test(image);
 }
 
 function deploymentReady(deploymentJson) {
@@ -327,6 +362,7 @@ expect(
   "knowledge-engine ingress remains restricted to gateway pods on 8080"
 );
 if (overlay === "pbs-live") {
+  const postgresImage = firstContainerImage(postgresStatefulSet);
   expect(
     "preflight:live-runtime-ready-gate",
     envValue(deployment, "CAS_PBS_REQUIRE_RUNTIME_READY") === "true",
@@ -356,6 +392,12 @@ if (overlay === "pbs-live") {
     !/cas-crc-dev|cas_knowledge_dev|postgresql:\/\/cas_knowledge:cas_knowledge_dev/.test(rendered) &&
       !renderedDoc(rendered, "Secret", "cas-knowledge-postgres"),
     "pbs-live render contains no CRC owner, dev DB password, or generated dev Postgres Secret"
+  );
+  expect(
+    "preflight:live-postgres-image-pinned",
+    pinnedProductionImage(postgresImage),
+    "pbs-live Postgres image is pinned to an approved digest or internal v0.1.4 release image",
+    `pbs-live Postgres image must be pinned to an approved digest or internal v0.1.4 release image; found ${postgresImage || "none"}`
   );
   expect(
     "preflight:live-no-shadow-writes",
@@ -418,6 +460,24 @@ if (authSecret) {
 }
 if (overlay === "pbs-live") {
   let liveDatabaseUrl = "";
+  if (requireCluster) {
+    for (const imageName of ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine"]) {
+      const imageTag = getJson(`cluster:release-image:${imageName}`, ["get", "imagestreamtag", "-n", namespace, `${imageName}:v0.1.4`]);
+      if (imageTag) pass(`cluster:release-image:${imageName}:v0.1.4`, `${imageName}:v0.1.4 ImageStreamTag exists`);
+    }
+    const apiTargets = collectKubernetesApiTargets();
+    const networkPolicies = getJson("cluster:gateway-networkpolicies", ["get", "networkpolicy", "-n", namespace]);
+    if (networkPolicies) {
+      const gatewayPolicies = (networkPolicies.items ?? []).filter((policy) => selectorMatchesGateway(policy.spec?.podSelector));
+      const allowedTargets = apiTargets.filter((target) => networkPolicyAllowsAnyIp({ spec: { egress: gatewayPolicies.flatMap((policy) => policy.spec?.egress ?? []) } }, [target.ip], [target.port]));
+      expect(
+        "cluster:gateway-kubernetes-api-egress",
+        apiTargets.length > 0 && allowedTargets.length > 0,
+        "Gateway NetworkPolicy allows the target cluster Kubernetes API Service or endpoint for SelfSubjectReview/OpenShift evidence",
+        `Gateway NetworkPolicies must allow at least one Kubernetes API target: ${JSON.stringify({ apiTargets, gatewayPolicies: gatewayPolicies.map((policy) => policy.metadata?.name) })}`
+      );
+    }
+  }
   const liveDbSecret = getJson("cluster:knowledge-postgres-live-secret", ["get", "secret", "-n", namespace, "cas-knowledge-postgres-live"]);
   if (liveDbSecret) {
     const missingKeys = ["database", "username", "password", "database-url"].filter((key) => !liveDbSecret.data?.[key]);
@@ -441,7 +501,7 @@ if (overlay === "pbs-live") {
   } else {
     pass("cluster:legacy-postgres-secret-absent", "legacy cas-knowledge-postgres Secret is absent or not readable in this preflight context");
   }
-  if (requireCluster) {
+  if (requireCluster && !skipApplied) {
     const appliedEngine = getJson("cluster:applied-knowledge-engine", ["get", "deployment", "-n", namespace, "cas-knowledge-engine"]);
     if (appliedEngine) {
       const engineContainer = workloadContainer(appliedEngine, "knowledge-engine");
@@ -611,6 +671,8 @@ if (overlay === "pbs-live") {
         policy
       );
     }
+  } else if (requireCluster && skipApplied) {
+    pass("cluster:applied-workload-contract-skipped", "applied workload contract checks skipped for pre-apply live preflight");
   }
 }
 

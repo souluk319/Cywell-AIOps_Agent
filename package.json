@@ -29,6 +29,7 @@
     "verify:crc:connection:preview": "node ./scripts/verify-crc-connection.mjs",
     "verify:crc:deployment": "node ./scripts/verify-crc-deployment.mjs",
     "verify:pbs:preflight": "node ./scripts/verify-pbs-preflight.mjs",
+    "verify:pbs:preflight:live:preapply": "node ./scripts/verify-pbs-preflight.mjs --require-cluster --require-secret --skip-applied",
     "verify:pbs:preflight:live": "node ./scripts/verify-pbs-preflight.mjs --require-cluster --require-secret",
     "verify:pbs:live": "node ./scripts/verify-pbs-live-smoke.mjs",
     "verify:pbs:cutover": "node ./scripts/verify-pbs-live-smoke.mjs --cutover",

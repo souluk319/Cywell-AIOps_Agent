@@ -215,6 +215,8 @@ if (operator.ok && operator.stdout) {
 }
 
 run("oc", ["apply", "-k", "deploy/kustomize/base"], { stdio: "inherit" });
+run("oc", ["apply", "-f", "deploy/kustomize/overlays/crc/21-lightspeed-ingress.yaml"], { stdio: "inherit" });
+run("oc", ["apply", "-f", "deploy/kustomize/overlays/crc/gateway-crc-api-egress.yaml"], { stdio: "inherit" });
 
 console.log("Pinning CAS deployments to freshly built dev images");
 run(

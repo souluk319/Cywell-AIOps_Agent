@@ -10,7 +10,7 @@
 | `v0.1.1/` | v0.1.1 RCA cockpit, RAG/Metric, 시뮬레이션 구현 기준 |
 | `v0.1.2/` | v0.1.1 CAS 패널을 유지한 대화 사이드바, 대화 저장, 로컬 패널 preview 기준 |
 | `v0.1.3/` | Software Catalog / OperatorHub 등록, OLM 제품화 기준 |
-| `v0.1.4/` | PBS 고객 데이터/RAG/LLM Wiki/Topology 통합, CRC runtime 검증, live cutover gate |
+| `v0.1.4/` | PBS 고객 데이터/RAG/LLM Wiki/Topology 통합, CRC runtime 검증, live cutover gate와 production checklist |
 
 ## Current Focus
 

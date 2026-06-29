@@ -404,6 +404,12 @@ const styles = `
   min-width: 0;
 }
 
+.cas-topology-workspace {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
 .cas-topology-canvas {
   background:
     linear-gradient(#e6ebf2 1px, transparent 1px),
@@ -416,6 +422,71 @@ const styles = `
   min-width: 0;
   overflow: hidden;
   position: relative;
+}
+
+.cas-topology-browser {
+  border: 1px solid var(--cas-knowledge-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.cas-topology-browser label {
+  color: var(--cas-knowledge-muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 5px;
+}
+
+.cas-topology-browser input {
+  border: 1px solid var(--cas-knowledge-line);
+  border-radius: 4px;
+  color: var(--cas-knowledge-ink);
+  font: inherit;
+  padding: 8px 9px;
+  width: 100%;
+}
+
+.cas-topology-node-list {
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.cas-topology-node-list-item {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--cas-knowledge-line);
+  border-radius: 6px;
+  color: var(--cas-knowledge-ink);
+  cursor: pointer;
+  display: grid;
+  gap: 5px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-width: 0;
+  padding: 8px;
+  text-align: left;
+}
+
+.cas-topology-node-list-item[data-selected="true"] {
+  border-color: var(--cas-knowledge-accent);
+  box-shadow: 0 0 0 2px rgba(8, 127, 140, 0.14);
+}
+
+.cas-topology-node-list-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cas-topology-node-list-item span {
+  color: var(--cas-knowledge-muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .cas-topology-edges {
@@ -634,6 +705,10 @@ const styles = `
     width: 100%;
   }
 
+  .cas-topology-node-list-item {
+    grid-template-columns: 1fr;
+  }
+
   .cas-topology-visible-count {
     position: static;
   }
@@ -838,41 +913,42 @@ function TopologyDashboard({
 }: {
   topology: TopologyPayload | null;
   selectedNodeId: string | null;
-  setSelectedNodeId: (nodeId: string) => void;
+  setSelectedNodeId: (nodeId: string | null) => void;
   typeFilter: string;
   setTypeFilter: (filter: string) => void;
   askAboutNode: (node: TopologyNode) => void;
 }) {
-  if (!topology || topology.nodes.length === 0) {
-    return (
-      <section className="cas-topology-dashboard" data-test="cas-topology-dashboard">
-        <div className="cas-topology-empty">Topology data will render here after customer data is indexed.</div>
-      </section>
-    );
-  }
-
-  const degreeById = nodeDegreeMap(topology.edges);
-  const nodesWithDegree = topology.nodes.map((node) => ({ ...node, degree: node.degree ?? degreeById.get(node.id) ?? 0 }));
+  const [nodeQuery, setNodeQuery] = React.useState("");
+  const topologyNodes = topology?.nodes ?? [];
+  const topologyEdges = topology?.edges ?? [];
+  const degreeById = nodeDegreeMap(topologyEdges);
+  const nodesWithDegree = topologyNodes.map((node) => ({ ...node, degree: node.degree ?? degreeById.get(node.id) ?? 0 }));
   const visibleNodes = typeFilter === "all" ? nodesWithDegree : nodesWithDegree.filter((node) => nodeTone(node.type) === typeFilter);
   const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
-  const visibleEdges = topology.edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target));
+  const visibleEdges = topologyEdges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target));
   const positioned = layoutTopology(visibleNodes, visibleEdges);
   const positionById = new Map(positioned.map((item) => [item.node.id, item]));
   const renderedNodeIds = new Set(positioned.map((item) => item.node.id));
-  const selectedNode =
-    visibleNodes.find((node) => node.id === selectedNodeId) ?? visibleNodes[0] ?? nodesWithDegree.find((node) => node.id === selectedNodeId);
+  const selectedNode = visibleNodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedRelations = selectedNode
-    ? topology.edges
+    ? visibleEdges
         .filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id)
         .sort((left, right) => left.type.localeCompare(right.type))
         .slice(0, 12)
     : [];
-  const relationRows = topology.edges.slice(0, 24);
+  const relationRows = visibleEdges.slice(0, 24);
+  const normalizedQuery = nodeQuery.trim().toLowerCase();
+  const browsableNodes = visibleNodes
+    .filter((node) => {
+      if (!normalizedQuery) return true;
+      return `${node.label} ${node.id} ${node.type} ${node.summary ?? ""}`.toLowerCase().includes(normalizedQuery);
+    })
+    .sort((left, right) => (right.degree ?? 0) - (left.degree ?? 0) || left.label.localeCompare(right.label));
   const counts = {
-    nodes: topology.counts?.nodes ?? topology.nodes.length,
-    edges: topology.counts?.edges ?? topology.edges.length,
-    documents: topology.counts?.documents ?? topology.nodes.filter((node) => nodeTone(node.type) === "document").length,
-    notes: topology.counts?.notes ?? topology.nodes.filter((node) => nodeTone(node.type) === "wiki-note").length
+    nodes: topology?.counts?.nodes ?? topologyNodes.length,
+    edges: topology?.counts?.edges ?? topologyEdges.length,
+    documents: topology?.counts?.documents ?? topologyNodes.filter((node) => nodeTone(node.type) === "document").length,
+    notes: topology?.counts?.notes ?? topologyNodes.filter((node) => nodeTone(node.type) === "wiki-note").length
   };
   const typeOptions = [
     { key: "all", label: "All" },
@@ -882,6 +958,24 @@ function TopologyDashboard({
     { key: "runtime", label: "Runtime" },
     { key: "image", label: "Images" }
   ];
+
+  React.useEffect(() => {
+    if (visibleNodes.length === 0) {
+      if (selectedNodeId) setSelectedNodeId(null);
+      return;
+    }
+    if (!selectedNodeId || !visibleNodeIds.has(selectedNodeId)) {
+      setSelectedNodeId(visibleNodes[0].id);
+    }
+  }, [selectedNodeId, setSelectedNodeId, visibleNodeIds, visibleNodes]);
+
+  if (!topology || topologyNodes.length === 0) {
+    return (
+      <section className="cas-topology-dashboard" data-test="cas-topology-dashboard">
+        <div className="cas-topology-empty">No topology nodes are available for this customer yet.</div>
+      </section>
+    );
+  }
 
   return (
     <section className="cas-topology-dashboard" data-test="cas-topology-dashboard">
@@ -920,53 +1014,91 @@ function TopologyDashboard({
       </div>
 
       <div className="cas-topology-grid">
-        <div className="cas-topology-canvas" data-test="cas-topology-canvas">
-          <svg aria-hidden="true" className="cas-topology-edges" viewBox="0 0 100 100" preserveAspectRatio="none">
-            {visibleEdges.map((edge, index) => {
-              const source = positionById.get(edge.source);
-              const target = positionById.get(edge.target);
-              if (!source || !target || !renderedNodeIds.has(edge.source) || !renderedNodeIds.has(edge.target)) return null;
-              return (
-                <line
-                  className="cas-topology-edge"
-                  data-test="cas-topology-edge"
-                  key={`${edge.source}-${edge.target}-${edge.type}-${index}`}
-                  x1={source.x}
-                  x2={target.x}
-                  y1={source.y}
-                  y2={target.y}
-                />
-              );
-            })}
-          </svg>
-          {positioned.map(({ node, x, y }) => (
-            <button
-              className="cas-topology-node"
-              aria-label={`${node.label}, ${node.type}, ${node.degree ?? 0} links`}
-              aria-pressed={selectedNode?.id === node.id}
-              data-selected={selectedNode?.id === node.id}
-              data-test="cas-topology-node"
-              data-tone={nodeTone(node.type)}
-              key={node.id}
-              onClick={() => setSelectedNodeId(node.id)}
-              style={{ left: `${x}%`, top: `${y}%` }}
-              title={node.label}
-              type="button"
-            >
-              <strong>{node.label}</strong>
-              <span>{node.type}</span>
-              <span>{node.degree ?? 0} links</span>
-            </button>
-          ))}
-          {visibleNodes.length > positioned.length && (
-            <div className="cas-knowledge-badge cas-topology-visible-count" data-test="cas-topology-visible-count">
-              Showing {positioned.length} of {visibleNodes.length} nodes
+        <div className="cas-topology-workspace">
+          <div className="cas-topology-canvas" data-test="cas-topology-canvas">
+            {visibleNodes.length === 0 && <div className="cas-topology-empty">No nodes match this filter.</div>}
+            <svg aria-hidden="true" className="cas-topology-edges" viewBox="0 0 100 100" preserveAspectRatio="none">
+              {visibleEdges.map((edge, index) => {
+                const source = positionById.get(edge.source);
+                const target = positionById.get(edge.target);
+                if (!source || !target || !renderedNodeIds.has(edge.source) || !renderedNodeIds.has(edge.target)) return null;
+                return (
+                  <line
+                    className="cas-topology-edge"
+                    data-test="cas-topology-edge"
+                    key={`${edge.source}-${edge.target}-${edge.type}-${index}`}
+                    x1={source.x}
+                    x2={target.x}
+                    y1={source.y}
+                    y2={target.y}
+                  />
+                );
+              })}
+            </svg>
+            {positioned.map(({ node, x, y }) => (
+              <button
+                className="cas-topology-node"
+                aria-label={`${node.label}, ${node.type}, ${node.degree ?? 0} links`}
+                aria-pressed={selectedNode?.id === node.id}
+                data-selected={selectedNode?.id === node.id}
+                data-test="cas-topology-node"
+                data-tone={nodeTone(node.type)}
+                key={node.id}
+                onClick={() => setSelectedNodeId(node.id)}
+                style={{ left: `${x}%`, top: `${y}%` }}
+                title={node.label}
+                type="button"
+              >
+                <strong>{node.label}</strong>
+                <span>{node.type}</span>
+                <span>{node.degree ?? 0} links</span>
+              </button>
+            ))}
+            {visibleNodes.length > positioned.length && (
+              <div className="cas-knowledge-badge cas-topology-visible-count" data-test="cas-topology-visible-count">
+                Showing {positioned.length} of {visibleNodes.length} nodes
+              </div>
+            )}
+          </div>
+          <div className="cas-topology-browser" data-test="cas-topology-node-index">
+            <label>
+              Node index
+              <input
+                aria-label="Search topology nodes"
+                data-test="cas-topology-node-search"
+                onChange={(event) => setNodeQuery(event.currentTarget.value)}
+                placeholder="Search nodes"
+                value={nodeQuery}
+              />
+            </label>
+            <div className="cas-topology-node-list">
+              {browsableNodes.length === 0 && <p className="cas-knowledge-muted">No matching nodes.</p>}
+              {browsableNodes.map((node) => (
+                <button
+                  aria-pressed={selectedNode?.id === node.id}
+                  className="cas-topology-node-list-item"
+                  data-selected={selectedNode?.id === node.id}
+                  data-test="cas-topology-node-index-item"
+                  key={node.id}
+                  onClick={() => setSelectedNodeId(node.id)}
+                  title={node.label}
+                  type="button"
+                >
+                  <strong>{node.label}</strong>
+                  <span>{node.type}</span>
+                  <span>{node.degree ?? 0} links</span>
+                </button>
+              ))}
             </div>
-          )}
+          </div>
         </div>
 
         <aside className="cas-topology-side" data-test="cas-topology-inspector">
           <h3>{selectedNode?.label ?? "No node selected"}</h3>
+          {visibleNodes.length === 0 && <p className="cas-knowledge-muted">Select another filter to inspect nodes.</p>}
+          {visibleNodes.length > 0 && !selectedNode && (
+            <p className="cas-knowledge-muted">Select a node from the canvas or node index.</p>
+          )}
           {selectedNode && (
             <>
               <div className="cas-knowledge-status">
@@ -1038,6 +1170,7 @@ export default function CywellKnowledgeRoute() {
   const [topologyData, setTopologyData] = React.useState<TopologyPayload | null>(null);
   const [topologyTypeFilter, setTopologyTypeFilter] = React.useState("all");
   const [selectedTopologyNodeId, setSelectedTopologyNodeId] = React.useState<string | null>(null);
+  const autoTopologyLoadKey = React.useRef("");
   const pathname = typeof window === "undefined" ? "/cywell/customer-data" : window.location.pathname;
   const activeKey = currentRouteKey(pathname);
   const activeRoute = routeItems.find((item) => item.key === activeKey) ?? routeItems[0];
@@ -1232,6 +1365,14 @@ export default function CywellKnowledgeRoute() {
       }),
     [customerId, runAction]
   );
+
+  React.useEffect(() => {
+    if (activeKey !== "topology") return;
+    const key = `${activeKey}:${customerId}`;
+    if (autoTopologyLoadKey.current === key) return;
+    autoTopologyLoadKey.current = key;
+    void loadTopology();
+  }, [activeKey, customerId, loadTopology]);
 
   const askAboutTopologyNode = React.useCallback(
     (node: TopologyNode) => {

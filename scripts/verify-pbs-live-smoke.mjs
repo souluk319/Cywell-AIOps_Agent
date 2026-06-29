@@ -375,7 +375,7 @@ async function runClusterSmoke() {
     "function casOk(result){return result.status>=200&&result.status<300&&result.body?.status!=='error'&&traceOk(result.body)}",
     "(async()=>{",
     "const health=await req('/api/knowledge/healthz');",
-    "const healthOk=health.status===200&&health.body?.provider==='pbs-http-live'&&health.body?.status==='ok'&&Array.isArray(health.body?.capabilities)&&health.body?.storage===undefined&&health.body?.counts===undefined&&health.body?.provider_config===undefined&&health.body?.engine?.endpoint===undefined;",
+    "const healthOk=health.status===200&&health.body?.provider===undefined&&health.body?.engine?.provider===undefined&&health.body?.status==='ok'&&Array.isArray(health.body?.capabilities)&&health.body?.storage===undefined&&health.body?.counts===undefined&&health.body?.provider_config===undefined&&health.body?.engine?.endpoint===undefined;",
     "const engineHealth=await engineReq('/api/knowledge/healthz');",
     "const readiness=engineHealth.body?.provider_config?.pbs_http?.readiness||{};",
     "const runtimeReady=readiness.database_runtime===true&&readiness.db_ready===true&&readiness.pgvector_ready===true;",
@@ -469,6 +469,29 @@ async function runClusterSmoke() {
   }
 
   if (consolePod) {
+    const serviceCheck = execNode(
+      consolePod.metadata.name,
+      [
+        "const https=require('https');",
+        `const smokeToken=${JSON.stringify(smokeToken)};`,
+        "function parse(body){try{return JSON.parse(body||'{}')}catch{return {parse_error:body}}}",
+        "const req=https.request('https://cas-gateway.cywell-ai-sentinel.svc.cluster.local:9443/api/knowledge/healthz',{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${smokeToken}`,accept:'application/json'}},res=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{const body=parse(b);console.log(JSON.stringify({status:res.statusCode,body,provider:body.provider,engineProvider:body.engine&&body.engine.provider}));});});",
+        "req.on('error',e=>{console.log(JSON.stringify({error:e.code||e.message}));process.exit(1);});",
+        "req.end();"
+      ].join(""),
+      10000
+    );
+    const serviceBody = parseLastJsonLine(serviceCheck.stdout);
+    expect(
+      "pbs-live:cluster-console-plugin-gateway-service",
+      serviceCheck.status === 0 &&
+        serviceBody?.status === 200 &&
+        serviceBody?.body?.status === "ok" &&
+        serviceBody?.provider === undefined &&
+        serviceBody?.engineProvider === undefined,
+      "console-plugin pod reaches gateway Service public knowledge health without provider leakage",
+      serviceCheck.stderr || serviceCheck.stdout
+    );
     const directCheck = execNode(
       consolePod.metadata.name,
       [

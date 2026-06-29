@@ -9,18 +9,21 @@ This summary captures the current v0.1.4 branch verification state for the Cywel
 | Command | Result | Notes |
 | --- | --- | --- |
 | `npm run verify` | PASS | Full local gate including contracts, gateway, knowledge engine, brain, OpenShift evidence, console build, browser topology DOM, console integration, CRC connection preview, and manifest verification |
-| `npm run verify:knowledge-engine` | PASS, 62 checks | Includes Gateway owner verification, internal bearer/header stripping, public health/capabilities sanitization, PBS shadow/live adapter contracts, topology provenance |
-| `npm run verify:console:topology-dom` | PASS, 19 checks | Browser-required smoke with 1024px and 390px overflow/overlap checks and dense 28-node fixture |
-| `npm run verify:console:integration` | PASS, 63 checks | Includes static app `innerHTML` rejection and built plugin route/bundle checks |
-| `npm run verify:deploy:manifests` | PASS, 204 checks | Includes base/shadow/live render checks, HMAC Secret refs, no tracked dev DB Secret, and direct console script build prerequisites |
+| `npm run verify:knowledge-engine` | PASS, 64 checks | Includes Gateway owner verification, signed internal owner headers, internal bearer/header stripping, public health/capabilities sanitization, PBS shadow/live adapter contracts, topology provenance |
+| `npm run verify:console:topology-dom` | PASS, 20 checks | Browser-required smoke with topology auto-load, dense 28-node searchable index, and 1024px/390px overflow/overlap checks |
+| `npm run verify:console:integration` | PASS, 67 checks | Includes static app `innerHTML` rejection, structural `/cywell/topology` manifest routing, topology auto-load, and built plugin route/bundle checks |
+| `npm run verify:deploy:manifests` | PASS, 214 checks | Includes base/shadow/live/CRC render checks, HMAC Secret refs, no tracked dev DB Secret, and direct console script build prerequisites |
 
 Current hardening additions after the initial summary:
 
 - Tracked base manifests no longer contain a literal dev Postgres password or database URL.
 - `deploy:crc` creates local-only random dev Postgres and internal owner-HMAC Secrets when missing.
 - Gateway signs derived owner headers; Knowledge Engine rejects unsigned owner headers when HMAC is configured.
-- Public Gateway `/healthz` and `/api/aiops/healthz` omit provider and owner identity internals.
+- Gateway and Knowledge Engine fail closed if the internal owner-HMAC Secret is missing.
+- Public Gateway `/healthz`, `/api/aiops/healthz`, `/api/knowledge/healthz`, and `/api/knowledge/capabilities` omit provider and owner identity internals.
 - PBS live preflight checks the live `DATABASE_URL` over TCP through the Postgres service.
+- Base manifests verify OpenShift API TLS with the mounted namespace CA instead of disabling TLS verification.
+- CRC-specific Kubernetes API egress and lab Lightspeed ingress are owned by the CRC overlay, not the base render.
 
 Clean checkout reproduction:
 
@@ -34,7 +37,7 @@ npm run verify: PASS
 
 | Command | Result | Notes |
 | --- | --- | --- |
-| `npm run deploy:crc` | PASS | Mutating deploy action; rebuilt and deployed `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev` to CRC, created/preserved local Secrets, and reran CRC deployment verification |
+| `npm run deploy:crc` | PASS, 62 runtime checks | Mutating deploy action; rebuilt and deployed `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev` to CRC, created/preserved local Secrets, applied CRC-only API/Lightspeed policies, and reran CRC deployment verification |
 
 Local JSON evidence was written under ignored `test-results/`:
 
@@ -51,7 +54,8 @@ test-results/cas-pbs-preflight.json
 | Command | Result | Blocking Reason |
 | --- | --- | --- |
 | `npm run verify:pbs:cutover` | FAIL expected | `CAS_PBS_BASE_URL` is not configured in the local shell |
-| `npm run verify:pbs:cutover:cluster` | FAIL expected | Current CRC has no `playbookstudio` namespace/service, no `cas-pbs-auth`, no `cas-knowledge-postgres-live`, still runs base `:dev` images/provider, has legacy `cas-knowledge-postgres` dev Secret, and has not applied `cas-knowledge-engine-pbs-egress` |
+| `npm run verify:pbs:preflight:live:preapply` | FAIL expected, 24 PASS / 11 FAIL | Render/config/egress/API checks pass; current CRC has no `playbookstudio` namespace/service, no `cas-pbs-auth`, no `cas-knowledge-postgres-live`, no `v0.1.4` release ImageStreamTags, still has the legacy `cas-knowledge-postgres` dev Secret, and the live Postgres image is still the mutable CRC/dev `pgvector/pgvector:pg16` image |
+| `npm run verify:pbs:cutover:cluster` | FAIL expected | Same live prerequisites as pre-apply plus actual pbs-live workload cutover and in-cluster Gateway/console-plugin smoke are not present yet |
 
 Diagnostic non-ready states:
 
@@ -62,6 +66,12 @@ Diagnostic non-ready states:
 
 ## Release Boundary
 
-CRC v0.1.4 dev deployment is verified. Production PBS live cutover is not complete until the external PBS runtime, live Secrets, release image tags, live overlay, PBS egress policy, live DB credential rotation/fresh PVC decision, and runtime/corpus readiness are present.
+CRC v0.1.4 dev deployment is verified. Production PBS live cutover is not complete until the external PBS runtime, live Secrets, release image tags, a pinned production Postgres/pgvector image, live overlay, PBS egress policy, live DB credential rotation/fresh PVC decision, and runtime/corpus readiness are present.
 
-Non-CRC live clusters also need cluster-specific Kubernetes API egress for Gateway SelfSubjectReview/OpenShift evidence. Standard Kubernetes NetworkPolicy cannot allow `kubernetes.default.svc` by Service name.
+The current CRC cluster already passes the Gateway Kubernetes API egress check for SelfSubjectReview/OpenShift evidence through the CRC overlay. Non-CRC live clusters still need their own cluster-specific Kubernetes API egress, because standard Kubernetes NetworkPolicy cannot allow `kubernetes.default.svc` by Service name.
+
+Operational checklist:
+
+```text
+deliverables/active/v0.1.4/production-live-cutover-checklist.md
+```

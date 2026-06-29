@@ -7,7 +7,6 @@ const files = [
   "deploy/kustomize/base/00-namespace.yaml",
   "deploy/kustomize/base/10-rbac.yaml",
   "deploy/kustomize/base/20-networkpolicy.yaml",
-  "deploy/kustomize/base/21-lightspeed-ingress.yaml",
   "deploy/kustomize/base/30-gateway.yaml",
   "deploy/kustomize/base/35-knowledge-engine.yaml",
   "deploy/kustomize/base/36-knowledge-postgres.yaml",
@@ -15,6 +14,8 @@ const files = [
   "deploy/kustomize/base/50-consoleplugin.yaml",
   "deploy/kustomize/base/kustomization.yaml",
   "deploy/kustomize/overlays/crc/buildconfigs.yaml",
+  "deploy/kustomize/overlays/crc/21-lightspeed-ingress.yaml",
+  "deploy/kustomize/overlays/crc/gateway-crc-api-egress.yaml",
   "deploy/kustomize/overlays/crc/kustomization.yaml",
   "deploy/kustomize/overlays/pbs-shadow/kustomization.yaml",
   "deploy/kustomize/overlays/pbs-shadow/knowledge-engine-pbs-shadow-patch.yaml",
@@ -314,6 +315,7 @@ function knowledgeEgressScoped(policy) {
 
 function runRenderedChecks() {
   const base = renderKustomize("base", "deploy/kustomize/base");
+  const crc = renderKustomize("crc", "deploy/kustomize/overlays/crc");
   const shadow = renderKustomize("pbs-shadow", "deploy/kustomize/overlays/pbs-shadow");
   const live = renderKustomize("pbs-live", "deploy/kustomize/overlays/pbs-live");
 
@@ -330,6 +332,12 @@ function runRenderedChecks() {
     "render:base:gateway-owner-hmac-secret",
     envFromRequiredSecret(baseGatewayDeployment, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "cas-knowledge-internal-auth", "owner-hmac-secret"),
     "base gateway signs owner headers with internal Secret material"
+  );
+  expect(
+    "render:base:openshift-api-tls",
+    envValue(baseGatewayDeployment, "CAS_OPENSHIFT_API_TLS_INSECURE") === "false" &&
+      envValue(baseGatewayDeployment, "CAS_OPENSHIFT_API_CA_FILE") === "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+    "base gateway verifies OpenShift API TLS with mounted cluster CA"
   );
   expect("render:base:knowledge-deployment", Boolean(baseDeployment), "base renders cas-knowledge-engine Deployment");
   expect(
@@ -353,6 +361,25 @@ function runRenderedChecks() {
     "render:base:knowledge-egress-policy",
     knowledgeEgressScoped(renderedDoc(base, "NetworkPolicy", "cas-knowledge-engine-egress")),
     "base renders scoped knowledge-engine DNS/Postgres egress policy"
+  );
+  expect(
+    "render:base:no-crc-lab-policies",
+    !base.includes("10.217.4.1/32") &&
+      !base.includes("192.168.126.11/32") &&
+      !base.includes("cas-gateway-to-lightspeed-app-server"),
+    "base render excludes CRC-specific Kubernetes API egress and lab Lightspeed ingress"
+  );
+  expect(
+    "render:crc:api-egress",
+    Boolean(renderedDoc(crc, "NetworkPolicy", "cas-gateway-crc-api-egress")) &&
+      crc.includes("10.217.4.1/32") &&
+      crc.includes("192.168.126.11/32"),
+    "CRC overlay renders CRC-specific Kubernetes API egress"
+  );
+  expect(
+    "render:crc:lightspeed-ingress",
+    Boolean(renderedDoc(crc, "NetworkPolicy", "cas-gateway-to-lightspeed-app-server")) && crc.includes("cywell.io/lab-scope: crc-dev"),
+    "CRC overlay renders lab-scoped Lightspeed ingress prerequisite"
   );
 
   const shadowDeployment = renderedDoc(shadow, "Deployment", "cas-knowledge-engine");
@@ -597,10 +624,10 @@ for (const file of files) {
       } else {
         fail("networkpolicy:dns-egress", "egress to OpenShift DNS 53/5353 missing");
       }
-      if (text.includes("10.217.4.1/32") && text.includes("192.168.126.11/32") && text.includes("port: 443") && text.includes("port: 6443")) {
-        pass("networkpolicy:kube-api-egress", "egress to Kubernetes API service and endpoint present");
+      if (!text.includes("10.217.4.1/32") && !text.includes("192.168.126.11/32")) {
+        pass("networkpolicy:no-crc-api-egress-in-base", "base NetworkPolicies do not hard-code CRC Kubernetes API endpoint egress");
       } else {
-        fail("networkpolicy:kube-api-egress", "egress to Kubernetes API service or endpoint missing");
+        fail("networkpolicy:no-crc-api-egress-in-base", "base NetworkPolicies must not hard-code CRC Kubernetes API endpoint egress");
       }
     }
     if (file.includes("pbs-shadow/kustomization")) {
@@ -766,10 +793,17 @@ for (const file of files) {
       }
     }
     if (file.includes("overlays/crc/kustomization")) {
-      if (!/pbs-shadow|pbs-live/i.test(text)) {
-        pass("crc-overlay:no-pbs-overlays", "CRC overlay does not reference PBS shadow/live overlays");
+      if (!/pbs-shadow|pbs-live/i.test(text) && text.includes("gateway-crc-api-egress.yaml") && text.includes("21-lightspeed-ingress.yaml")) {
+        pass("crc-overlay:no-pbs-overlays", "CRC overlay composes base/local deployment path plus CRC-only API and Lightspeed policies");
       } else {
-        fail("crc-overlay:no-pbs-overlays", "CRC overlay must continue to compose the base/local deployment path");
+        fail("crc-overlay:no-pbs-overlays", "CRC overlay must compose base/local deployment path with CRC-only policies and no PBS overlays");
+      }
+    }
+    if (file.includes("gateway-crc-api-egress")) {
+      if (text.includes("cywell.io/lab-scope: crc-dev") && text.includes("10.217.4.1/32") && text.includes("192.168.126.11/32")) {
+        pass("crc-overlay:gateway-api-egress", "CRC overlay owns CRC-specific Kubernetes API egress");
+      } else {
+        fail("crc-overlay:gateway-api-egress", "CRC-specific Kubernetes API egress policy missing expected lab scope and endpoint CIDRs");
       }
     }
     if (file.includes("deploy-crc-dev")) {
@@ -807,6 +841,12 @@ for (const file of files) {
         text.includes("__pycache__") && text.includes(".pyc"),
         "CRC deploy build context excludes generated Python bytecode"
       );
+      expect(
+        "crc-deploy:crc-only-policies",
+        text.includes("deploy/kustomize/overlays/crc/21-lightspeed-ingress.yaml") &&
+          text.includes("deploy/kustomize/overlays/crc/gateway-crc-api-egress.yaml"),
+        "CRC deploy script applies CRC-only Lightspeed ingress and Kubernetes API egress policies outside base"
+      );
     }
     if (file === "package.json") {
       if (
@@ -843,6 +883,11 @@ for (const file of files) {
       } else {
         fail("package:pbs-preflight-live-script", "package.json must expose strict PBS live preflight");
       }
+      if (text.includes('"verify:pbs:preflight:live:preapply"') && text.includes("--skip-applied")) {
+        pass("package:pbs-preflight-live-preapply-script", "package.json exposes pre-apply PBS live preflight without applied workload contract");
+      } else {
+        fail("package:pbs-preflight-live-preapply-script", "package.json must expose pre-apply PBS live preflight with --skip-applied");
+      }
       if (text.includes('"verify:pbs:cutover"') && text.includes("--cutover")) {
         pass("package:pbs-cutover-script", "package.json exposes PBS cutover smoke");
       } else {
@@ -873,12 +918,13 @@ for (const file of files) {
         text.includes("--cluster") &&
         text.includes("CAS_PBS_LIVE_CLUSTER_SMOKE") &&
         text.includes("cluster-gateway-health") &&
+        text.includes("cluster-console-plugin-gateway-service") &&
         text.includes("cluster-write-lineage") &&
         text.includes("cluster-direct-engine-blocked")
       ) {
-        pass("pbs-live-smoke:cluster-cutover-mode", "PBS live smoke has an in-cluster cutover mode through the gateway pod");
+        pass("pbs-live-smoke:cluster-cutover-mode", "PBS live smoke has in-cluster gateway and console-plugin-to-gateway cutover checks");
       } else {
-        fail("pbs-live-smoke:cluster-cutover-mode", "PBS live smoke must support an in-cluster gateway cutover mode");
+        fail("pbs-live-smoke:cluster-cutover-mode", "PBS live smoke must support in-cluster gateway and console-plugin-to-gateway cutover checks");
       }
     }
     if (file.includes("verify-pbs-preflight")) {
@@ -897,11 +943,16 @@ for (const file of files) {
         text.includes("CAS_PBS_REQUIRE_CORPUS_READY") &&
         text.includes("cas-knowledge-postgres-live") &&
         text.includes("cluster:pbs-runtime-ready-pods") &&
+        text.includes("cluster:gateway-kubernetes-api-egress") &&
+        text.includes("cluster:release-image:") &&
+        text.includes("preflight:live-postgres-image-pinned") &&
+        text.includes("pinnedProductionImage") &&
+        text.includes("skipApplied") &&
         text.includes("pbs-live")
       ) {
-        pass("pbs-preflight:live-readiness-gate", "PBS preflight checks live runtime, corpus, Secret, and PBS pod-label gates");
+        pass("pbs-preflight:live-readiness-gate", "PBS preflight checks live runtime, corpus, Secret, release images, Postgres image pinning, API egress, and PBS pod-label gates");
       } else {
-        fail("pbs-preflight:live-readiness-gate", "PBS preflight must check live runtime, corpus, Secret, and PBS pod-label gates");
+        fail("pbs-preflight:live-readiness-gate", "PBS preflight must check live runtime, corpus, Secret, release images, Postgres image pinning, API egress, and PBS pod-label gates");
       }
     }
     if (file.includes("21-lightspeed-ingress")) {
@@ -936,6 +987,17 @@ for (const file of files) {
         pass("gateway:openshift-api-url", "gateway points at in-cluster Kubernetes API");
       } else {
         fail("gateway:openshift-api-url", "gateway Kubernetes API URL missing");
+      }
+      if (
+        text.includes("CAS_OPENSHIFT_API_CA_FILE") &&
+        text.includes("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt") &&
+        text.includes("CAS_OPENSHIFT_API_TLS_INSECURE") &&
+        text.includes('value: "false"') &&
+        text.includes("kube-root-ca.crt")
+      ) {
+        pass("gateway:openshift-api-tls", "gateway verifies Kubernetes API TLS with mounted namespace CA bundle");
+      } else {
+        fail("gateway:openshift-api-tls", "gateway must verify Kubernetes API TLS with mounted namespace CA bundle");
       }
       if (text.includes("CAS_KNOWLEDGE_ENGINE_URL") && text.includes("cas-knowledge-engine.cywell-ai-sentinel.svc.cluster.local")) {
         pass("gateway:knowledge-engine-url", "gateway points at in-cluster CAS knowledge engine");

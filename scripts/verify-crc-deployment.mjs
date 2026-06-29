@@ -378,6 +378,14 @@ expect(
   "cas-gateway egress NetworkPolicy contains broad peers"
 );
 expect(
+  "runtime:gateway-crc-api-egress-policy",
+  policyIsRestrictive(networkPolicyByName.get("cas-gateway-crc-api-egress")) &&
+    JSON.stringify(networkPolicyByName.get("cas-gateway-crc-api-egress")?.spec ?? {}).includes("10.217.4.1/32") &&
+    JSON.stringify(networkPolicyByName.get("cas-gateway-crc-api-egress")?.spec ?? {}).includes("192.168.126.11/32"),
+  "cas-gateway CRC API egress NetworkPolicy allows only CRC Kubernetes API service/endpoint IPs",
+  "cas-gateway CRC API egress NetworkPolicy is missing or too broad"
+);
+expect(
   "runtime:gateway-effective-policies-no-broad-peers",
   gatewaySelectedPolicies.length >= 2 && gatewaySelectedPolicies.every(policyIsRestrictive),
   "all NetworkPolicies selecting cas-gateway have no broad namespace, pod, or internet peers",
@@ -449,9 +457,11 @@ expect(
 expect(
   "runtime:gateway-evidence-env",
   gatewayEnvByName.get("CAS_EVIDENCE_PROVIDER") === "openshift-api" &&
-    gatewayEnvByName.get("CAS_OPENSHIFT_API_URL")?.includes("kubernetes.default.svc"),
+    gatewayEnvByName.get("CAS_OPENSHIFT_API_URL")?.includes("kubernetes.default.svc") &&
+    gatewayEnvByName.get("CAS_OPENSHIFT_API_TLS_INSECURE") === "false" &&
+    gatewayEnvByName.get("CAS_OPENSHIFT_API_CA_FILE") === "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
   "cas-gateway is configured to collect OpenShift API evidence",
-  "cas-gateway OpenShift evidence env is missing"
+  "cas-gateway OpenShift evidence env or TLS CA config is missing"
 );
 expect(
   "runtime:gateway-owner-identity-env",
@@ -633,7 +643,8 @@ if (gatewayPod) {
       parsed.status === 200 &&
       body.service === "cas-knowledge-engine" &&
       body.status === "ok" &&
-      body.provider === "pbs-compatible-local" &&
+      body.provider === undefined &&
+      body.engine?.provider === undefined &&
       Array.isArray(body.capabilities) &&
       body.storage === undefined &&
       body.counts === undefined &&

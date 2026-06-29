@@ -101,6 +101,13 @@ function ownerSignature(secret, owner) {
   return createHmac("sha256", secret).update(owner).digest("hex");
 }
 
+function signedOwnerHeaders(owner) {
+  return {
+    "x-forwarded-user": owner,
+    "x-cas-owner-signature": ownerSignature(ownerHmacSecret, owner)
+  };
+}
+
 function graphIntegrity(body) {
   const nodes = Array.isArray(body?.nodes) ? body.nodes : body?.topology && Array.isArray(body.topology.nodes) ? body.topology.nodes : [];
   const edges = Array.isArray(body?.edges) ? body.edges : body?.topology && Array.isArray(body.topology.edges) ? body.topology.edges : [];
@@ -426,11 +433,13 @@ const selftest = run(python.command, [...python.argsPrefix, "-m", "cas_knowledge
 expect("knowledge:selftest", selftest.status === 0, "knowledge engine self-test passed", selftest.stderr || selftest.stdout);
 
 const enginePort = await getFreePort();
+const unsignedEnginePort = await getFreePort();
 const gatewayPort = await getFreePort();
 const verifiedGatewayPort = await getFreePort();
 const fakeIdentityPort = await getFreePort();
 const boundaryEnginePort = await getFreePort();
 const boundaryGatewayPort = await getFreePort();
+const unsignedBoundaryGatewayPort = await getFreePort();
 const publicFailureGatewayPort = await getFreePort();
 const deadKnowledgeEnginePort = await getFreePort();
 const verifierFailureGatewayPort = await getFreePort();
@@ -441,9 +450,11 @@ const livePort = await getFreePort();
 const degradedLivePort = await getFreePort();
 const staleIndexLivePort = await getFreePort();
 const engineBase = `http://127.0.0.1:${enginePort}`;
+const unsignedEngineBase = `http://127.0.0.1:${unsignedEnginePort}`;
 const gatewayBase = `http://127.0.0.1:${gatewayPort}`;
 const verifiedGatewayBase = `http://127.0.0.1:${verifiedGatewayPort}`;
 const boundaryGatewayBase = `http://127.0.0.1:${boundaryGatewayPort}`;
+const unsignedBoundaryGatewayBase = `http://127.0.0.1:${unsignedBoundaryGatewayPort}`;
 const publicFailureGatewayBase = `http://127.0.0.1:${publicFailureGatewayPort}`;
 const verifierFailureGatewayBase = `http://127.0.0.1:${verifierFailureGatewayPort}`;
 const shadowBase = `http://127.0.0.1:${shadowPort}`;
@@ -509,6 +520,31 @@ try {
       directOpenShiftOwner.body.code === "owner-required",
     "knowledge engine only trusts signed x-forwarded-user in trusted-header mode",
     JSON.stringify({ unsigned: directUnsignedOwner.body, remote: directRemoteOwner.body, openshift: directOpenShiftOwner.body })
+  );
+
+  const unsignedEngineEnv = {
+    ...process.env,
+    PYTHONPATH: pythonPath,
+    HOST: "127.0.0.1",
+    PORT: String(unsignedEnginePort),
+    CAS_KNOWLEDGE_DATA_DIR: dataDir,
+    CAS_KNOWLEDGE_PROVIDER: "pbs-compatible-local",
+    CAS_KNOWLEDGE_OWNER_MODE: "trusted-header",
+    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ""
+  };
+  spawnChild(python.command, [...python.argsPrefix, "-m", "cas_knowledge_engine.app"], unsignedEngineEnv);
+  await waitForJson(`${unsignedEngineBase}/api/knowledge/healthz`, ({ response, body }) => response.status === 200 && body.service === "cas-knowledge-engine");
+  const missingSecretDirectOwner = await fetchJson(`${unsignedEngineBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: { "x-forwarded-user": "unsigned-owner" },
+    body: JSON.stringify({ customer_id: "verify", question: "missing hmac secret" })
+  });
+  expect(
+    "knowledge:engine-missing-hmac-secret-rejected",
+    missingSecretDirectOwner.response.status === 403 && missingSecretDirectOwner.body.code === "owner-required",
+    "knowledge engine rejects trusted-header private requests when owner HMAC secret is missing",
+    JSON.stringify(missingSecretDirectOwner.body)
   );
 
   const gatewayEnv = {
@@ -886,20 +922,24 @@ try {
   };
   spawnChild("node", ["apps/gateway/src/server.mjs"], boundaryGatewayEnv);
   const boundaryHealth = await waitForJson(`${boundaryGatewayBase}/api/knowledge/healthz`, ({ response, body }) => {
-    return response.status === 200 && body.service === "cas-knowledge-engine" && body.provider === "fake-boundary";
+    return response.status === 200 && body.service === "cas-knowledge-engine" && body.engine?.status === "ready";
   });
   const boundaryCapabilities = await fetchJson(`${boundaryGatewayBase}/api/knowledge/capabilities`);
   expect(
     "knowledge:gateway-public-health-sanitized",
     boundaryHealth.body.status === "ok" &&
+      boundaryHealth.body.provider === undefined &&
+      boundaryHealth.body.engine?.provider === undefined &&
       boundaryHealth.body.storage === undefined &&
       boundaryHealth.body.counts === undefined &&
       boundaryHealth.body.provider_config === undefined &&
       boundaryHealth.body.engine?.endpoint === undefined &&
       Array.isArray(boundaryHealth.body.capabilities) &&
       boundaryCapabilities.response.status === 200 &&
+      boundaryCapabilities.body.provider === undefined &&
+      boundaryCapabilities.body.engine === undefined &&
       Array.isArray(boundaryCapabilities.body.capabilities),
-    "gateway public knowledge health/capabilities expose readiness without storage, tenant counts, or provider internals",
+    "gateway public knowledge health/capabilities expose readiness without storage, tenant counts, provider mode, or provider internals",
     JSON.stringify({ health: boundaryHealth.body, capabilities: boundaryCapabilities.body })
   );
   const publicFailureGatewayEnv = {
@@ -983,6 +1023,35 @@ try {
       rejectedBoundaryPrivateCountAfter === rejectedBoundaryPrivateCountBefore,
     "gateway rejects missing/spoofed private knowledge owners before the engine receives the request",
     JSON.stringify({ noOwner: boundaryNoOwner.body, spoofedOnly: boundarySpoofedOnly.body })
+  );
+
+  const unsignedBoundaryGatewayEnv = {
+    ...process.env,
+    HOST: "127.0.0.1",
+    PORT: String(unsignedBoundaryGatewayPort),
+    CAS_BRAIN_PROVIDER: "mock",
+    CAS_EVIDENCE_PROVIDER: "none",
+    CAS_KNOWLEDGE_OWNER_IDENTITY_MODE: "token-hash",
+    CAS_KNOWLEDGE_ENGINE_URL: boundaryEngine.url,
+    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ""
+  };
+  spawnChild("node", ["apps/gateway/src/server.mjs"], unsignedBoundaryGatewayEnv);
+  await waitForJson(`${unsignedBoundaryGatewayBase}/api/knowledge/healthz`, ({ response, body }) => response.status === 200 && body.service === "cas-knowledge-engine");
+  const unsignedGatewayPrivateCountBefore = boundaryEngine.records.filter((record) => record.path === "/api/knowledge/rag/query").length;
+  const unsignedGatewayRag = await fetchJson(`${unsignedBoundaryGatewayBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: { authorization: "Bearer unsigned-boundary-user-token" },
+    body: JSON.stringify({ customer_id: "boundary", question: "missing signing secret" })
+  });
+  const unsignedGatewayPrivateCountAfter = boundaryEngine.records.filter((record) => record.path === "/api/knowledge/rag/query").length;
+  expect(
+    "knowledge:gateway-missing-hmac-secret-not-proxied",
+    unsignedGatewayRag.response.status === 503 &&
+      unsignedGatewayRag.body.code === "knowledge-owner-signing-unavailable" &&
+      unsignedGatewayPrivateCountAfter === unsignedGatewayPrivateCountBefore,
+    "gateway rejects private knowledge proxying when internal owner signing secret is missing",
+    JSON.stringify(unsignedGatewayRag.body)
   );
 
   const verifierFailureGatewayEnv = {
@@ -1109,7 +1178,8 @@ try {
     CAS_PBS_SHADOW_WRITES: "true",
     CAS_KNOWLEDGE_OWNER_MODE: "trusted-header",
     CAS_KNOWLEDGE_SINGLE_OWNER: "verify-single-owner",
-    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true"
+    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
   };
   spawnChild(python.command, [...python.argsPrefix, "-m", "cas_knowledge_engine.app"], shadowEnv);
   const shadowHealth = await waitForJson(`${shadowBase}/api/knowledge/healthz`, ({ response, body }) => {
@@ -1126,7 +1196,7 @@ try {
   const shadowOwner = "shadow-owner-a";
   const shadowUpload = await fetchJson(`${shadowBase}/api/knowledge/uploads/ingest`, {
     method: "POST",
-    headers: { "x-forwarded-user": shadowOwner },
+    headers: signedOwnerHeaders(shadowOwner),
     body: JSON.stringify({
       customer_id: "shadow",
       filename: "shadow-runbook.txt",
@@ -1165,7 +1235,8 @@ try {
     CAS_PBS_BEARER_TOKEN: verifyPbsBearerToken,
     CAS_KNOWLEDGE_OWNER_MODE: "trusted-header",
     CAS_KNOWLEDGE_SINGLE_OWNER: "verify-single-owner",
-    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true"
+    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
   };
   spawnChild(python.command, [...python.argsPrefix, "-m", "cas_knowledge_engine.app"], liveEnv);
   const liveHealth = await waitForJson(`${liveBase}/api/knowledge/healthz`, ({ response, body }) => {
@@ -1193,7 +1264,8 @@ try {
     CAS_PBS_REQUIRE_RUNTIME_READY: "true",
     CAS_KNOWLEDGE_OWNER_MODE: "trusted-header",
     CAS_KNOWLEDGE_SINGLE_OWNER: "not-ready-owner",
-    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true"
+    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
   };
   spawnChild(python.command, [...python.argsPrefix, "-m", "cas_knowledge_engine.app"], degradedLiveEnv);
   const degradedLiveHealth = await waitForJson(`${degradedLiveBase}/api/knowledge/healthz`, ({ response, body }) => {
@@ -1223,7 +1295,8 @@ try {
     CAS_PBS_REQUIRED_READY_SCOPES: "official_docs,study_docs",
     CAS_KNOWLEDGE_OWNER_MODE: "trusted-header",
     CAS_KNOWLEDGE_SINGLE_OWNER: "stale-index-owner",
-    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true"
+    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
   };
   spawnChild(python.command, [...python.argsPrefix, "-m", "cas_knowledge_engine.app"], staleIndexLiveEnv);
   const staleIndexLiveHealth = await waitForJson(`${staleIndexLiveBase}/api/knowledge/healthz`, ({ response, body }) => {
@@ -1241,7 +1314,7 @@ try {
     JSON.stringify(staleIndexLiveHealth.body.provider_config?.pbs_http ?? {})
   );
 
-  const liveHeaders = { "x-forwarded-user": "live-owner-a" };
+  const liveHeaders = signedOwnerHeaders("live-owner-a");
   const liveOwner = liveHeaders["x-forwarded-user"];
   const liveOwnerHash = pbsOwnerHash(liveOwner);
   const liveRecord = (method, path, predicate = () => true) =>

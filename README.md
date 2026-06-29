@@ -65,6 +65,8 @@ Those commands are expected to fail until `CAS_PBS_BASE_URL`, the `playbookstudi
 
 `npm run verify:pbs:preflight` may exit 0 with WARN entries, and `npm run verify:pbs:live` may exit 0 as SKIP when `CAS_PBS_BASE_URL` is unset. Those are diagnostic states, not PBS live release readiness.
 
+The production runbook is tracked at `deliverables/active/v0.1.4/production-live-cutover-checklist.md`.
+
 Console Plugin 병렬 설치 기준:
 
 - OpsLens path: `/opslens`

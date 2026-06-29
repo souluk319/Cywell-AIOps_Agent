@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 
@@ -8,6 +9,7 @@ export function getEvidenceConfig(env = process.env) {
   return {
     provider: env.CAS_EVIDENCE_PROVIDER ?? "openshift-api",
     apiUrl: (env.CAS_OPENSHIFT_API_URL ?? defaultApiUrl).replace(/\/+$/, ""),
+    caFile: String(env.CAS_OPENSHIFT_API_CA_FILE ?? "").trim(),
     timeoutMs: Number(env.CAS_EVIDENCE_TIMEOUT_MS ?? defaultTimeoutMs),
     tlsInsecure: env.CAS_OPENSHIFT_API_TLS_INSECURE === "true",
     logTailLines: Number(env.CAS_EVIDENCE_LOG_TAIL_LINES ?? 80)
@@ -26,6 +28,7 @@ function requestText(url, options = {}) {
   const target = new URL(url);
   const isHttps = target.protocol === "https:";
   const transport = isHttps ? httpsRequest : httpRequest;
+  const ca = isHttps && !options.tlsInsecure && options.caFile ? readFileSync(options.caFile) : undefined;
 
   return new Promise((resolve, reject) => {
     const request = transport(
@@ -33,6 +36,7 @@ function requestText(url, options = {}) {
       {
         method: options.method ?? "GET",
         headers: options.headers ?? {},
+        ca,
         rejectUnauthorized: isHttps ? !options.tlsInsecure : undefined,
         timeout: options.timeoutMs
       },
@@ -77,6 +81,7 @@ async function kubeRequest(path, options = {}) {
       accept: options.accept ?? "application/json"
     },
     timeoutMs: config.timeoutMs,
+    caFile: config.caFile,
     tlsInsecure: config.tlsInsecure
   });
 

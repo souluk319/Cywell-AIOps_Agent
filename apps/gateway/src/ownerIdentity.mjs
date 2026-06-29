@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 
@@ -19,6 +20,7 @@ export function getOwnerIdentityConfig(env = process.env) {
   return {
     mode,
     apiUrl: String(env.CAS_OPENSHIFT_API_URL ?? defaultApiUrl).replace(/\/+$/, ""),
+    caFile: String(env.CAS_OPENSHIFT_API_CA_FILE ?? "").trim(),
     timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : defaultTimeoutMs,
     tlsInsecure: env.CAS_OPENSHIFT_API_TLS_INSECURE === "true",
     cacheTtlMs: Number.isFinite(cacheTtlMs) && cacheTtlMs >= 0 ? cacheTtlMs : defaultCacheTtlMs
@@ -58,6 +60,7 @@ function requestText(url, options = {}) {
   const isHttps = target.protocol === "https:";
   const transport = isHttps ? httpsRequest : httpRequest;
   const body = options.body ? Buffer.from(String(options.body), "utf8") : undefined;
+  const ca = isHttps && !options.tlsInsecure && options.caFile ? readFileSync(options.caFile) : undefined;
 
   return new Promise((resolve, reject) => {
     const request = transport(
@@ -65,6 +68,7 @@ function requestText(url, options = {}) {
       {
         method: options.method ?? "GET",
         headers: options.headers ?? {},
+        ca,
         rejectUnauthorized: isHttps ? !options.tlsInsecure : undefined,
         timeout: options.timeoutMs
       },
@@ -118,6 +122,7 @@ export async function resolveOpenShiftUserIdentity(authorization, options = {}) 
       kind: "SelfSubjectReview"
     }),
     timeoutMs: config.timeoutMs,
+    caFile: config.caFile,
     tlsInsecure: config.tlsInsecure
   });
 

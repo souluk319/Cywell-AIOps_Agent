@@ -47,8 +47,10 @@ spec:
               value: openshift-api
             - name: CAS_OPENSHIFT_API_URL
               value: https://kubernetes.default.svc
+            - name: CAS_OPENSHIFT_API_CA_FILE
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - name: CAS_OPENSHIFT_API_TLS_INSECURE
-              value: "true"
+              value: "false"
             - name: CAS_EVIDENCE_TIMEOUT_MS
               value: "8000"
             - name: CAS_KNOWLEDGE_OWNER_IDENTITY_MODE
@@ -80,10 +82,19 @@ spec:
             - name: service-serving-cert
               mountPath: /var/run/secrets/cas/tls
               readOnly: true
+            - name: kube-root-ca
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
       volumes:
         - name: service-serving-cert
           secret:
             secretName: cas-gateway-tls
+        - name: kube-root-ca
+          configMap:
+            name: kube-root-ca.crt
+            items:
+              - key: ca.crt
+                path: ca.crt
 ---
 apiVersion: v1
 kind: Service

@@ -90,10 +90,9 @@ function publicKnowledgeRoute(pathname) {
 
 function signedOwnerHeaders(scopedOwner) {
   if (!scopedOwner) return {};
+  if (!ownerHmacSecret) return null;
   const headers = { "x-forwarded-user": scopedOwner };
-  if (ownerHmacSecret) {
-    headers["x-cas-owner-signature"] = createHmac("sha256", ownerHmacSecret).update(scopedOwner).digest("hex");
-  }
+  headers["x-cas-owner-signature"] = createHmac("sha256", ownerHmacSecret).update(scopedOwner).digest("hex");
   return headers;
 }
 
@@ -141,12 +140,26 @@ function sanitizedKnowledgeHealth(body = {}, statusCode = 200) {
     status,
     service: proxiedEngine ? "cas-knowledge-engine" : "cas-knowledge-facade",
     version: body.version ?? "0.1.4",
-    provider: proxiedEngine ? (body.provider ?? knowledgeConfig.provider) : knowledgeConfig.provider,
     engine: {
-      provider: knowledgeConfig.provider,
       status: status === "ok" ? "ready" : "degraded"
     },
-    capabilities: Array.isArray(body.capabilities) ? body.capabilities : buildKnowledgeCapabilities()
+    capabilities: sanitizedKnowledgeCapabilities(body).capabilities
+  };
+}
+
+function sanitizedKnowledgeCapabilities(body = {}) {
+  const source = Array.isArray(body.capabilities) ? body.capabilities : buildKnowledgeCapabilities();
+  return {
+    status: String(body.status ?? "ok"),
+    service: "cas-knowledge-facade",
+    capabilities: source.map((capability) => ({
+      id: String(capability.id ?? ""),
+      label: String(capability.label ?? ""),
+      phase: capability.phase ? String(capability.phase) : undefined,
+      endpoint: String(capability.endpoint ?? ""),
+      source: String(capability.source ?? "PBS knowledge engine"),
+      state: String(capability.state ?? "ready")
+    }))
   };
 }
 
@@ -186,7 +199,6 @@ async function sendKnowledgeHealth(response) {
       service: "cas-knowledge-facade",
       route: "/api/knowledge/healthz",
       engine: {
-        provider: knowledgeConfig.provider,
         status: "unavailable"
       },
       error: error instanceof Error ? error.message : "unknown knowledge engine health error"
@@ -214,6 +226,15 @@ async function proxyKnowledgeRequest(request, response, url) {
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await readBody(request);
     const scopedOwner = ownerResult.owner ?? "";
     const ownerHeaders = signedOwnerHeaders(scopedOwner);
+    if (scopedOwner && !ownerHeaders) {
+      sendJson(response, 503, {
+        code: "knowledge-owner-signing-unavailable",
+        status: "error",
+        service: "cas-knowledge-facade",
+        reason: "internal owner signing secret is not configured"
+      });
+      return;
+    }
     const upstream = await fetch(targetUrl, {
       method: request.method,
       headers: {
@@ -284,13 +305,30 @@ const requestHandler = async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/knowledge/capabilities") {
       if (knowledgeConfig.engineUrl) {
-        await proxyKnowledgeRequest(request, response, url);
+        const targetUrl = `${knowledgeConfig.engineUrl}/api/knowledge/capabilities`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), knowledgeConfig.timeoutMs);
+        try {
+          const upstream = await fetch(targetUrl, {
+            method: "GET",
+            headers: { accept: "application/json" },
+            signal: controller.signal
+          });
+          const body = parseJsonBuffer(Buffer.from(await upstream.arrayBuffer()));
+          sendJson(response, upstream.status, sanitizedKnowledgeCapabilities(body));
+        } catch (capabilityError) {
+          sendJson(response, 502, {
+            code: "knowledge-engine-unavailable",
+            status: "degraded",
+            service: "cas-knowledge-facade",
+            route: "/api/knowledge/capabilities",
+            error: capabilityError instanceof Error ? capabilityError.message : "unknown knowledge engine capabilities error"
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
       } else {
-        sendJson(response, 200, {
-          status: "ok",
-          service: "cas-knowledge-facade",
-          capabilities: buildKnowledgeCapabilities()
-        });
+        sendJson(response, 200, sanitizedKnowledgeCapabilities({ capabilities: buildKnowledgeCapabilities() }));
       }
       return;
     }

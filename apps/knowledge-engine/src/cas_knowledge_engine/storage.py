@@ -166,10 +166,6 @@ class PostgresKnowledgeStore:
             raise RuntimeError(f"database unavailable: {self.db_error}")
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM cas_knowledge_events")
-                cur.execute("DELETE FROM cas_knowledge_notes")
-                cur.execute("DELETE FROM cas_knowledge_chunks")
-                cur.execute("DELETE FROM cas_knowledge_documents")
                 for document in store["documents"]:
                     cur.execute(
                         """
