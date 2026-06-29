@@ -665,7 +665,12 @@ const consoleOperator = getJson("console:operator", ["get", "console.operator.op
 const enabledPlugins = consoleOperator?.spec?.plugins ?? [];
 const capabilities = consoleOperator?.spec?.customization?.capabilities ?? [];
 const capabilityByName = new Map(capabilities.map((capability) => [capability.name, capability]));
-expect("console:opslens-still-enabled", enabledPlugins.includes("cywell-opslens"), "cywell-opslens remains enabled");
+expect(
+  "console:opslens-replaced",
+  !enabledPlugins.includes("cywell-opslens"),
+  "cywell-opslens is disabled so the v0.1.4 Cywell launcher owns the console AI surface",
+  "cywell-opslens is still enabled"
+);
 expect("console:cas-enabled", enabledPlugins.includes("cywell-ai-sentinel"), "cywell-ai-sentinel is enabled");
 expect(
   "console:lightspeed-replaced",
