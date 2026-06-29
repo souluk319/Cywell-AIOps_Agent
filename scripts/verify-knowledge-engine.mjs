@@ -885,13 +885,37 @@ try {
     reports.response.status === 200 && reports.body.counts?.documents === 3,
     "gateway upload reports list indexed document"
   );
+  const reportItems = Array.isArray(reports.body.items) ? reports.body.items : [];
+  const uploadReport = reportItems.find((item) => item.document_source_id === uploadedDocumentId);
+  expect(
+    "knowledge:upload-reports-pbs-shape",
+    reports.response.status === 200 &&
+      reports.body.counts?.items === 3 &&
+      uploadReport?.filename === "verify-runbook.txt" &&
+      uploadReport?.ready_for_chat === true &&
+      uploadReport?.basic_index_ready === true &&
+      uploadReport?.chunk_count >= 1 &&
+      uploadReport?.graph_summary?.wikilinks?.includes("Router Latency") &&
+      uploadReport?.graph_summary?.tags?.includes("ingress") &&
+      uploadReport?.graph_summary?.urls?.includes("https://example.com/verify-runbook.") &&
+      Array.isArray(uploadReport?.chunk_previews) &&
+      uploadReport.chunk_previews.some((preview) => String(preview.markdown || "").includes("OpenShift router latency")),
+    "gateway upload reports expose PBS-style items with graph_summary and chunk previews",
+    JSON.stringify(uploadReport)
+  );
 
   const localVault = await fetchJson(`${gatewayBase}/api/knowledge/wiki-vault?customer_id=verify`, {
     headers: ownerHeaders
   });
+  const selectedUpload = Array.isArray(localVault.body.selected_uploads)
+    ? localVault.body.selected_uploads.find((item) => item.document_source_id === uploadedDocumentId)
+    : null;
+  const selectedContext = Array.isArray(localVault.body.selected_context) ? localVault.body.selected_context[0] : null;
   expect(
     "knowledge:wiki-vault-local-signals",
     localVault.response.status === 200 &&
+      Array.isArray(localVault.body.graph?.nodes) &&
+      Array.isArray(localVault.body.graph?.edges) &&
       localVault.body.summary?.graph_relation_count >= 1 &&
       Array.isArray(localVault.body.top_wikilinks) &&
       localVault.body.top_wikilinks.some((item) => item.label === "Router Latency") &&
@@ -900,8 +924,13 @@ try {
       Array.isArray(localVault.body.relations) &&
       localVault.body.relations.length >= 1 &&
       Array.isArray(localVault.body.selected_context) &&
-      localVault.body.selected_context.length >= 1,
-    "gateway local wiki vault exposes PBS-style wikilinks, tags, relations, and selected context",
+      localVault.body.selected_context.length >= 1 &&
+      selectedContext?.document_source_id &&
+      typeof selectedContext?.viewer_path === "string" &&
+      selectedContext?.source_scope === "wiki_vault" &&
+      selectedUpload?.graph_summary?.wikilinks?.includes("Router Latency") &&
+      selectedUpload?.chunk_previews?.length >= 1,
+    "gateway local wiki vault exposes PBS-style graph alias, wikilinks, tags, upload summaries, context viewer paths, relations, and selected context",
     JSON.stringify(localVault.body)
   );
 
@@ -926,6 +955,32 @@ try {
       ),
     "gateway RAG cites the uploaded customer document",
     JSON.stringify({ uploadedDocumentId, citations: ragCitations })
+  );
+  const scopedRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      question: "router latency evidence",
+      active_document_id: uploadedDocumentId,
+      enabled_upload_document_ids: [uploadedDocumentId],
+      enabled_source_scopes: ["user_upload"],
+      restrict_uploaded_sources: true
+    })
+  });
+  const scopedCitations = Array.isArray(scopedRag.body.citations) ? scopedRag.body.citations : [];
+  expect(
+    "knowledge:rag-active-document-scope",
+    scopedRag.response.status === 200 &&
+      scopedCitations.length >= 1 &&
+      scopedCitations.every((citation) => citation.document_source_id === uploadedDocumentId) &&
+      scopedCitations.every((citation) => typeof citation.viewer_path === "string") &&
+      scopedCitations.some((citation) => citation.source === "chunk" && String(citation.viewer_path ?? "").includes(uploadedDocumentId)) &&
+      scopedCitations.every((citation) => typeof citation.source_scope === "string") &&
+      scopedRag.body.trace?.active_document_id === uploadedDocumentId &&
+      scopedRag.body.trace?.restrict_uploaded_sources === true,
+    "gateway RAG honors active uploaded document scope and emits source lineage citations",
+    JSON.stringify(scopedRag.body)
   );
   const vaultOnlyNote = await fetchJson(`${gatewayBase}/api/knowledge/wiki-vault/notes`, {
     method: "POST",

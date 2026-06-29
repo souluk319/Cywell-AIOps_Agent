@@ -167,7 +167,10 @@ function customerAccessPolicyIsConcrete(jsonText) {
     const groups = policy?.groups && typeof policy.groups === "object" ? policy.groups : {};
     const users = policy?.users && typeof policy.users === "object" ? policy.users : {};
     const entries = [...Object.values(groups), ...Object.values(users)].flatMap((value) => (Array.isArray(value) ? value : []));
-    return entries.length > 0 && entries.every((value) => String(value).trim() && String(value).trim() !== "*");
+    return entries.length > 0 && entries.every((value) => {
+      const clean = String(value).trim();
+      return clean && !clean.includes("*");
+    });
   } catch {
     return false;
   }
@@ -587,18 +590,21 @@ function loadReleaseImagesEvidence() {
   try {
     const evidence = JSON.parse(readFileSync(releaseImagesEvidencePath, "utf8"));
     const head = currentGitHead();
+    const sourceEvidenceHead = String(evidence.sourceEvidenceHead ?? "");
     const valid =
       evidence.status === "PASS" &&
       evidence.namespace === namespace &&
       evidence.releaseTag === "v0.1.4" &&
       (!head || evidence.head === head) &&
+      (!head || sourceEvidenceHead === head) &&
+      evidence.staleEvidenceAllowed !== true &&
       evidence.promotedImages &&
       typeof evidence.promotedImages === "object";
     expect(
       "cluster:release-images-evidence",
       valid,
-      "release image promotion evidence is PASS, current-head, namespace-scoped, and contains promoted image digests",
-      `${releaseImagesEvidencePath} must be PASS for namespace ${namespace}, current head ${head || "unknown"}, releaseTag v0.1.4, and include promotedImages`
+      "release image promotion evidence is PASS, current-head, non-stale-source, namespace-scoped, and contains promoted image digests",
+      `${releaseImagesEvidencePath} must be PASS for namespace ${namespace}, current head ${head || "unknown"}, releaseTag v0.1.4, include promotedImages, sourceEvidenceHead must match current head, and staleEvidenceAllowed must not be true`
     );
     return valid ? evidence : null;
   } catch (error) {

@@ -1,6 +1,26 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - PBS-Compatible Shadow Schema, Rich Topology Signals, and Release Evidence Binding
+## Latest Update - PBS Upload/RAG Scope Contract and Non-Stale Release Evidence
+
+Implemented after the topology/RAG parity and live-gate parallel review pass:
+
+- Local upload reports now expose PBS-style `items` with `document_source_id`, readiness flags, `graph_summary`, source scope, and chunk previews.
+- Local Wiki Vault selected uploads and context rows now preserve PBS-style graph aliases, selected-upload summaries, context viewer paths, document lineage, and source scopes.
+- Local RAG now honors `active_document_id`, `enabled_upload_document_ids`, `enabled_source_scopes`, and `restrict_uploaded_sources`; citations include `document_source_id`, `viewer_path`, `source_scope`, `source_collection`, and section paths.
+- The topology inspector RAG action now passes the selected topology node's document/source scope into `/api/knowledge/rag/query`.
+- CRC release promotion evidence now records the source deployment evidence head/check time and whether stale evidence was allowed; strict live preflight rejects stale-source release evidence.
+- Strict live preflight now rejects any wildcard character in customer ACL entries, including prefix/suffix wildcards, unless the policy is replaced before cutover.
+
+Proof captured in that pass:
+
+- `python -m py_compile apps/knowledge-engine/src/cas_knowledge_engine/engine.py`: PASS.
+- `node --check` passed for changed verification and release scripts.
+- `npm run verify:knowledge-engine`: PASS, 80 checks.
+- `npm run verify:console:topology-dom`: PASS, 31 browser-backed checks.
+- `npm run verify:console:integration`: PASS, 73 checks.
+- `npm run verify:deploy:manifests`: PASS, 259 checks.
+
+## Previous Update - PBS-Compatible Shadow Schema, Rich Topology Signals, and Release Evidence Binding
 
 Implemented after the backend/frontend/release parallel review pass:
 
@@ -13,7 +33,7 @@ Implemented after the backend/frontend/release parallel review pass:
 - CRC release promotion now refuses to move `v0.1.4` tags unless each release source digest matches the PASS CRC deployment evidence in `test-results/cas-crc-deployment.json`.
 - Strict live preflight now rejects wildcard customer ACL placeholders, verifies applied ConfigMap values, checks applied workload pod digests against promoted release evidence, and evaluates the union of applied knowledge-engine egress NetworkPolicies.
 
-Current proof:
+Proof captured in that pass:
 
 - `python -m py_compile apps/knowledge-engine/src/cas_knowledge_engine/engine.py apps/knowledge-engine/src/cas_knowledge_engine/storage.py`: PASS.
 - `node --check` passed for changed verification and release scripts.
@@ -42,7 +62,7 @@ Implemented after the live-readiness parallel audit pass:
 - Cluster direct-engine block verification now requires an actual blocked result from the in-cluster probe, not merely any non-200 response.
 - Strict live preflight now checks `CAS_PBS_TLS_INSECURE=false`, live Gateway customer ACL wiring, and the union of applied ingress NetworkPolicies selecting knowledge-engine pods.
 
-Current proof:
+Proof captured in that pass:
 
 - `node --check` passed for Gateway and changed verifier scripts.
 - `npm run verify:knowledge-engine`: PASS, 76 checks.
@@ -68,7 +88,7 @@ Implemented after the post-commit parallel audit pass:
 - Console direct verification scripts now build ignored `dist/` assets automatically when invoked directly; the aggregate verify path uses the built variants after the single console build.
 - CRC build context filtering now excludes Python bytecode and `__pycache__`.
 
-Current proof:
+Proof captured in that pass:
 
 - Clean clone from `v0.1.4` commit `c335977`: `npm ci` PASS and `npm run verify` PASS.
 - Current working tree verification after hardening: `npm run verify` PASS.
@@ -346,7 +366,7 @@ Historical verified results at this step:
 - `npm run verify:pbs:cutover`: expected `FAIL`; `CAS_PBS_BASE_URL` is not configured
 - `npm run verify:pbs:cutover:cluster`: expected `FAIL`; current CRC has no `playbookstudio` namespace/service, no `cas-pbs-auth`, no `cas-knowledge-postgres-live`, still runs `:dev` base images/provider, has legacy `cas-knowledge-postgres` dev Secret, and has not applied `cas-knowledge-engine-pbs-egress`
 
-## Latest Update - Local Vault Graph and Head-Bound Release Evidence
+## Earlier Update - Local Vault Graph and Head-Bound Release Evidence
 
 Implemented in this pass:
 

@@ -83,7 +83,7 @@ If those Secrets already exist, compare keys and rotation plan before applying t
 Review and replace the live ConfigMap customer ACL before applying `pbs-live`. This value is not secret, but it controls customer data authorization and must be reviewed like release configuration.
 
 ```powershell
-$customerAccessJson = '{"groups":{"cywell-knowledge-admins":["*"],"customer-a-ops":["customer-a"],"customer-b-ops":["customer-b"]}}'
+$customerAccessJson = '{"groups":{"cywell-knowledge-admins":["customer-a","customer-b"],"customer-a-ops":["customer-a"],"customer-b-ops":["customer-b"]}}'
 
 oc create configmap cas-knowledge-live-config `
   -n cywell-ai-sentinel `
@@ -94,7 +94,7 @@ oc create configmap cas-knowledge-live-config `
 oc diff -f .\test-results\cas-knowledge-live-config.configmap.yaml
 ```
 
-Do not proceed if the reviewed policy grants `*` outside an approved admin group.
+Do not proceed if the reviewed policy contains `*` or prefix/suffix wildcard entries. The strict live preflight requires concrete customer IDs in every ACL entry.
 
 ## Pre-Apply Gates
 
@@ -114,6 +114,7 @@ Required result:
 - `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags. If `v0.1.4` tags already exist and must intentionally move, rerun as `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` and capture the old/new image evidence.
 - `verify:pbs:preflight:live:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
 - `verify:pbs:preflight:live:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
+- `verify:pbs:preflight:live:preapply` confirms release-image evidence is current-head and sourced from non-stale CRC deployment evidence.
 
 Stop immediately if any gate fails.
 

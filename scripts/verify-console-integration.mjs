@@ -338,6 +338,18 @@ expectText(
   "knowledge route renders topology-to-RAG inspector action"
 );
 expectText(
+  "console-knowledge:topology-rag-scoped-source",
+  knowledgeRouteSource,
+  "enabled_upload_document_ids",
+  "knowledge route sends selected topology document scope into RAG requests"
+);
+expectText(
+  "console-knowledge:topology-rag-restrict-uploaded",
+  knowledgeRouteSource,
+  "restrict_uploaded_sources",
+  "knowledge route can restrict topology RAG actions to selected uploaded sources"
+);
+expectText(
   "console-knowledge:topology-nested-graph",
   knowledgeRouteSource,
   "topologyGraph",

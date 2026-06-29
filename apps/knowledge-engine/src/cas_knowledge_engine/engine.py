@@ -742,6 +742,7 @@ class KnowledgeEngine:
                 "entity_kind",
                 "source_kind",
                 "source_url",
+                "source_scope",
                 "ready_for_chat",
                 "basic_index_ready",
             ]:
@@ -1128,6 +1129,60 @@ class KnowledgeEngine:
         concepts = self._signal_list([*(fallback_terms or []), *top_terms(body, 8)], limit=8)
         return {"links": links, "tags": tags, "urls": urls, "concepts": concepts}
 
+    def _upload_chunk_previews(self, chunks: list[dict[str, Any]], limit: int = 2) -> list[dict[str, Any]]:
+        previews: list[dict[str, Any]] = []
+        for chunk in sorted(chunks, key=lambda item: int(item.get("index") or 0))[: max(1, limit)]:
+            text = str(chunk.get("text") or "").strip()
+            if len(text) > 900:
+                text = f"{text[:900].rstrip()}..."
+            previews.append(
+                {
+                    "heading_title": str(chunk.get("heading_title") or "").strip(),
+                    "section_path": [str(item) for item in chunk.get("section_path") or [] if str(item).strip()],
+                    "markdown": text,
+                }
+            )
+        return previews
+
+    def _upload_report_item(self, document: dict[str, Any], chunks: list[dict[str, Any]]) -> dict[str, Any]:
+        document_id = str(document.get("id") or "")
+        metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+        pbs_payload = metadata.get("pbs_payload") if isinstance(metadata.get("pbs_payload"), dict) else {}
+        source_kind = str(pbs_payload.get("source_kind") or document.get("source_type") or "upload").strip() or "upload"
+        source_url = str(document.get("source_uri") or metadata.get("url") or pbs_payload.get("url") or "").strip()
+        chunk_texts = " ".join(str(chunk.get("text") or "") for chunk in chunks)
+        signals = self._text_signals(
+            f"{document.get('title', '')} {document.get('summary', '')} {chunk_texts}",
+            [str(term) for term in document.get("terms", [])[:8]],
+        )
+        graph_summary = {
+            "wikilinks": signals["links"],
+            "tags": signals["tags"],
+            "urls": signals["urls"],
+            "concepts": signals["concepts"],
+            "image_entities": [],
+            "image_evidence": [],
+        }
+        return {
+            "id": document_id,
+            "document_source_id": document_id,
+            "filename": str(document.get("title") or document_id),
+            "title": str(document.get("title") or document_id),
+            "source_kind": source_kind,
+            "source_url": source_url,
+            "source_scope": str(pbs_payload.get("source_scope") or metadata.get("source_scope") or "user_upload"),
+            "customer_id": str(document.get("customer_id") or "default"),
+            "owner_user_id": str(document.get("owner_id") or self.default_owner_id),
+            "owner_id": str(document.get("owner_id") or self.default_owner_id),
+            "created_by": str(document.get("owner_id") or self.default_owner_id),
+            "chunk_count": len(chunks),
+            "ready_for_chat": len(chunks) > 0,
+            "basic_index_ready": len(chunks) > 0,
+            "graph_summary": graph_summary,
+            "chunk_previews": self._upload_chunk_previews(chunks, limit=2),
+            "metadata": metadata,
+        }
+
     def _local_vault_graph(self, *, customer_id: str, owner_id: str, store: dict[str, Any] | None = None) -> dict[str, Any]:
         store = store or self.load_store()
         documents = [doc for doc in store["documents"] if self._in_scope(doc, customer_id=customer_id, owner_id=owner_id)]
@@ -1136,6 +1191,10 @@ class KnowledgeEngine:
         for chunk in store["chunks"]:
             if self._in_scope(chunk, customer_id=customer_id, owner_id=owner_id):
                 chunks_by_document.setdefault(str(chunk.get("document_id") or ""), []).append(chunk)
+        reports_by_document = {
+            str(document.get("id") or ""): self._upload_report_item(document, chunks_by_document.get(str(document.get("id") or ""), []))
+            for document in documents
+        }
 
         nodes: dict[str, dict[str, Any]] = {}
         edges: list[dict[str, Any]] = []
@@ -1166,10 +1225,10 @@ class KnowledgeEngine:
             doc_id = str(document["id"])
             metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
             pbs_payload = metadata.get("pbs_payload") if isinstance(metadata.get("pbs_payload"), dict) else {}
+            report = reports_by_document.get(doc_id, {})
+            graph_summary = report.get("graph_summary") if isinstance(report.get("graph_summary"), dict) else {}
             source_kind = str(pbs_payload.get("source_kind") or document.get("source_type") or "upload")
             source_url = str(document.get("source_uri") or metadata.get("url") or pbs_payload.get("url") or "")
-            chunk_texts = " ".join(str(chunk.get("text") or "") for chunk in chunks_by_document.get(doc_id, []))
-            signals = self._text_signals(f"{document.get('title', '')} {document.get('summary', '')} {chunk_texts}", document.get("terms", [])[:8])
             add_node(
                 doc_id,
                 "upload_document" if source_kind == "upload" else "web_url_source",
@@ -1179,19 +1238,24 @@ class KnowledgeEngine:
                 document_source_id=doc_id,
                 source_kind=source_kind,
                 source_url=source_url or None,
+                source_scope=report.get("source_scope"),
+                viewer_path=f"/cywell/customer-data?customer_id={customer_id}&document_id={doc_id}",
                 basic_index_ready=True,
+                ready_for_chat=report.get("ready_for_chat"),
+                chunk_count=report.get("chunk_count"),
+                graph_summary=graph_summary,
             )
-            for label in signals["links"]:
+            for label in graph_summary.get("wikilinks", []):
                 wikilink_counts[label] += 1
                 link_id = stable_id("wikilink", label.lower())
                 add_node(link_id, "wikilink", label)
                 add_relation(doc_id, link_id, "wikilink", label, source_document_id=doc_id)
-            for label in signals["tags"]:
+            for label in graph_summary.get("tags", []):
                 tag_counts[label] += 1
                 tag_id = stable_id("tag", label.lower())
                 add_node(tag_id, "tag", label)
                 add_relation(doc_id, tag_id, "tag", label, source_document_id=doc_id)
-            for label in signals["concepts"][:6]:
+            for label in graph_summary.get("concepts", [])[:6]:
                 concept_id = stable_id("concept", label.lower())
                 add_node(concept_id, "concept", label, entity_kind="concept")
                 add_relation(doc_id, concept_id, "mentions", label, source_document_id=doc_id)
@@ -1243,13 +1307,9 @@ class KnowledgeEngine:
         top_wikilinks = [{"label": label, "count": count} for label, count in wikilink_counts.most_common(12)]
         top_tags = [{"label": label, "count": count} for label, count in tag_counts.most_common(12)]
         selected_uploads = [
-            {
-                "id": document["id"],
-                "title": document.get("title", ""),
-                "summary": document.get("summary", ""),
-                "source_kind": (document.get("metadata") or {}).get("pbs_payload", {}).get("source_kind", document.get("source_type", "")) if isinstance(document.get("metadata"), dict) else document.get("source_type", ""),
-            }
+            reports_by_document[str(document.get("id") or "")]
             for document in documents[:8]
+            if str(document.get("id") or "") in reports_by_document
         ]
         selected_context = [
             {
@@ -1258,6 +1318,9 @@ class KnowledgeEngine:
                 "body": str(note.get("body", ""))[:700],
                 "source": note.get("source", ""),
                 "document_id": note.get("document_id"),
+                "document_source_id": note.get("document_id"),
+                "viewer_path": f"/cywell/llm-wiki?customer_id={customer_id}&note_id={note['id']}",
+                "source_scope": "wiki_vault",
             }
             for note in notes[:8]
         ]
@@ -1312,6 +1375,10 @@ class KnowledgeEngine:
             "backlinks": backlinks,
             "selected_context": selected_context,
             "selected_uploads": selected_uploads,
+            "graph": {
+                "nodes": list(nodes.values()),
+                "edges": edges,
+            },
         }
 
     def search(self, payload: dict[str, Any], owner_id: str | None = None) -> dict[str, Any]:
@@ -1323,10 +1390,50 @@ class KnowledgeEngine:
         if self._pbs_live_enabled():
             return self._pbs_search_payload(question, self.pbs.chat(payload, resolved_owner_id), customer_id=customer_id, owner_id=resolved_owner_id)
         query_terms = tokenize(question)
+        active_document_id = str(
+            payload.get("active_document_id")
+            or payload.get("activeDocumentId")
+            or payload.get("document_source_id")
+            or payload.get("documentSourceId")
+            or ""
+        ).strip()
+        enabled_ids_payload = payload.get("enabled_upload_document_ids") or payload.get("enabledUploadDocumentIds") or []
+        if isinstance(enabled_ids_payload, str):
+            enabled_ids_payload = [item.strip() for item in enabled_ids_payload.split(",")]
+        enabled_document_ids = {str(item).strip() for item in enabled_ids_payload if str(item).strip()}
+        if active_document_id:
+            enabled_document_ids.add(active_document_id)
+        enabled_scopes_payload = payload.get("enabled_source_scopes") or payload.get("enabledSourceScopes") or []
+        if isinstance(enabled_scopes_payload, str):
+            enabled_scopes_payload = [item.strip() for item in enabled_scopes_payload.split(",")]
+        enabled_source_scopes = {str(item).strip() for item in enabled_scopes_payload if str(item).strip()}
+        restrict_uploaded_sources = payload_bool(
+            payload,
+            "restrict_uploaded_sources",
+            "restrictUploadedSources",
+            default=bool(enabled_document_ids),
+        )
         store = self.load_store()
         scored: list[tuple[int, dict[str, Any]]] = []
+        documents = {
+            doc["id"]: doc
+            for doc in store["documents"]
+            if self._in_scope(doc, customer_id=customer_id, owner_id=resolved_owner_id)
+        }
+
+        def source_scope_for(document: dict[str, Any]) -> str:
+            metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+            pbs_payload = metadata.get("pbs_payload") if isinstance(metadata.get("pbs_payload"), dict) else {}
+            return str(pbs_payload.get("source_scope") or metadata.get("source_scope") or document.get("source_type") or "user_upload")
+
         for chunk in store["chunks"]:
             if not self._in_scope(chunk, customer_id=customer_id, owner_id=resolved_owner_id):
+                continue
+            document_id = str(chunk.get("document_id") or "")
+            document = documents.get(document_id, {})
+            if restrict_uploaded_sources and enabled_document_ids and document_id not in enabled_document_ids:
+                continue
+            if enabled_source_scopes and source_scope_for(document) not in enabled_source_scopes:
                 continue
             chunk_terms = set(chunk.get("terms") or tokenize(chunk.get("text", "")))
             score = sum(3 if term in chunk_terms else 0 for term in query_terms)
@@ -1335,20 +1442,30 @@ class KnowledgeEngine:
                 scored.append((score, chunk))
         scored.sort(key=lambda item: item[0], reverse=True)
         top_chunks = [chunk for _score, chunk in scored[:5]]
-        documents = {doc["id"]: doc for doc in store["documents"]}
-        citations: list[dict[str, Any]] = [
-            {
-                "chunk_id": chunk["id"],
-                "document_id": chunk["document_id"],
-                "title": documents.get(chunk["document_id"], {}).get("title", chunk["document_id"]),
-                "snippet": chunk["text"][:260],
-                "source": "chunk",
-            }
-            for chunk in top_chunks
-        ]
+        citations: list[dict[str, Any]] = []
+        for chunk in top_chunks:
+            document_id = str(chunk.get("document_id") or "")
+            document = documents.get(document_id, {})
+            citations.append(
+                {
+                    "chunk_id": chunk["id"],
+                    "document_id": document_id,
+                    "document_source_id": document_id,
+                    "title": document.get("title", document_id),
+                    "snippet": chunk["text"][:260],
+                    "source": "chunk",
+                    "viewer_path": f"/cywell/customer-data?customer_id={customer_id}&document_id={document_id}",
+                    "source_scope": source_scope_for(document),
+                    "source_collection": customer_id,
+                    "section_path": [str(item) for item in chunk.get("section_path") or [] if str(item).strip()],
+                }
+            )
         vault = self._local_vault_graph(customer_id=customer_id, owner_id=resolved_owner_id, store=store)
         vault_scored: list[tuple[int, dict[str, Any]]] = []
         for context in vault["selected_context"]:
+            context_document_id = str(context.get("document_id") or "")
+            if restrict_uploaded_sources and enabled_document_ids and context_document_id and context_document_id not in enabled_document_ids:
+                continue
             haystack = f"{context.get('title', '')} {context.get('body', '')}".lower()
             score = sum(4 if term in haystack else 0 for term in query_terms)
             score += sum(haystack.count(term) for term in query_terms)
@@ -1360,9 +1477,14 @@ class KnowledgeEngine:
                 {
                     "note_id": context["id"],
                     "document_id": context.get("document_id"),
+                    "document_source_id": context.get("document_id"),
                     "title": context.get("title", context["id"]),
                     "snippet": str(context.get("body") or "")[:260],
                     "source": "wiki-vault",
+                    "viewer_path": f"/cywell/llm-wiki?customer_id={customer_id}&note_id={context['id']}",
+                    "source_scope": "wiki_vault",
+                    "source_collection": customer_id,
+                    "section_path": [],
                 }
             )
         answer = "관련 고객 데이터가 아직 적재되지 않았습니다."
@@ -1391,6 +1513,10 @@ class KnowledgeEngine:
                 "matches": len(scored),
                 "vault_matches": len(vault_scored),
                 "wiki_vault_context_attached": bool(vault["selected_context"]),
+                "active_document_id": active_document_id,
+                "enabled_upload_document_ids": sorted(enabled_document_ids),
+                "enabled_source_scopes": sorted(enabled_source_scopes),
+                "restrict_uploaded_sources": restrict_uploaded_sources,
             },
         }
         if self._pbs_shadow_enabled():
@@ -1403,6 +1529,14 @@ class KnowledgeEngine:
             return self._pbs_reports_payload(self.pbs.upload_reports(resolved_owner_id, customer_id=customer_id), customer_id=customer_id, owner_id=resolved_owner_id)
         store = self.load_store()
         documents = [doc for doc in store["documents"] if self._in_scope(doc, customer_id=customer_id, owner_id=resolved_owner_id)]
+        chunks_by_document: dict[str, list[dict[str, Any]]] = {}
+        for chunk in store["chunks"]:
+            if self._in_scope(chunk, customer_id=customer_id, owner_id=resolved_owner_id):
+                chunks_by_document.setdefault(str(chunk.get("document_id") or ""), []).append(chunk)
+        items = [
+            self._upload_report_item(document, chunks_by_document.get(str(document.get("id") or ""), []))
+            for document in documents
+        ]
         events = [
             event
             for event in store["events"]
@@ -1414,9 +1548,13 @@ class KnowledgeEngine:
             "customer_id": customer_id,
             "owner_mode": self.owner_mode,
             "documents": documents,
+            "items": items,
             "events": events[-50:],
             "counts": {
                 "documents": len(documents),
+                "items": len(items),
+                "chunks": sum(int(item.get("chunk_count") or 0) for item in items),
+                "ready_for_chat": len([item for item in items if item.get("ready_for_chat") is True]),
                 "events": len(events),
             },
         }
@@ -1596,6 +1734,10 @@ class KnowledgeEngine:
             if "topology" in body:
                 body.setdefault("pbs_topology", body.get("topology"))
             body["topology"] = self._topology_from_pbs_vault(pbs_result.body if pbs_result.ok else {}, customer_id=customer_id, owner_id=resolved_owner_id)
+            body["graph"] = {
+                "nodes": body["topology"].get("nodes", []),
+                "edges": body["topology"].get("edges", []),
+            }
             return body
         store = self.load_store()
         vault = self._local_vault_graph(customer_id=customer_id, owner_id=resolved_owner_id, store=store)
@@ -1613,6 +1755,7 @@ class KnowledgeEngine:
             "selected_context": vault["selected_context"],
             "selected_uploads": vault["selected_uploads"],
             "topology": vault["topology"],
+            "graph": vault["graph"],
         }
         if self._pbs_shadow_enabled():
             return self._with_shadow(result, "wiki_vault", self.pbs.wiki_vault({"customer_id": customer_id}, resolved_owner_id))

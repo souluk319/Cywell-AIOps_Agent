@@ -244,7 +244,7 @@ Delivered:
   - node inspector
   - relation grid
   - direct RAG action from selected node
-  - graph integrity checks so returned edges must point at returned nodes
+  - graph normalization checks that create explicit fallback endpoint nodes when PBS edges reference missing endpoints
 
 Not yet PBS parity:
 
@@ -346,8 +346,8 @@ v0.1.4 currently proves:
 - owner-scoped customer workspace isolation plus live ConfigMap-backed customer ACL enforcement before private knowledge requests are proxied
 - rejection of conflicting top-level and nested customer IDs before indexing or outbound PBS calls
 - CRC deployment of gateway, console plugin, knowledge engine, and Postgres
-- topology dashboard visual design in the live console plugin bundle
-- topology KPI strip, PBS-rich node tones, type filters, Signal leaders, relation grid, selected-node inspector, source/viewer metadata, and node-to-RAG action in the live console plugin bundle
+- compact Cywell topology dashboard visual design in the live console plugin bundle
+- topology KPI strip, PBS-rich node tones, type filters, Signal leaders, relation grid, selected-node inspector, source/viewer metadata, selected-source RAG action, and fallback endpoint handling in the live console plugin bundle
 - PBS-compatible upload and URL ingest payload metadata
 - PBS-compatible local Postgres schema and ingest shadow rows for document sources, parsed documents, and chunks
 - local Wiki Vault graph extraction for `[[wikilinks]]`, `#tags`, URLs, concepts, relations, backlinks, selected context/uploads, and RAG citations from vault-only context
@@ -358,7 +358,7 @@ v0.1.4 currently proves:
 - PBS live outbound customer scope verification for reports, wiki status, and wiki vault
 - PBS live response scope verification so mismatched customer IDs or PBS owner/user hashes are blocked before report rows, wiki vault payloads, or topology graphs reach CAS callers
 - rendered PBS shadow/live deployment overlays with HTTPS service-token transport, shadow optional token Secret reference, live required token Secret reference, live required Postgres Secret references, no dev owner/DB Secret material, release image tags, and restricted knowledge-engine egress to labeled PBS runtime pods on `8765`
-- rendered PBS live overlay with Gateway customer ACL required from `cas-knowledge-live-config/customer-access-json`; the default is an admin-all placeholder and target customer/group mapping is still an external cutover input
+- rendered PBS live overlay with Gateway customer ACL required from `cas-knowledge-live-config/customer-access-json`; the default wildcard placeholder fails strict preflight until target customer/group mapping is supplied
 - topology normalization across PBS `graph`, `topology.graph`, `links`, `relations`, `relationships`, `node_id`, `source_id`, and `target_id` variants without mixing wrapper and nested graph candidates
 - topology normalization preserves PBS summary counts, wikilinks, tags, entity/concept nodes, relation signals, degree/weight, selected context, and selected upload metadata
 - Knowledge Engine ingress isolation so only the CAS gateway can call scoped data APIs in-cluster

@@ -218,6 +218,8 @@ function topologyResponse(customerId) {
               kind: "wiki-note",
               title: "ACME Router Wiki",
               summary: "LLM Wiki note compiled from ACME Router Evidence.",
+              document_source_id: "doc-router",
+              source_scope: "user_upload",
               revision: 4,
               previous_revision: 3,
               provenance: { source_document_id: "doc-router", source: "wiki-loop" }
@@ -644,9 +646,15 @@ try {
       "console-topology-dom:node-rag",
       ragCall?.body?.customer_id === "acme-topology" &&
         String(ragCall?.body?.question ?? "").includes("ACME Router Wiki") &&
+        ragCall?.body?.active_document_id === "doc-router" &&
+        Array.isArray(ragCall?.body?.enabled_upload_document_ids) &&
+        ragCall.body.enabled_upload_document_ids.includes("doc-router") &&
+        ragCall?.body?.restrict_uploaded_sources === true &&
+        Array.isArray(ragCall?.body?.enabled_source_scopes) &&
+        ragCall.body.enabled_source_scopes.includes("user_upload") &&
         resultText.includes("RAG answer for ACME Router Wiki") &&
         (await page.locator('[data-test="cas-topology-dashboard"]').count()) === 1,
-      "topology inspector RAG action posts a node-derived question while preserving the dashboard",
+      "topology inspector RAG action posts a node-derived source-scoped question while preserving the dashboard",
       JSON.stringify({ ragCall, resultText })
     );
     await Promise.all([

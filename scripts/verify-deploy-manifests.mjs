@@ -659,6 +659,32 @@ for (const file of files) {
         "PBS live response bodies are checked against requested customer/owner scope",
         "PBS live adapter must reject response bodies outside the requested customer/owner scope"
       );
+      expect(
+        "knowledge-engine:pbs-style-upload-reports",
+        text.includes("def _upload_report_item") &&
+          text.includes("graph_summary") &&
+          text.includes("chunk_previews") &&
+          text.includes("ready_for_chat") &&
+          text.includes("basic_index_ready") &&
+          text.includes('"items": items') &&
+          text.includes('"graph": {') &&
+          text.includes("viewer_path") &&
+          text.includes("source_scope"),
+        "local upload reports and Wiki Vault selected uploads expose PBS-style graph summary, graph alias, viewer paths, and chunk previews",
+        "local upload reports and Wiki Vault must preserve PBS-style items, graph_summary, graph alias, viewer_path, source_scope, chunk_previews, and readiness fields"
+      );
+      expect(
+        "knowledge-engine:rag-source-scope",
+        text.includes("active_document_id") &&
+          text.includes("enabled_upload_document_ids") &&
+          text.includes("enabled_source_scopes") &&
+          text.includes("restrict_uploaded_sources") &&
+          text.includes("document_source_id") &&
+          text.includes("viewer_path") &&
+          text.includes("source_collection"),
+        "local RAG honors selected upload/source scope and emits source lineage citations",
+        "local RAG must preserve active document/source filters and citation lineage fields"
+      );
     }
     if (file.includes("apps/gateway/src/server.mjs")) {
       expect(
@@ -1141,10 +1167,13 @@ for (const file of files) {
       );
       expect(
         "release-crc:verified-evidence-bound",
-        text.includes("CAS_RELEASE_EVIDENCE") &&
+          text.includes("CAS_RELEASE_EVIDENCE") &&
           text.includes("cas-crc-deployment.json") &&
           text.includes("CAS_RELEASE_ALLOW_STALE_EVIDENCE") &&
           text.includes("CAS_RELEASE_EVIDENCE_MAX_AGE_HOURS") &&
+          text.includes("sourceEvidenceHead") &&
+          text.includes("sourceEvidenceCheckedAt") &&
+          text.includes("staleEvidenceAllowed") &&
           text.includes("verifiedImages") &&
           text.includes("assertSourceMatchesDeploymentEvidence") &&
           text.includes("current head is") &&
@@ -1243,6 +1272,10 @@ for (const file of files) {
         text.includes("cluster:applied-pbs-config-values") &&
         text.includes("cluster:applied-live-customer-acl") &&
         text.includes("preflight:live-customer-acl-concrete") &&
+        text.includes('!clean.includes("*")') &&
+        text.includes("sourceEvidenceHead") &&
+        text.includes("staleEvidenceAllowed") &&
+        text.includes("non-stale-source") &&
         text.includes("image.dockerImageReference") &&
         text.includes("digestPinnedImageReference") &&
         text.includes("CAS_RELEASE_IMAGES_EVIDENCE") &&

@@ -40,11 +40,13 @@ type TopologyNode = {
   entity_kind?: string;
   source_kind?: string;
   source_url?: string;
+  source_scope?: string;
   ready_for_chat?: boolean;
   basic_index_ready?: boolean;
   revision?: number;
   previous_revision?: number;
   document_id?: string;
+  document_source_id?: string;
   source_document_id?: string;
   updated_at?: string | number;
   metadata?: Record<string, unknown>;
@@ -861,11 +863,13 @@ function topologyPayload(value: ActionResult | null): TopologyPayload | null {
         entity_kind: node.entity_kind ? String(node.entity_kind) : undefined,
         source_kind: node.source_kind ? String(node.source_kind) : undefined,
         source_url: node.source_url ? String(node.source_url) : undefined,
+        source_scope: node.source_scope ? String(node.source_scope) : undefined,
         ready_for_chat: typeof node.ready_for_chat === "boolean" ? node.ready_for_chat : undefined,
         basic_index_ready: typeof node.basic_index_ready === "boolean" ? node.basic_index_ready : undefined,
         revision: Number.isFinite(Number(node.revision)) ? Number(node.revision) : undefined,
         previous_revision: Number.isFinite(Number(node.previous_revision)) ? Number(node.previous_revision) : undefined,
         document_id: node.document_id ? String(node.document_id) : undefined,
+        document_source_id: node.document_source_id ? String(node.document_source_id) : undefined,
         source_document_id: sourceDocumentId ? String(sourceDocumentId) : undefined,
         updated_at: typeof node.updated_at === "string" || typeof node.updated_at === "number" ? node.updated_at : undefined,
         metadata: metadata ?? undefined,
@@ -1596,13 +1600,25 @@ export default function CywellKnowledgeRoute() {
   const askAboutTopologyNode = React.useCallback(
     (node: TopologyNode) => {
       const nextQuestion = `${node.label} 노드와 연결된 운영 증적과 원인은?`;
+      const activeDocumentId =
+        node.document_source_id ||
+        node.source_document_id ||
+        node.document_id ||
+        (nodeTone(node.type) === "document" ? node.id : "");
       setQuestion(nextQuestion);
       void runAction(() =>
         requestJson("/api/knowledge/rag/query", {
           method: "POST",
           body: JSON.stringify({
             customer_id: customerId,
-            question: nextQuestion
+            question: nextQuestion,
+            topology_node_id: node.id,
+            topology_node_type: node.type,
+            active_document_id: activeDocumentId || undefined,
+            document_source_id: activeDocumentId || undefined,
+            enabled_upload_document_ids: activeDocumentId ? [activeDocumentId] : undefined,
+            enabled_source_scopes: node.source_scope ? [node.source_scope] : undefined,
+            restrict_uploaded_sources: Boolean(activeDocumentId)
           })
         })
       );

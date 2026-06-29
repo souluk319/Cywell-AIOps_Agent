@@ -87,7 +87,8 @@ function loadDeploymentEvidence() {
   }
   pass("release:evidence:crc-deployment", `loaded PASS CRC deployment evidence from ${releaseEvidencePath}`, {
     evidenceCheckedAt: evidence.checkedAt,
-    evidenceHead: evidence.head
+    evidenceHead: evidence.head,
+    staleEvidenceAllowed: allowStaleEvidence
   });
   return evidence;
 }
@@ -260,6 +261,10 @@ try {
         namespace,
         releaseTag,
         releaseEvidencePath,
+        sourceEvidencePath: releaseEvidencePath,
+        sourceEvidenceHead: deploymentEvidence?.head ?? "",
+        sourceEvidenceCheckedAt: deploymentEvidence?.checkedAt ?? "",
+        staleEvidenceAllowed: allowStaleEvidence,
         branch: currentGitBranch(),
         head: currentGitHead(),
         forceRelease,
@@ -284,6 +289,10 @@ try {
         namespace,
         releaseTag,
         releaseEvidencePath,
+        sourceEvidencePath: releaseEvidencePath,
+        sourceEvidenceHead: deploymentEvidence?.head ?? "",
+        sourceEvidenceCheckedAt: deploymentEvidence?.checkedAt ?? "",
+        staleEvidenceAllowed: allowStaleEvidence,
         branch: (() => {
           try {
             return currentGitBranch();
