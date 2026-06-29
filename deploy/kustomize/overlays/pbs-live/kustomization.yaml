@@ -17,9 +17,11 @@ configMapGenerator:
     namespace: cywell-ai-sentinel
     literals:
       - service-owner=cas-pbs-live
+      - customer-access-json={"groups":{"cywell-knowledge-admins":["*"]}}
 generatorOptions:
   disableNameSuffixHash: true
 patches:
   - path: delete-dev-knowledge-env-patch.yaml
+  - path: gateway-customer-access-live-patch.yaml
   - path: knowledge-engine-pbs-live-patch.yaml
   - path: knowledge-postgres-live-secretrefs-patch.yaml

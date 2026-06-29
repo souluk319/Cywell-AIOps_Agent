@@ -32,6 +32,9 @@ These values must come from the target environment. Do not commit any secret val
   - `CAS_PBS_BEARER_TOKEN`, `CAS_PBS_API_KEY`, or `CAS_PBS_BEARER_TOKEN_FILE`
 - PBS bearer token material for:
   - `cas-pbs-auth/bearer-token`
+- Gateway customer workspace ACL JSON for `cas-knowledge-live-config/customer-access-json`.
+  - Default render grants `cywell-knowledge-admins` access to all customers as an admin placeholder.
+  - Production cutover must replace or approve this with the target mapping of OpenShift users/groups/namespaces to customer IDs.
 - Live Postgres credentials for:
   - `cas-knowledge-postgres-live/database`
   - `cas-knowledge-postgres-live/username`
@@ -75,6 +78,24 @@ oc apply -f .\test-results\cas-knowledge-postgres-live.secret.yaml
 
 If those Secrets already exist, compare keys and rotation plan before applying the reviewed Secret manifests.
 
+## Customer ACL Template
+
+Review and replace the live ConfigMap customer ACL before applying `pbs-live`. This value is not secret, but it controls customer data authorization and must be reviewed like release configuration.
+
+```powershell
+$customerAccessJson = '{"groups":{"cywell-knowledge-admins":["*"],"customer-a-ops":["customer-a"],"customer-b-ops":["customer-b"]}}'
+
+oc create configmap cas-knowledge-live-config `
+  -n cywell-ai-sentinel `
+  --from-literal=service-owner="$env:CAS_KNOWLEDGE_SERVICE_OWNER" `
+  --from-literal=customer-access-json="$customerAccessJson" `
+  --dry-run=client -o yaml > .\test-results\cas-knowledge-live-config.configmap.yaml
+
+oc diff -f .\test-results\cas-knowledge-live-config.configmap.yaml
+```
+
+Do not proceed if the reviewed policy grants `*` outside an approved admin group.
+
 ## Pre-Apply Gates
 
 Run these before applying live manifests:
@@ -92,6 +113,7 @@ Required result:
 - `verify:deploy:manifests` passes.
 - `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags. If `v0.1.4` tags already exist and must intentionally move, rerun as `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` and capture the old/new image evidence.
 - `verify:pbs:preflight:live:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
+- `verify:pbs:preflight:live:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
 
 Stop immediately if any gate fails.
 
@@ -135,6 +157,8 @@ Required result:
 - PBS egress policy is present and scoped exactly to DNS, Postgres, and labeled PBS runtime pods on port `8765`.
 - PBS service-token auth uses HTTPS/mTLS transport; plain HTTP with bearer token is not accepted.
 - Knowledge Engine applied env includes PBS config refs, required runtime/corpus readiness gates, HMAC Secret refs, and live Secret refs.
+- Gateway applied env enables customer workspace ACL and reads `CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON` from `cas-knowledge-live-config/customer-access-json`.
+- Applied ingress NetworkPolicy union for knowledge-engine pods allows only Gateway pods on TCP `8080`.
 - Upload -> RAG -> wiki vault -> topology lineage passes through the Gateway.
 - Direct console-plugin pod access to `cas-knowledge-engine` remains blocked.
 

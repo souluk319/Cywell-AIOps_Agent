@@ -21,9 +21,10 @@ function envBool(name, defaultValue = false) {
 
 const cutover = process.argv.includes("--cutover") || envBool("CAS_PBS_LIVE_CUTOVER");
 const clusterSmoke = process.argv.includes("--cluster") || envBool("CAS_PBS_LIVE_CLUSTER_SMOKE");
-const readOnlyException = process.argv.includes("--read-only-exception") || envBool("CAS_PBS_LIVE_READ_ONLY_EXCEPTION");
+const requestedReadOnlyException = process.argv.includes("--read-only-exception") || envBool("CAS_PBS_LIVE_READ_ONLY_EXCEPTION");
+const readOnlyException = requestedReadOnlyException && !cutover && !clusterSmoke;
 const requireLive = cutover || clusterSmoke || envBool("CAS_PBS_LIVE_REQUIRED");
-const writeSmoke = (cutover && !readOnlyException) || envBool("CAS_PBS_LIVE_WRITE_SMOKE");
+const writeSmoke = cutover || envBool("CAS_PBS_LIVE_WRITE_SMOKE");
 const requireRuntimeReady = envBool("CAS_PBS_LIVE_REQUIRE_RUNTIME_READY", true);
 const requireCorpusReady = envBool("CAS_PBS_LIVE_REQUIRE_CORPUS_READY", true);
 const evidenceMode = clusterSmoke ? "cluster-cutover" : cutover ? "local-cutover" : requireLive ? "required-diagnostic" : "diagnostic";
@@ -49,6 +50,10 @@ function fail(id, detail) {
 function expect(id, condition, passDetail, failDetail = passDetail) {
   if (condition) pass(id, passDetail);
   else fail(id, failDetail);
+}
+
+if (requestedReadOnlyException && (cutover || clusterSmoke)) {
+  fail("pbs-live:read-only-exception-forbidden", "cutover and cluster release smoke require write lineage; read-only exception is diagnostic-only");
 }
 
 function parseJson(text) {
@@ -530,7 +535,7 @@ async function runClusterSmoke() {
   );
   if (!writeSmoke) {
     if (cutover && !readOnlyException) {
-      fail("pbs-live:cluster-write-smoke-required", "cluster cutover smoke requires write smoke unless CAS_PBS_LIVE_READ_ONLY_EXCEPTION=true");
+      fail("pbs-live:cluster-write-smoke-required", "cluster cutover smoke requires write lineage");
     } else {
       skip("pbs-live:cluster-write-smoke", "CAS_PBS_LIVE_WRITE_SMOKE is not true; cluster upload/RAG/wiki write smoke skipped");
     }
@@ -592,7 +597,7 @@ async function runClusterSmoke() {
     const directBody = parseLastJsonLine(directCheck.stdout);
     expect(
       "pbs-live:cluster-direct-engine-blocked",
-      directCheck.status === 0 && directBody?.status !== 200,
+      directCheck.status === 0 && typeof directBody?.blocked === "string",
       "console-plugin pod cannot directly reach knowledge-engine; gateway is the in-cluster ingress path",
       directCheck.stderr || directCheck.stdout
     );
@@ -780,7 +785,7 @@ try {
 
   if (!writeSmoke) {
     if (cutover && !readOnlyException) {
-      fail("pbs-live:write-smoke-required", "cutover smoke requires write smoke unless CAS_PBS_LIVE_READ_ONLY_EXCEPTION=true");
+      fail("pbs-live:write-smoke-required", "cutover smoke requires write lineage");
     } else {
       skip("pbs-live:write-smoke", "CAS_PBS_LIVE_WRITE_SMOKE is not true; upload/RAG/wiki write smoke skipped");
     }

@@ -9,10 +9,10 @@ This summary captures the current v0.1.4 branch verification state for the Cywel
 | Command | Result | Notes |
 | --- | --- | --- |
 | `npm run verify` | PASS | Full local gate including contracts, gateway, knowledge engine, brain, OpenShift evidence, console build, browser topology DOM, console integration, CRC connection preview, and manifest verification |
-| `npm run verify:knowledge-engine` | PASS, 72 checks | Includes Gateway owner verification, signed internal owner headers, internal bearer/header stripping, public health/capabilities sanitization, unsafe upload/URL ingest rejection, PBS shadow/live adapter contracts, PBS live response scope mismatch rejection, topology provenance, orphan endpoint topology normalization, and single-candidate PBS graph normalization |
+| `npm run verify:knowledge-engine` | PASS, 75 checks | Includes Gateway owner verification, signed internal owner headers, ConfigMap-driven customer workspace ACL behavior, internal bearer/header stripping, public health/capabilities sanitization, unsafe upload/URL ingest rejection, PBS shadow/live adapter contracts, PBS live response scope mismatch rejection, topology provenance, orphan endpoint topology normalization, and single-candidate PBS graph normalization |
 | `npm run verify:console:topology-dom` | PASS, 27 checks | Browser-required smoke with topology auto-load, empty/error reload stale-data protection, filter-scoped node index, orphan edge fallback nodes, mixed-scope graph selection, late-response stale-data protection, dense 28-node searchable index, and 1024px/390px overflow/overlap checks |
 | `npm run verify:console:integration` | PASS, 68 checks | Includes static app `innerHTML` rejection, structural `/cywell/topology` manifest routing/navigation, topology auto-load, and built plugin route/bundle checks |
-| `npm run verify:deploy:manifests` | PASS, 243 checks | Includes base/shadow/live/CRC render checks, HMAC Secret refs, no tracked dev DB Secret, pbs-live Postgres release image pinning, release image promotion force gate coverage, explicit strict shadow preflight script coverage, HTTPS PBS service-token transport, PBS live response scope guard coverage, and direct console script build prerequisites |
+| `npm run verify:deploy:manifests` | PASS, 252 checks | Includes base/shadow/live/CRC render checks, HMAC Secret refs, no tracked dev DB Secret, pbs-live Gateway customer ACL config, pbs-live Postgres release image pinning, release image promotion force gate coverage, explicit strict shadow preflight script coverage, HTTPS PBS service-token transport, PBS live response scope guard coverage, and direct console script build prerequisites |
 
 Current hardening additions after the initial summary:
 
@@ -33,6 +33,9 @@ Current hardening additions after the initial summary:
 - PBS-live upload policy now runs before outbound PBS calls, and verifier asserts rejected live uploads create no PBS request.
 - PBS-live responses are checked against the requested customer ID and owner/PBS user hash before CAS exposes report rows, wiki vault payloads, or topology graphs.
 - PBS service-token auth now fails closed without token material and rejects non-local plain HTTP transport; rendered pbs-shadow/live default to HTTPS.
+- Gateway can require customer workspace ACL before private knowledge proxying; live mode reads `CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON` from `cas-knowledge-live-config/customer-access-json`, rejects unmapped customers with `403`, and rejects conflicting nested `source_metadata.customer_id` with `400`.
+- Strict live preflight checks the live customer ACL env wiring and confirms all applied ingress NetworkPolicies selecting knowledge-engine pods only allow Gateway pods on TCP `8080`.
+- PBS live release smoke no longer permits read-only exception bypass for cutover/release checks, and direct-engine block verification requires an actual in-cluster blocked result instead of accepting any non-200 response.
 - Preflight and live-smoke evidence artifacts are mode-specific, so shadow, live preapply, live applied, local cutover, and cluster cutover runs do not overwrite each other.
 
 Clean checkout reproduction:
@@ -68,7 +71,7 @@ test-results/cas-pbs-preflight-pbs-live-preapply-cluster-required-secrets.json
 | Command | Result | Blocking Reason |
 | --- | --- | --- |
 | `npm run verify:pbs:cutover` | FAIL expected | `CAS_PBS_BASE_URL` is not configured in the local shell |
-| `npm run verify:pbs:preflight:live:preapply` | FAIL expected, 35 PASS / 7 FAIL | Render/config/egress/API checks pass; service-token transport is HTTPS, `v0.1.4` release ImageStreamTags, resolved image references, digest-pinned Postgres release tag, and pbs-live Postgres image pinning now pass. Current CRC still has no `playbookstudio` namespace/service, no `cas-pbs-auth`, no `cas-knowledge-postgres-live`, and still has the legacy `cas-knowledge-postgres` dev Secret |
+| `npm run verify:pbs:preflight:live:preapply` | FAIL expected, 37 PASS / 7 FAIL | Render/config/egress/API checks pass; service-token transport is HTTPS, pbs-live Gateway customer ACL is wired to the live ConfigMap, `v0.1.4` release ImageStreamTags, resolved image references, digest-pinned Postgres release tag, and pbs-live Postgres image pinning now pass. Current CRC still has no `playbookstudio` namespace/service, no `cas-pbs-auth`, no `cas-knowledge-postgres-live`, and still has the legacy `cas-knowledge-postgres` dev Secret |
 | `npm run verify:release:pbs-live` | FAIL expected | Same live prerequisites as pre-apply plus actual pbs-live workload cutover and in-cluster Gateway/console-plugin smoke are not present yet |
 
 Diagnostic non-ready states:
@@ -85,6 +88,8 @@ Diagnostic non-ready states:
 CRC v0.1.4 dev deployment is verified and local `v0.1.4` release ImageStreamTags exist. Production PBS live cutover is not complete until the external HTTPS/mTLS PBS runtime, live Secrets, live overlay, PBS egress policy, live DB credential rotation/fresh PVC decision, runtime/corpus readiness, and `npm run verify:release:pbs-live` success are present.
 
 The current CRC cluster already passes the Gateway Kubernetes API egress check for SelfSubjectReview/OpenShift evidence through the CRC overlay. Non-CRC live clusters still need their own cluster-specific Kubernetes API egress, because standard Kubernetes NetworkPolicy cannot allow `kubernetes.default.svc` by Service name.
+
+The pbs-live overlay enforces Gateway customer workspace ACL through `cas-knowledge-live-config/customer-access-json`. The default rendered value is an admin-all placeholder for `cywell-knowledge-admins`; production cutover must replace or review it with the real customer/group mapping before live apply.
 
 Operational checklist:
 

@@ -25,6 +25,8 @@ const ownerIdentityConfig = getOwnerIdentityConfig();
 const ownerIdentityCache = new Map();
 const maxRequestBytes = Number(process.env.CAS_MAX_REQUEST_BYTES ?? 25 * 1024 * 1024);
 const ownerHmacSecret = String(process.env.CAS_KNOWLEDGE_OWNER_HMAC_SECRET ?? "").trim();
+const customerAccessPolicy = loadCustomerAccessPolicy(process.env);
+const requireCustomerAccess = String(process.env.CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS ?? "false").toLowerCase() === "true";
 
 function loadTlsOptions() {
   if (!tlsCertFile || !tlsKeyFile) return undefined;
@@ -86,6 +88,88 @@ function routeMissing(response) {
 
 function publicKnowledgeRoute(pathname) {
   return pathname === "/api/knowledge/healthz" || pathname === "/api/knowledge/capabilities";
+}
+
+function loadCustomerAccessPolicy(env = process.env) {
+  const file = String(env.CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE ?? "").trim();
+  const raw = String(env.CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON ?? "").trim() || (file && existsSync(file) ? readFileSync(file, "utf8") : "");
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeCustomerList(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function customerPatternMatches(pattern, customerId) {
+  if (pattern === "*") return true;
+  if (pattern.endsWith("*")) return customerId.startsWith(pattern.slice(0, -1));
+  return pattern === customerId;
+}
+
+function customerListAllows(list, customerId) {
+  return normalizeCustomerList(list).some((pattern) => customerPatternMatches(pattern, customerId));
+}
+
+function customerIdsFromRequest(url, body) {
+  const ids = [];
+  const add = (value) => {
+    const text = String(value ?? "").trim();
+    if (text && !ids.includes(text)) ids.push(text);
+  };
+  const queryCustomer = url.searchParams.get("customer_id") || url.searchParams.get("customerId");
+  add(queryCustomer);
+  if (!body || body.length === 0) return ids.length ? ids : ["default"];
+  const parsed = parseJsonBuffer(body);
+  add(parsed.customer_id ?? parsed.customerId);
+  for (const key of ["source_metadata", "sourceMetadata", "metadata"]) {
+    if (parsed[key] && typeof parsed[key] === "object") add(parsed[key].customer_id ?? parsed[key].customerId);
+  }
+  return ids.length ? ids : ["default"];
+}
+
+function customerAccessAllowed(ownerResult, customerId) {
+  if (!customerAccessPolicy) return !requireCustomerAccess;
+  const owner = String(ownerResult?.owner ?? "");
+  const username = String(ownerResult?.username ?? "");
+  const groups = Array.isArray(ownerResult?.groups) ? ownerResult.groups.map((group) => String(group)) : [];
+  if (customerListAllows(customerAccessPolicy.default, customerId)) return true;
+  if (owner && customerListAllows(customerAccessPolicy.owners?.[owner], customerId)) return true;
+  if (username && customerListAllows(customerAccessPolicy.users?.[username], customerId)) return true;
+  return groups.some((group) => customerListAllows(customerAccessPolicy.groups?.[group], customerId));
+}
+
+function sendCustomerAccessFailure(response, ownerResult, customerId) {
+  sendJson(response, 403, {
+    code: "knowledge-customer-forbidden",
+    status: "error",
+    service: "cas-knowledge-facade",
+    owner_identity_provider: ownerResult?.provider ?? ownerIdentityConfig.mode,
+    customer_id: customerId,
+    reason: "verified owner is not allowed to access the requested customer workspace"
+  });
+}
+
+function sendCustomerMismatchFailure(response, customerIds) {
+  sendJson(response, 400, {
+    code: "knowledge-customer-mismatch",
+    status: "error",
+    service: "cas-knowledge-facade",
+    customer_ids: customerIds,
+    reason: "knowledge request contains conflicting customer workspace identifiers"
+  });
 }
 
 function signedOwnerHeaders(scopedOwner) {
@@ -224,6 +308,16 @@ async function proxyKnowledgeRequest(request, response, url) {
       return;
     }
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await readBody(request);
+    const customerIds = customerIdsFromRequest(url, body);
+    if (customerIds.length > 1) {
+      sendCustomerMismatchFailure(response, customerIds);
+      return;
+    }
+    const customerId = customerIds[0];
+    if (!customerAccessAllowed(ownerResult, customerId)) {
+      sendCustomerAccessFailure(response, ownerResult, customerId);
+      return;
+    }
     const scopedOwner = ownerResult.owner ?? "";
     const ownerHeaders = signedOwnerHeaders(scopedOwner);
     if (scopedOwner && !ownerHeaders) {

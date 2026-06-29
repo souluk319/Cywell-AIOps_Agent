@@ -279,6 +279,7 @@ Delivered:
   - required `cas-pbs-auth/bearer-token` Secret reference for `CAS_PBS_BEARER_TOKEN` in live mode
   - live required `cas-knowledge-postgres-live` Secret references for Knowledge Engine and Postgres credentials
   - live `cas-knowledge-live-config/service-owner` instead of inherited CRC owner defaults
+  - live `cas-knowledge-live-config/customer-access-json` drives Gateway customer workspace ACL
   - live render removes inherited dev Postgres Secret material and uses `v0.1.4` release image tags instead of `:dev`
   - knowledge-engine egress limited to DNS, Postgres, and labeled PBS runtime pods on namespace `playbookstudio`, port `8765`
   - PBS service-token transport defaults to HTTPS, and the PBS client fails closed for missing token material or non-local HTTP token transport unless explicitly overridden for a lab
@@ -294,12 +295,14 @@ Delivered:
 - `npm run verify:release:pbs-live` is the non-skipping release gate and runs strict live preflight plus in-cluster cutover smoke
 - `npm run verify:pbs:cutover` is a local write smoke gate and fails unless `CAS_PBS_BASE_URL` and PBS auth material are configured
 - live PBS route failures propagate as non-2xx CAS HTTP status with PBS trace evidence
+- Gateway can require a ConfigMap-backed customer workspace ACL before proxying private knowledge requests; live mode enables this and verifies mismatched nested `source_metadata.customer_id` is rejected before reaching Knowledge Engine
+- strict PBS preflight checks that all applied ingress NetworkPolicies selecting knowledge-engine pods only allow Gateway pods on TCP `8080`
 - `deploy:crc` starts OpenShift binary builds without `--follow --wait`, follows build logs separately, and polls final build phase to avoid cancellation after slow uploads
 
 Still required:
 
 - production secret management
-- production customer authorization policy that maps verified OpenShift users/groups/namespaces to allowed customer workspaces; v0.1.4 currently treats `customer_id` as an owner-namespaced workspace key
+- production customer authorization policy content that maps verified OpenShift users/groups/namespaces to allowed customer workspaces; the live overlay enforces the ConfigMap-backed ACL, but the real customer/group mapping must come from the target environment
 - migration rollback plan
 - backup/restore plan
 - exact PBS migration lineage
@@ -337,7 +340,8 @@ v0.1.4 currently proves:
 
 - Cywell menu and route integration
 - working customer data/RAG/wiki/topology API path
-- owner-scoped customer workspace isolation; it does not yet prove a global customer ACL across OpenShift users/groups
+- owner-scoped customer workspace isolation plus live ConfigMap-backed customer ACL enforcement before private knowledge requests are proxied
+- rejection of conflicting top-level and nested customer IDs before indexing or outbound PBS calls
 - CRC deployment of gateway, console plugin, knowledge engine, and Postgres
 - topology dashboard visual design in the live console plugin bundle
 - topology KPI strip, relation grid, selected-node inspector, and node-to-RAG action in the live console plugin bundle
@@ -349,6 +353,7 @@ v0.1.4 currently proves:
 - PBS live outbound customer scope verification for reports, wiki status, and wiki vault
 - PBS live response scope verification so mismatched customer IDs or PBS owner/user hashes are blocked before report rows, wiki vault payloads, or topology graphs reach CAS callers
 - rendered PBS shadow/live deployment overlays with HTTPS service-token transport, shadow optional token Secret reference, live required token Secret reference, live required Postgres Secret references, no dev owner/DB Secret material, release image tags, and restricted knowledge-engine egress to labeled PBS runtime pods on `8765`
+- rendered PBS live overlay with Gateway customer ACL required from `cas-knowledge-live-config/customer-access-json`; the default is an admin-all placeholder and target customer/group mapping is still an external cutover input
 - topology normalization across PBS `graph`, `topology.graph`, `links`, `relations`, `relationships`, `node_id`, `source_id`, and `target_id` variants without mixing wrapper and nested graph candidates
 - Knowledge Engine ingress isolation so only the CAS gateway can call scoped data APIs in-cluster
 - optional real PBS live smoke verifier with skip/required modes and strict DB/pgvector/corpus readiness checks

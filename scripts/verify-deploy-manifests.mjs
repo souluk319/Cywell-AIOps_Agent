@@ -23,6 +23,7 @@ const files = [
   "deploy/kustomize/overlays/pbs-shadow/pbs-egress-networkpolicy.yaml",
   "deploy/kustomize/overlays/pbs-live/kustomization.yaml",
   "deploy/kustomize/overlays/pbs-live/delete-dev-knowledge-env-patch.yaml",
+  "deploy/kustomize/overlays/pbs-live/gateway-customer-access-live-patch.yaml",
   "deploy/kustomize/overlays/pbs-live/knowledge-engine-pbs-live-patch.yaml",
   "deploy/kustomize/overlays/pbs-live/knowledge-postgres-live-secretrefs-patch.yaml",
   "package.json",
@@ -30,6 +31,7 @@ const files = [
   "scripts/promote-crc-release-images.mjs",
   "scripts/verify-pbs-live-smoke.mjs",
   "scripts/verify-pbs-preflight.mjs",
+  "apps/gateway/src/server.mjs",
   "apps/knowledge-engine/src/cas_knowledge_engine/engine.py",
   "apps/knowledge-engine/src/cas_knowledge_engine/pbs_client.py",
   "apps/knowledge-engine/src/cas_knowledge_engine/selftest.py",
@@ -340,6 +342,11 @@ function runRenderedChecks() {
     "base gateway signs owner headers with internal Secret material"
   );
   expect(
+    "render:base:gateway-customer-acl-dev-mode",
+    envValue(baseGatewayDeployment, "CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS") === "false",
+    "base/CRC gateway keeps customer ACL disabled for owner-scoped dev mode"
+  );
+  expect(
     "render:base:openshift-api-tls",
     envValue(baseGatewayDeployment, "CAS_OPENSHIFT_API_TLS_INSECURE") === "false" &&
       envValue(baseGatewayDeployment, "CAS_OPENSHIFT_API_CA_FILE") === "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
@@ -481,6 +488,15 @@ function runRenderedChecks() {
   );
 
   const liveDeployment = renderedDoc(live, "Deployment", "cas-knowledge-engine");
+  const liveGatewayDeployment = renderedDoc(live, "Deployment", "cas-gateway");
+  expect("render:pbs-live:gateway-deployment", Boolean(liveGatewayDeployment), "PBS live renders cas-gateway Deployment");
+  expect(
+    "render:pbs-live:gateway-customer-acl-required",
+    envValue(liveGatewayDeployment, "CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS") === "true" &&
+      envFromConfig(liveGatewayDeployment, "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON", "cas-knowledge-live-config", "customer-access-json") &&
+      live.includes("cywell-knowledge-admins"),
+    "PBS live gateway requires configured customer workspace ACL"
+  );
   expect("render:pbs-live:knowledge-deployment", Boolean(liveDeployment), "PBS live renders cas-knowledge-engine Deployment");
   expect(
     "render:pbs-live:provider",
@@ -640,6 +656,19 @@ for (const file of files) {
           text.includes("_pbs_scoped_body"),
         "PBS live response bodies are checked against requested customer/owner scope",
         "PBS live adapter must reject response bodies outside the requested customer/owner scope"
+      );
+    }
+    if (file.includes("apps/gateway/src/server.mjs")) {
+      expect(
+        "gateway:customer-access-acl",
+        text.includes("CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON") &&
+          text.includes("CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS") &&
+          text.includes("knowledge-customer-forbidden") &&
+          text.includes("knowledge-customer-mismatch") &&
+          text.includes("source_metadata") &&
+          text.includes("customerAccessAllowed"),
+        "gateway enforces configured customer workspace ACL before proxying private knowledge requests",
+        "gateway must enforce configured customer workspace ACL before proxying private knowledge requests"
       );
     }
     if (file.includes("cas_knowledge_engine/pbs_client.py")) {
@@ -811,6 +840,8 @@ for (const file of files) {
         text.includes("knowledge-engine-pbs-live-patch.yaml") &&
         text.includes("newTag: v0.1.4") &&
         text.includes("cas-knowledge-live-config") &&
+        text.includes("customer-access-json") &&
+        text.includes("gateway-customer-access-live-patch.yaml") &&
         text.includes("delete-dev-knowledge-env-patch.yaml") &&
         !text.includes("delete-dev-postgres-secret.yaml") &&
         text.includes("knowledge-postgres-live-secretrefs-patch.yaml")
@@ -818,6 +849,21 @@ for (const file of files) {
         pass("pbs-live:kustomization", "PBS live overlay builds on PBS shadow overlay with release images and live config");
       } else {
         fail("pbs-live:kustomization", "PBS live overlay must build on PBS shadow overlay without stale dev Secret delete patches");
+      }
+    }
+    if (file.includes("gateway-customer-access-live-patch")) {
+      if (
+        text.includes("CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS") &&
+        text.includes('value: "true"') &&
+        text.includes("CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON") &&
+        text.includes("configMapKeyRef") &&
+        text.includes("cas-knowledge-live-config") &&
+        text.includes("customer-access-json") &&
+        text.includes("optional: false")
+      ) {
+        pass("pbs-live:gateway-customer-acl", "PBS live gateway requires customer access policy ConfigMap");
+      } else {
+        fail("pbs-live:gateway-customer-acl", "PBS live gateway customer access policy env refs missing");
       }
     }
     if (file.includes("delete-dev-knowledge-env-patch")) {
@@ -1070,6 +1116,13 @@ for (const file of files) {
         fail("pbs-live-smoke:cutover-mode", "PBS live smoke must support cutover mode with required write smoke and PBS auth material");
       }
       expect(
+        "pbs-live-smoke:no-readonly-release-bypass",
+        text.includes("requestedReadOnlyException") &&
+          text.includes("pbs-live:read-only-exception-forbidden") &&
+          text.includes("cutover and cluster release smoke require write lineage"),
+        "PBS live release smoke cannot bypass write lineage with read-only exception"
+      );
+      expect(
         "pbs-live-smoke:mode-specific-evidence",
         text.includes("evidenceMode") && text.includes("cas-pbs-live-smoke-${evidenceMode}.json"),
         "PBS live smoke writes mode-specific evidence artifacts"
@@ -1086,6 +1139,7 @@ for (const file of files) {
         text.includes("cluster-console-plugin-gateway-service") &&
         text.includes("cluster-write-lineage") &&
         text.includes("cluster-direct-engine-blocked") &&
+        text.includes("typeof directBody?.blocked") &&
         text.includes("appliedPbsEgressScoped") &&
         text.includes("serviceHost(")
       ) {
@@ -1100,6 +1154,11 @@ for (const file of files) {
       } else {
         fail("pbs-preflight:overlay-contract", "PBS preflight must check config, secret, and egress policy");
       }
+      expect(
+        "pbs-preflight:tls-insecure-disabled",
+        text.includes("preflight:tls-insecure-disabled") && text.includes('configValue(configMap, "tls-insecure") === "false"'),
+        "PBS preflight rejects tls-insecure=true regressions"
+      );
       if (text.includes("playbookstudio-runtime") && text.includes("port 8765")) {
         pass("pbs-preflight:runtime-service-contract", "PBS preflight checks runtime service and backend port");
       } else {
@@ -1114,6 +1173,8 @@ for (const file of files) {
         text.includes("service-token-transport") &&
         text.includes("appliedPbsEgressScoped") &&
         text.includes("appliedKnowledgeIngressScoped") &&
+        text.includes("appliedKnowledgeIngressUnionScoped") &&
+        text.includes("cluster:applied-knowledge-ingress-union-scoped") &&
         text.includes("liveDatabaseUrlUsesService") &&
         text.includes("image.dockerImageReference") &&
         text.includes("cluster:pbs-runtime-ready-pods") &&

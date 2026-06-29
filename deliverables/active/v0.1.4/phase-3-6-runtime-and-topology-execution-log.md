@@ -1,5 +1,26 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
+## Latest Update - Customer ACL and Live Gate Tightening
+
+Implemented after the live-readiness parallel audit pass:
+
+- Gateway private knowledge proxy now supports `CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS=true`.
+- Customer workspace ACL can be supplied through `CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON` or `CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE`.
+- Private knowledge requests are rejected before reaching Knowledge Engine when the verified owner/user/group is not allowed for the requested `customer_id`.
+- Conflicting customer scope across top-level request fields and nested `source_metadata`/`sourceMetadata`/`metadata` is rejected before indexing or outbound PBS calls.
+- pbs-live enables Gateway customer ACL and reads `CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON` from `cas-knowledge-live-config/customer-access-json`.
+- The default live ConfigMap value grants `cywell-knowledge-admins` all customers as an admin placeholder; target production clusters must replace or approve the real user/group/customer mapping.
+- Live smoke cutover/release mode now forbids read-only exception bypass and requires write lineage.
+- Cluster direct-engine block verification now requires an actual blocked result from the in-cluster probe, not merely any non-200 response.
+- Strict live preflight now checks `CAS_PBS_TLS_INSECURE=false`, live Gateway customer ACL wiring, and the union of applied ingress NetworkPolicies selecting knowledge-engine pods.
+
+Current proof:
+
+- `node --check` passed for Gateway and changed verifier scripts.
+- `npm run verify:knowledge-engine`: PASS, 75 checks.
+- `npm run verify:deploy:manifests`: PASS, 252 checks.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL, `37 PASS / 7 FAIL`; failures remain external live prerequisites in the current CRC cluster.
+
 ## Latest Update - Internal Owner Signing, Secret Hygiene, and CRC Redeploy
 
 Implemented after the post-commit parallel audit pass:
@@ -165,7 +186,7 @@ Latest PBS preflight evidence:
 - `test-results/cas-pbs-preflight-pbs-shadow-diagnostic-local-optional-secrets.json`
 - `test-results/cas-pbs-preflight-pbs-live-preapply-cluster-required-secrets.json`
 - shadow diagnostic status: `PASS/WARN` in the local CRC environment because the real `playbookstudio` namespace/service and optional `cas-pbs-auth` Secret are absent
-- live preapply status: expected `FAIL`, `35 PASS / 7 FAIL`
+- live preapply status: expected `FAIL`, `37 PASS / 7 FAIL`
 - rendered live overlay checks pass for provider, ConfigMap env refs, required token Secret ref, live Postgres Secret refs, no literal Secret material, no dev defaults, HTTPS PBS service-token transport, PBS base URL shape, timeout/response bounds, labeled PBS egress, knowledge ingress, runtime readiness gate, corpus readiness gate, and disabled shadow writes
 - WARNs are expected in local CRC until the real `playbookstudio` namespace/service, required `cas-pbs-auth` Secret, required `cas-knowledge-postgres-live` Secret, and cleanup of legacy `cas-knowledge-postgres` Secret are handled
 
@@ -295,8 +316,8 @@ Implemented after the latest parallel review pass:
 
 Verified results at this step:
 
-- `npm run verify:knowledge-engine`: `PASS`, 72 checks
-- `npm run verify:deploy:manifests`: `PASS`, 243 checks
+- `npm run verify:knowledge-engine`: `PASS`, 75 checks
+- `npm run verify:deploy:manifests`: `PASS`, 252 checks
 
 Live cutover note:
 

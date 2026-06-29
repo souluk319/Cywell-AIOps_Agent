@@ -108,6 +108,10 @@ function signedOwnerHeaders(owner) {
   };
 }
 
+function tokenOwner(token) {
+  return `token-${createHash("sha256").update(token).digest("hex").slice(0, 16)}`;
+}
+
 function graphIntegrity(body) {
   const nodes = Array.isArray(body?.nodes) ? body.nodes : body?.topology && Array.isArray(body.topology.nodes) ? body.topology.nodes : [];
   const edges = Array.isArray(body?.edges) ? body.edges : body?.topology && Array.isArray(body.topology.edges) ? body.topology.edges : [];
@@ -620,7 +624,16 @@ try {
     CAS_KNOWLEDGE_OWNER_IDENTITY_MODE: "token-hash",
     CAS_KNOWLEDGE_ENGINE_URL: engineBase,
     CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000",
-    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret,
+    CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS: "true",
+    CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({
+      owners: {
+        [tokenOwner("verify-owner-a")]: ["verify"],
+        [tokenOwner("verify-owner-b")]: ["verify"],
+        [tokenOwner("verify-token-a")]: ["auth-scope", "shared-note-scope"],
+        [tokenOwner("verify-token-b")]: ["auth-scope", "shared-note-scope"]
+      }
+    })
   };
   spawnChild("node", ["apps/gateway/src/server.mjs"], gatewayEnv);
   const ownerHeaders = { authorization: "Bearer verify-owner-a" };
@@ -759,6 +772,24 @@ try {
       urlIngest.body.document?.metadata?.pbs_payload?.auto_compile_wiki === true,
     "gateway URL ingest records PBS wiki compile contract"
   );
+  const mismatchedCustomerUpload = await fetchJson(`${gatewayBase}/api/knowledge/uploads/ingest`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      filename: "mismatched-customer.txt",
+      content: "Nested customer metadata must not smuggle a different workspace.",
+      source_metadata: {
+        customer_id: "forbidden-customer"
+      }
+    })
+  });
+  expect(
+    "knowledge:customer-acl-blocks-mismatched-metadata",
+    mismatchedCustomerUpload.response.status === 400 && mismatchedCustomerUpload.body.code === "knowledge-customer-mismatch",
+    "gateway rejects conflicting top-level and nested customer workspace identifiers",
+    JSON.stringify(mismatchedCustomerUpload.body)
+  );
   const loopbackUrlIngest = await fetchJson(`${gatewayBase}/api/knowledge/uploads/url-ingest`, {
     method: "POST",
     headers: ownerHeaders,
@@ -819,6 +850,20 @@ try {
     "knowledge:owner-isolation",
     isolatedRag.response.status === 200 && Array.isArray(isolatedRag.body.citations) && isolatedRag.body.citations.length === 0,
     "gateway knowledge API isolates same customer_id by owner scope"
+  );
+  const forbiddenCustomerRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "forbidden-customer",
+      question: "router latency evidence"
+    })
+  });
+  expect(
+    "knowledge:customer-acl-denies-unmapped-customer",
+    forbiddenCustomerRag.response.status === 403 && forbiddenCustomerRag.body.code === "knowledge-customer-forbidden",
+    "gateway rejects verified owners when the requested customer workspace is not in their ACL",
+    JSON.stringify(forbiddenCustomerRag.body)
   );
   const noOwnerRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
     method: "POST",
@@ -938,7 +983,13 @@ try {
     CAS_KNOWLEDGE_OWNER_IDENTITY_CACHE_TTL_MS: "0",
     CAS_KNOWLEDGE_ENGINE_URL: engineBase,
     CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000",
-    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret,
+    CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS: "true",
+    CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({
+      users: {
+        "verified-user": ["verified-scope"]
+      }
+    })
   };
   spawnChild("node", ["apps/gateway/src/server.mjs"], verifiedGatewayEnv);
   const verifiedGatewayHealth = await waitForJson(`${verifiedGatewayBase}/api/knowledge/healthz`, ({ response, body }) => {
@@ -998,13 +1049,13 @@ try {
     verifiedUpload.response.status === 200 &&
       refreshedTokenRag.response.status === 200 &&
       refreshedCitations.length > 0 &&
-      differentUserRag.response.status === 200 &&
-      differentUserCitations.length === 0 &&
-      spoofedValidOtherRag.response.status === 200 &&
-      spoofedOtherCitations.length === 0 &&
+      differentUserRag.response.status === 403 &&
+      differentUserRag.body.code === "knowledge-customer-forbidden" &&
+      spoofedValidOtherRag.response.status === 403 &&
+      spoofedValidOtherRag.body.code === "knowledge-customer-forbidden" &&
       invalidVerifiedRag.response.status === 401 &&
       invalidVerifiedRag.body.code === "knowledge-owner-unverified",
-    "SelfSubjectReview gateway maps refreshed tokens to the same verified user, isolates other users, and rejects invalid/spoofed owners",
+    "SelfSubjectReview gateway maps refreshed tokens to the same verified user, denies other users by customer ACL, and rejects invalid/spoofed owners",
     JSON.stringify({ refreshedCitations, differentUserCitations, spoofedOtherCitations, invalid: invalidVerifiedRag.body })
   );
   expect(
@@ -1021,6 +1072,8 @@ try {
   );
 
   boundaryEngine = await startFakeKnowledgeBoundaryServer(boundaryEnginePort);
+  const boundaryUserToken = "boundary-user-token";
+  const expectedBoundaryOwner = tokenOwner(boundaryUserToken);
   const boundaryGatewayEnv = {
     ...process.env,
     HOST: "127.0.0.1",
@@ -1030,7 +1083,13 @@ try {
     CAS_KNOWLEDGE_OWNER_IDENTITY_MODE: "token-hash",
     CAS_KNOWLEDGE_ENGINE_URL: boundaryEngine.url,
     CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000",
-    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret,
+    CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS: "true",
+    CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({
+      owners: {
+        [expectedBoundaryOwner]: ["boundary"]
+      }
+    })
   };
   spawnChild("node", ["apps/gateway/src/server.mjs"], boundaryGatewayEnv);
   const boundaryHealth = await waitForJson(`${boundaryGatewayBase}/api/knowledge/healthz`, ({ response, body }) => {
@@ -1089,8 +1148,6 @@ try {
     JSON.stringify(publicCapabilitiesFailure.body)
   );
 
-  const boundaryUserToken = "boundary-user-token";
-  const expectedBoundaryOwner = `token-${createHash("sha256").update(boundaryUserToken).digest("hex").slice(0, 16)}`;
   const boundaryRag = await fetchJson(`${boundaryGatewayBase}/api/knowledge/rag/query`, {
     method: "POST",
     headers: {
@@ -1113,6 +1170,22 @@ try {
       boundaryPrivateRecord?.headers?.["x-cas-owner-signature"] === ownerSignature(ownerHmacSecret, expectedBoundaryOwner),
     "gateway strips user bearer/spoofed owner headers before the internal Knowledge Engine hop and injects only its signed derived owner",
     JSON.stringify(boundaryPrivateRecord?.headers ?? {})
+  );
+
+  const forbiddenBoundaryPrivateCountBefore = boundaryEngine.records.filter((record) => record.path === "/api/knowledge/rag/query").length;
+  const boundaryForbiddenCustomer = await fetchJson(`${boundaryGatewayBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${boundaryUserToken}` },
+    body: JSON.stringify({ customer_id: "outside-boundary", question: "customer ACL should stop before proxy" })
+  });
+  const forbiddenBoundaryPrivateCountAfter = boundaryEngine.records.filter((record) => record.path === "/api/knowledge/rag/query").length;
+  expect(
+    "knowledge:gateway-customer-acl-not-proxied",
+    boundaryForbiddenCustomer.response.status === 403 &&
+      boundaryForbiddenCustomer.body.code === "knowledge-customer-forbidden" &&
+      forbiddenBoundaryPrivateCountAfter === forbiddenBoundaryPrivateCountBefore,
+    "gateway rejects customer ACL failures before the internal Knowledge Engine hop",
+    JSON.stringify({ body: boundaryForbiddenCustomer.body, before: forbiddenBoundaryPrivateCountBefore, after: forbiddenBoundaryPrivateCountAfter })
   );
 
   const rejectedBoundaryPrivateCountBefore = boundaryEngine.records.filter((record) => record.path === "/api/knowledge/rag/query").length;

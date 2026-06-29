@@ -179,6 +179,23 @@ function selectorMatches(selector = {}, expected = {}) {
   return labelsEqual(matchLabels(selector), expected) && !selector.matchExpressions?.length;
 }
 
+function selectorSelectsLabels(selector = {}, labels = {}) {
+  const requiredLabels = selector.matchLabels ?? {};
+  for (const [key, value] of Object.entries(requiredLabels)) {
+    if (labels[key] !== value) return false;
+  }
+  for (const expression of selector.matchExpressions ?? []) {
+    const key = expression.key;
+    const values = expression.values ?? [];
+    if (expression.operator === "In" && !values.includes(labels[key])) return false;
+    if (expression.operator === "NotIn" && values.includes(labels[key])) return false;
+    if (expression.operator === "Exists" && !(key in labels)) return false;
+    if (expression.operator === "DoesNotExist" && key in labels) return false;
+    if (!["In", "NotIn", "Exists", "DoesNotExist"].includes(expression.operator)) return false;
+  }
+  return true;
+}
+
 function peerHasNoBroadAccess(peer = {}) {
   const broadSelector = (selector) => selector && Object.keys(selector).length === 0;
   const broadCidr = peer.ipBlock?.cidr === "0.0.0.0/0" || peer.ipBlock?.cidr === "::/0";
@@ -207,6 +224,54 @@ function appliedKnowledgeIngressScoped(policy) {
     !from[0].ipBlock &&
     portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 8080 }])
   );
+}
+
+function ingressPolicyApplies(policy) {
+  const types = policy?.spec?.policyTypes ?? [];
+  if (types.length === 0) return true;
+  return types.includes("Ingress");
+}
+
+function ingressRuleAllowsOnlyGateway8080(rule = {}) {
+  const from = rule.from ?? [];
+  return (
+    from.length > 0 &&
+    from.every(
+      (peer) =>
+        peerHasNoBroadAccess(peer) &&
+        selectorMatches(peer.podSelector, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "gateway" }) &&
+        !peer.namespaceSelector &&
+        !peer.ipBlock
+    ) &&
+    portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 8080 }])
+  );
+}
+
+function appliedKnowledgeIngressUnionScoped(policies = [], knowledgeLabels = {}) {
+  const selectedPolicies = policies.filter(
+    (policy) => ingressPolicyApplies(policy) && selectorSelectsLabels(policy.spec?.podSelector ?? {}, knowledgeLabels)
+  );
+  let hasGatewayAllow = false;
+  for (const policy of selectedPolicies) {
+    for (const rule of policy.spec?.ingress ?? []) {
+      if (!ingressRuleAllowsOnlyGateway8080(rule)) {
+        return {
+          ok: false,
+          reason: "knowledge-engine ingress union contains a peer or port outside gateway:8080",
+          policies: selectedPolicies.map((item) => item.metadata?.name).filter(Boolean)
+        };
+      }
+      hasGatewayAllow = true;
+    }
+  }
+  return {
+    ok: selectedPolicies.length > 0 && hasGatewayAllow,
+    reason:
+      selectedPolicies.length === 0
+        ? "no applied ingress NetworkPolicy selects knowledge-engine pods"
+        : "no applied ingress NetworkPolicy allows gateway:8080 to knowledge-engine pods",
+    policies: selectedPolicies.map((item) => item.metadata?.name).filter(Boolean)
+  };
 }
 
 function appliedPbsEgressScoped(policy) {
@@ -410,6 +475,7 @@ expect(
 );
 const rendered = renderKustomize(overlayPath);
 const deployment = renderedDoc(rendered, "Deployment", "cas-knowledge-engine");
+const gatewayDeployment = renderedDoc(rendered, "Deployment", "cas-gateway");
 const configMap = renderedDoc(rendered, "ConfigMap", "cas-pbs-config");
 const liveConfigMap = renderedDoc(rendered, "ConfigMap", "cas-knowledge-live-config");
 const postgresStatefulSet = renderedDoc(rendered, "StatefulSet", "cas-knowledge-postgres");
@@ -462,6 +528,12 @@ expect(
   "service-token PBS auth must not use plain HTTP for non-local live/shadow traffic"
 );
 expect(
+  "preflight:tls-insecure-disabled",
+  configValue(configMap, "tls-insecure") === "false",
+  "PBS TLS verification is enabled in rendered overlay",
+  "PBS shadow/live overlays must keep tls-insecure=false"
+);
+expect(
   "preflight:timeout-bounds",
   Number(configValue(configMap, "timeout-ms")) >= 1000 && Number(configValue(configMap, "timeout-ms")) <= 60000,
   "cas-pbs-config timeout-ms is within operational bounds"
@@ -507,6 +579,15 @@ if (overlay === "pbs-live") {
     "preflight:live-owner-config",
     Boolean(liveConfigMap) && envFromConfig(deployment, "CAS_KNOWLEDGE_SINGLE_OWNER", "cas-knowledge-live-config", "service-owner"),
     "pbs-live resolves health/service owner from live ConfigMap"
+  );
+  expect(
+    "preflight:live-gateway-customer-acl",
+    Boolean(gatewayDeployment) &&
+      Boolean(liveConfigMap) &&
+      envValue(gatewayDeployment, "CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS") === "true" &&
+      envFromConfig(gatewayDeployment, "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON", "cas-knowledge-live-config", "customer-access-json") &&
+      configValue(liveConfigMap, "customer-access-json").includes("cywell-knowledge-admins"),
+    "pbs-live requires Gateway customer workspace ACL from live ConfigMap"
   );
   expect(
     "preflight:live-database-secret-ref",
@@ -646,8 +727,13 @@ if (overlay === "pbs-live") {
     pass("cluster:legacy-postgres-secret-absent", "legacy cas-knowledge-postgres Secret is absent or not readable in this preflight context");
   }
   if (requireCluster && !skipApplied) {
+    let appliedKnowledgeLabels = {
+      "app.kubernetes.io/name": "cywell-ai-sentinel",
+      "app.kubernetes.io/component": "knowledge-engine"
+    };
     const appliedEngine = getJson("cluster:applied-knowledge-engine", ["get", "deployment", "-n", namespace, "cas-knowledge-engine"]);
     if (appliedEngine) {
+      appliedKnowledgeLabels = { ...appliedKnowledgeLabels, ...(appliedEngine.spec?.template?.metadata?.labels ?? {}) };
       const engineContainer = workloadContainer(appliedEngine, "knowledge-engine");
       const serviceOwnerRef = workloadEnv(appliedEngine, "CAS_KNOWLEDGE_SINGLE_OWNER", "knowledge-engine").valueFrom?.configMapKeyRef;
       expect(
@@ -688,9 +774,11 @@ if (overlay === "pbs-live") {
         deploymentReady(appliedGateway) &&
           String(gatewayContainer.image ?? "").endsWith(":v0.1.4") &&
           workloadEnvValue(appliedGateway, "CAS_KNOWLEDGE_OWNER_IDENTITY_MODE", "gateway") === "openshift-selfsubjectreview" &&
+          workloadEnvValue(appliedGateway, "CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS", "gateway") === "true" &&
+          workloadEnvConfigRef(appliedGateway, "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON", "cas-knowledge-live-config", "customer-access-json", "gateway") &&
           workloadEnvSecretRef(appliedGateway, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "cas-knowledge-internal-auth", "owner-hmac-secret", "gateway") &&
           workloadEnvValue(appliedGateway, "CAS_KNOWLEDGE_ENGINE_URL", "gateway").includes("cas-knowledge-engine"),
-        "applied cas-gateway is rolled out with v0.1.4, SelfSubjectReview owner identity, HMAC, and knowledge routing",
+        "applied cas-gateway is rolled out with v0.1.4, SelfSubjectReview owner identity, customer ACL, HMAC, and knowledge routing",
         JSON.stringify({
           image: gatewayContainer.image,
           knowledgeUrl: workloadEnvValue(appliedGateway, "CAS_KNOWLEDGE_ENGINE_URL", "gateway"),
@@ -809,6 +897,16 @@ if (overlay === "pbs-live") {
         appliedKnowledgeIngressScoped(appliedKnowledgeIngress),
         "applied knowledge ingress NetworkPolicy allows only gateway pods on 8080",
         JSON.stringify(appliedKnowledgeIngress.spec ?? {})
+      );
+    }
+    const appliedNetworkPolicies = getJson("cluster:applied-networkpolicy-union", ["get", "networkpolicy", "-n", namespace]);
+    if (appliedNetworkPolicies) {
+      const union = appliedKnowledgeIngressUnionScoped(appliedNetworkPolicies.items ?? [], appliedKnowledgeLabels);
+      expect(
+        "cluster:applied-knowledge-ingress-union-scoped",
+        union.ok,
+        "applied knowledge-engine ingress union allows only gateway pods on TCP 8080",
+        JSON.stringify(union)
       );
     }
     const appliedPbsEgress = getJson("cluster:applied-pbs-egress-policy", [
