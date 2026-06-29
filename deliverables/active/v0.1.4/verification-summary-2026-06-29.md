@@ -54,6 +54,15 @@ npm run verify: PASS
 | `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` | PASS, 16 release checks | Mutating release action; force-promoted `cas-gateway`, `cas-console-plugin`, `cas-knowledge-engine`, and digest-pinned `cas-knowledge-postgres` to local `v0.1.4` ImageStreamTags |
 | `npm run verify:pbs:preflight:shadow` | PASS/WARN | Render/config checks pass for `pbs-shadow`; current CRC warns because external `playbookstudio` namespace/service and optional `cas-pbs-auth` are absent |
 
+Latest CRC `v0.1.4` release image references after commit `7b9d555`:
+
+```text
+cas-gateway@sha256:27650edd220c17dd13a1356c7c69b3ad69a311bf733ec006fc76040492a8596f
+cas-console-plugin@sha256:cd86e87f87a2029db23434dd549f982159ee4e13542db799feca7ace25363ddc
+cas-knowledge-engine@sha256:7b11ffb7ca8d5ac028ba521b30ebbb60a0d35a0063c89518d85268f38376ecc6
+cas-knowledge-postgres@sha256:9073dff8ba54ee8cefcfec5bc2a1269fc9f3aeecbd431eb892549d9b83dc1325
+```
+
 Local JSON evidence was written under ignored `test-results/`:
 
 ```text
