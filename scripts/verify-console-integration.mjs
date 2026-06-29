@@ -392,6 +392,24 @@ expectText(
   "knowledge route renders topology signal leaders"
 );
 expectText(
+  "console-knowledge:topology-vault-token-panel",
+  knowledgeRouteSource,
+  "data-test=\"cas-topology-token-panel\"",
+  "knowledge route renders PBS Wiki Vault token side-channel panel"
+);
+expectText(
+  "console-knowledge:topology-vault-context-panel",
+  knowledgeRouteSource,
+  "data-test=\"cas-topology-context-panel\"",
+  "knowledge route renders PBS Wiki Vault selected upload/context side-channel panel"
+);
+expectText(
+  "console-knowledge:topology-vault-relations-panel",
+  knowledgeRouteSource,
+  "data-test=\"cas-topology-vault-relations\"",
+  "knowledge route renders PBS Wiki Vault relation side-channel panel"
+);
+expectText(
   "console-knowledge:topology-edge-id",
   knowledgeRouteSource,
   "source_id",
@@ -492,6 +510,12 @@ expectText(
   knowledgeRouteBundle,
   "source_document_id",
   "built knowledge route bundle preserves topology lineage fields"
+);
+expectText(
+  "console-knowledge:bundle-topology-sidechannels",
+  knowledgeRouteBundle,
+  "cas-topology-token-panel",
+  "built knowledge route bundle contains PBS Wiki Vault side-channel panels"
 );
 
 const failures = checks.filter((check) => check.status === "FAIL");

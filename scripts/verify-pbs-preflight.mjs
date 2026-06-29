@@ -513,9 +513,21 @@ function selectorMatchesGateway(selector = {}) {
   return labels["app.kubernetes.io/name"] === "cywell-ai-sentinel" && labels["app.kubernetes.io/component"] === "gateway";
 }
 
+function ipBlockMatches(ipBlock, ip) {
+  const cidr = String(ipBlock?.cidr ?? "");
+  return cidr === ip || cidr === `${ip}/32`;
+}
+
+function networkPolicyPortMatches(portRule, port) {
+  return Number(portRule?.port) === Number(port);
+}
+
 function networkPolicyAllowsAnyIp(policy, ips, ports) {
-  const spec = JSON.stringify(policy?.spec ?? {});
-  return ips.some((ip) => spec.includes(`${ip}/32`) || spec.includes(`"cidr":"${ip}`)) && ports.some((port) => spec.includes(`"port":${port}`));
+  return (policy?.spec?.egress ?? []).some((rule) => {
+    const peerOk = (rule.to ?? []).some((peer) => ips.some((ip) => ipBlockMatches(peer.ipBlock, ip)));
+    const portOk = (rule.ports ?? []).some((portRule) => ports.some((port) => networkPolicyPortMatches(portRule, port)));
+    return peerOk && portOk;
+  });
 }
 
 function collectKubernetesApiTargets() {

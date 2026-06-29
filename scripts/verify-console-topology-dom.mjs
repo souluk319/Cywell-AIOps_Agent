@@ -196,6 +196,33 @@ function topologyResponse(customerId) {
             { source_id: "pbs-rich-note", target_id: "pbs-rich-tag", kind: "tagged" },
             { source_id: "pbs-rich-entity", target_id: "pbs-rich-concept", kind: "explains" }
           ]
+        },
+        pbs: {
+          top_wikilinks: [{ label: "HAProxy", count: 4 }],
+          top_tags: [{ label: "router", count: 2 }],
+          selected_uploads: [
+            {
+              document_source_id: "pbs-rich-upload",
+              title: "Rich Upload",
+              source_scope: "user_upload",
+              ready_for_chat: true,
+              chunk_count: 7
+            }
+          ],
+          selected_context: [
+            {
+              id: "pbs-rich-note",
+              title: "Rich Wiki Note",
+              body: "Compiled wiki context for HAProxy router latency.",
+              document_source_id: "pbs-rich-upload",
+              viewer_path: "/wiki/rich",
+              source_scope: "wiki_vault"
+            }
+          ],
+          relations: [
+            { source: "pbs-rich-upload", target: "pbs-rich-note", type: "compiled_to" },
+            { source: "pbs-rich-note", target: "HAProxy", type: "links_to" }
+          ]
         }
       }
     };
@@ -758,6 +785,23 @@ try {
       richLeaderText.includes("Rich Wiki Note") && richLeaderText.includes("9 links") && richLeaderText.includes("route shard"),
       "PBS-rich topology exposes high-signal nodes in Signal leaders",
       richLeaderText
+    );
+    const tokenPanelText = await page.locator('[data-test="cas-topology-token-panel"]').innerText();
+    const contextPanelText = await page.locator('[data-test="cas-topology-context-panel"]').innerText();
+    const vaultRelationsText = await page.locator('[data-test="cas-topology-vault-relations"]').innerText();
+    expect(
+      "console-topology-dom:pbs-rich-sidechannels",
+      tokenPanelText.includes("HAProxy 4") &&
+        tokenPanelText.includes("#router 2") &&
+        contextPanelText.includes("Rich Upload") &&
+        contextPanelText.includes("pbs-rich-upload") &&
+        contextPanelText.includes("7 chunks") &&
+        contextPanelText.includes("Rich Wiki Note") &&
+        contextPanelText.includes("/wiki/rich") &&
+        vaultRelationsText.includes("compiled_to") &&
+        vaultRelationsText.includes("pbs-rich-upload -> pbs-rich-note"),
+      "PBS-rich topology renders Wiki Vault tokens, selected uploads/context, and recent relation side-channel panels",
+      JSON.stringify({ tokenPanelText, contextPanelText, vaultRelationsText })
     );
     await page.getByRole("button", { name: "Links", exact: true }).click();
     expect(

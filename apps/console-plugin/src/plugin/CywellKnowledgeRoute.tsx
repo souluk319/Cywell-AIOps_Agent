@@ -85,6 +85,42 @@ type TopologyPayload = {
     entities?: number;
     concepts?: number;
   };
+  top_wikilinks?: TopologyToken[];
+  top_tags?: TopologyToken[];
+  selected_context?: TopologyContextItem[];
+  selected_uploads?: TopologyUploadItem[];
+  relations?: TopologyRelationSignal[];
+};
+
+type TopologyToken = {
+  label: string;
+  count?: number;
+};
+
+type TopologyContextItem = {
+  id?: string;
+  title: string;
+  body?: string;
+  document_source_id?: string;
+  viewer_path?: string;
+  source_scope?: string;
+};
+
+type TopologyUploadItem = {
+  id?: string;
+  document_source_id?: string;
+  title: string;
+  filename?: string;
+  source_scope?: string;
+  ready_for_chat?: boolean;
+  chunk_count?: number;
+};
+
+type TopologyRelationSignal = {
+  source: string;
+  target: string;
+  type: string;
+  label?: string;
 };
 
 type RouteItem = {
@@ -649,6 +685,12 @@ const styles = `
   overflow: auto;
 }
 
+.cas-topology-token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .cas-topology-relation {
   border: 1px solid var(--cas-knowledge-line);
   border-radius: 6px;
@@ -787,11 +829,33 @@ function recordValue(value: unknown): ActionResult | null {
   return typeof value === "object" && value !== null ? (value as ActionResult) : null;
 }
 
-function topologyCandidates(value: ActionResult) {
+function topologyCandidateRecords(value: ActionResult) {
   const topology = recordValue(value.topology);
   const topologyGraph = topology ? recordValue(topology.graph) : null;
   const graph = recordValue(value.graph);
-  return [graph, topologyGraph, topology, value].filter((candidate): candidate is ActionResult => Boolean(candidate));
+  return [
+    {
+      candidate: graph,
+      sidecars: [recordValue(graph?.pbs), recordValue(value.pbs), value, graph]
+    },
+    {
+      candidate: topologyGraph,
+      sidecars: [recordValue(topologyGraph?.pbs), topology ? recordValue(topology.pbs) : null, topology, topologyGraph]
+    },
+    {
+      candidate: topology,
+      sidecars: [topology ? recordValue(topology.pbs) : null, topology]
+    },
+    {
+      candidate: value,
+      sidecars: [recordValue(value.pbs), value]
+    }
+  ]
+    .filter((entry): entry is { candidate: ActionResult; sidecars: Array<ActionResult | null> } => Boolean(entry.candidate))
+    .map((entry) => ({
+      candidate: entry.candidate,
+      sidecars: entry.sidecars.filter((sidecar): sidecar is ActionResult => Boolean(sidecar))
+    }));
 }
 
 function firstTopologyList(candidates: ActionResult[], keys: string[]) {
@@ -802,6 +866,69 @@ function firstTopologyList(candidates: ActionResult[], keys: string[]) {
     }
   }
   return [];
+}
+
+function firstRecordList(candidates: ActionResult[], keys: string[]) {
+  return firstTopologyList(candidates, keys).filter((item): item is ActionResult => typeof item === "object" && item !== null);
+}
+
+function topologyTokenList(candidates: ActionResult[], key: string): TopologyToken[] {
+  const values = firstTopologyList(candidates, [key]);
+  return values
+    .map((item) => {
+      const record = recordValue(item);
+      const label = record ? String(record.label ?? record.name ?? record.title ?? "").trim() : String(item ?? "").trim();
+      const count = record && Number.isFinite(Number(record.count)) ? Number(record.count) : undefined;
+      return label ? { label, count } : null;
+    })
+    .filter((item): item is TopologyToken => Boolean(item))
+    .slice(0, 16);
+}
+
+function topologyContextList(candidates: ActionResult[]): TopologyContextItem[] {
+  return firstRecordList(candidates, ["selected_context", "selectedContext", "context"])
+    .map((item) => {
+      const id = item.id ? String(item.id) : item.note_id ? String(item.note_id) : undefined;
+      const title = String(item.title ?? item.name ?? id ?? "Wiki context");
+      return {
+        id,
+        title,
+        body: item.body || item.summary || item.markdown ? String(item.body ?? item.summary ?? item.markdown) : undefined,
+        document_source_id: item.document_source_id || item.source_document_id || item.document_id ? String(item.document_source_id ?? item.source_document_id ?? item.document_id) : undefined,
+        viewer_path: item.viewer_path ? String(item.viewer_path) : undefined,
+        source_scope: item.source_scope ? String(item.source_scope) : undefined
+      };
+    })
+    .slice(0, 8);
+}
+
+function topologyUploadList(candidates: ActionResult[]): TopologyUploadItem[] {
+  return firstRecordList(candidates, ["selected_uploads", "selectedUploads", "uploads"])
+    .map((item) => {
+      const id = item.id || item.document_source_id ? String(item.id ?? item.document_source_id) : undefined;
+      return {
+        id,
+        document_source_id: item.document_source_id || item.source_document_id || item.document_id ? String(item.document_source_id ?? item.source_document_id ?? item.document_id) : id,
+        title: String(item.title ?? item.filename ?? item.file_name ?? id ?? "Upload"),
+        filename: item.filename || item.file_name ? String(item.filename ?? item.file_name) : undefined,
+        source_scope: item.source_scope ? String(item.source_scope) : undefined,
+        ready_for_chat: typeof item.ready_for_chat === "boolean" ? item.ready_for_chat : undefined,
+        chunk_count: Number.isFinite(Number(item.chunk_count)) ? Number(item.chunk_count) : undefined
+      };
+    })
+    .slice(0, 8);
+}
+
+function topologyRelationSignals(candidates: ActionResult[]): TopologyRelationSignal[] {
+  return firstRecordList(candidates, ["relations", "relation_signals", "vault_relations"])
+    .map((item) => {
+      const source = nodeRef(item.source ?? item.from ?? item.subject ?? item.source_id ?? item.subject_id);
+      const target = nodeRef(item.target ?? item.to ?? item.object ?? item.target_id ?? item.object_id);
+      const type = String(item.type ?? item.kind ?? item.relation ?? item.label ?? "relates");
+      return source && target ? { source, target, type, label: item.label ? String(item.label) : undefined } : null;
+    })
+    .filter((item): item is TopologyRelationSignal => Boolean(item))
+    .slice(0, 24);
 }
 
 function topologyListCandidate(candidate: ActionResult) {
@@ -830,9 +957,10 @@ function countAlias(source: ActionResult | undefined, keys: string[], fallback: 
 
 function topologyPayload(value: ActionResult | null): TopologyPayload | null {
   if (!value) return null;
-  const candidates = topologyCandidates(value);
-  const candidate = candidates.find(topologyListCandidate);
-  if (!candidate) return null;
+  const candidateRecord = topologyCandidateRecords(value).find((entry) => topologyListCandidate(entry.candidate));
+  const candidate = candidateRecord?.candidate;
+  if (!candidate || !candidateRecord) return null;
+  const sidecarCandidates = candidateRecord.sidecars;
   const rawNodes = firstTopologyList([candidate], ["nodes", "entities", "vertices"]);
   const rawEdges = firstTopologyList([candidate], ["edges", "links", "relations", "relationships"]);
   const countsCandidate = recordValue(candidate.counts) ?? recordValue(candidate.summary);
@@ -935,7 +1063,12 @@ function topologyPayload(value: ActionResult | null): TopologyPayload | null {
     customer_id: value.customer_id ? String(value.customer_id) : candidate?.customer_id ? String(candidate.customer_id) : undefined,
     nodes,
     edges,
-    counts: counts as TopologyPayload["counts"] | undefined
+    counts: counts as TopologyPayload["counts"] | undefined,
+    top_wikilinks: topologyTokenList(sidecarCandidates, "top_wikilinks"),
+    top_tags: topologyTokenList(sidecarCandidates, "top_tags"),
+    selected_context: topologyContextList(sidecarCandidates),
+    selected_uploads: topologyUploadList(sidecarCandidates),
+    relations: topologyRelationSignals(sidecarCandidates)
   };
 }
 
@@ -1078,6 +1211,11 @@ function TopologyDashboard({
   const signalLeaders = [...nodesWithDegree]
     .sort((left, right) => (right.degree ?? 0) - (left.degree ?? 0) || (right.weight ?? 0) - (left.weight ?? 0) || left.label.localeCompare(right.label))
     .slice(0, 8);
+  const topWikilinks = topology?.top_wikilinks ?? [];
+  const topTags = topology?.top_tags ?? [];
+  const selectedUploads = topology?.selected_uploads ?? [];
+  const selectedContext = topology?.selected_context ?? [];
+  const vaultRelations = topology?.relations ?? [];
   const counts = {
     nodes: topology?.counts?.nodes ?? topologyNodes.length,
     edges: topology?.counts?.edges ?? topologyEdges.length,
@@ -1319,6 +1457,69 @@ function TopologyDashboard({
               </button>
             ))}
           </div>
+          {(topWikilinks.length > 0 || topTags.length > 0) && (
+            <div className="cas-topology-relations" data-test="cas-topology-token-panel">
+              <h3>Vault signals</h3>
+              {topWikilinks.length > 0 && (
+                <div className="cas-topology-token-row" data-test="cas-topology-top-wikilinks">
+                  {topWikilinks.slice(0, 8).map((item) => (
+                    <span className="cas-knowledge-badge" key={`wikilink-${item.label}`}>
+                      {item.count !== undefined ? `${item.label} ${item.count}` : item.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {topTags.length > 0 && (
+                <div className="cas-topology-token-row" data-test="cas-topology-top-tags">
+                  {topTags.slice(0, 8).map((item) => (
+                    <span className="cas-knowledge-badge" key={`tag-${item.label}`}>
+                      {item.count !== undefined ? `#${item.label} ${item.count}` : `#${item.label}`}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {(selectedUploads.length > 0 || selectedContext.length > 0) && (
+            <div className="cas-topology-relations" data-test="cas-topology-context-panel">
+              <h3>Vault context</h3>
+              {selectedUploads.slice(0, 4).map((upload) => (
+                <div className="cas-topology-relation" data-test="cas-topology-selected-upload" key={`upload-${upload.document_source_id ?? upload.id ?? upload.title}`}>
+                  <strong>{upload.title}</strong>
+                  <span className="cas-knowledge-muted">
+                    {[
+                      upload.document_source_id,
+                      upload.source_scope,
+                      upload.chunk_count !== undefined ? `${upload.chunk_count} chunks` : "",
+                      upload.ready_for_chat === true ? "ready" : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </div>
+              ))}
+              {selectedContext.slice(0, 4).map((context) => (
+                <div className="cas-topology-relation" data-test="cas-topology-selected-context" key={`context-${context.id ?? context.title}`}>
+                  <strong>{context.title}</strong>
+                  {context.body && <span className="cas-knowledge-muted">{context.body.replace(/\s+/g, " ").slice(0, 110)}</span>}
+                  <span className="cas-knowledge-muted">
+                    {[context.document_source_id, context.source_scope, context.viewer_path].filter(Boolean).join(" · ")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {vaultRelations.length > 0 && (
+            <div className="cas-topology-relations" data-test="cas-topology-vault-relations">
+              <h3>Vault relations</h3>
+              {vaultRelations.slice(0, 6).map((relation, index) => (
+                <div className="cas-topology-relation" key={`vault-${relation.source}-${relation.target}-${relation.type}-${index}`}>
+                  <strong>{relation.type}</strong>
+                  <span className="cas-knowledge-muted">{`${relation.source} -> ${relation.target}`}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="cas-topology-relations">
             {selectedRelations.length === 0 && <p className="cas-knowledge-muted">No direct relations in the current view.</p>}
             {selectedRelations.map((edge, index) => (

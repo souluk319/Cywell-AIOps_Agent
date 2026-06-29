@@ -1,6 +1,26 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - PBS Upload/RAG Scope Contract and Non-Stale Release Evidence
+## Latest Update - Wiki Vault Side-Channels, Staged Wiki Loop, and Structural API Egress
+
+Implemented after the second parallel review pass:
+
+- The Cywell topology dashboard now preserves and renders PBS Wiki Vault side-channel data: ranked wikilinks/tags, selected uploads, selected context, and recent vault relations.
+- Topology normalization keeps side-channel data scoped to the same selected graph candidate, preserving the existing mixed wrapper/nested graph safety invariant.
+- Local LLM Wiki loop now returns PBS-style `run_id`, `stages`, `duration_ms`, `warnings`, and `summary`; status exposes `last_run`, `compiled_wiki_status`, and `pgvector_ready`.
+- Manual Wiki Vault note save now preserves PBS-style overlay metadata including `overlay_id`, `book_slug`, `note_type`, target refs, wikilinks, and tags.
+- Strict live preflight now checks Gateway Kubernetes API egress structurally: the API IP peer and API port must appear in the same NetworkPolicy egress rule.
+
+Proof captured in that pass:
+
+- `python -m py_compile apps/knowledge-engine/src/cas_knowledge_engine/engine.py`: PASS.
+- `node --check` passed for changed verification and preflight scripts.
+- `npm run verify:knowledge-engine`: PASS, 82 checks.
+- `npm run verify:console:topology-dom`: PASS, 32 browser-backed checks.
+- `npm run verify:console:integration`: PASS, 77 checks.
+- `npm run verify:deploy:manifests`: PASS, 260 checks.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL, `42 PASS / 8 FAIL`; failures remain external live prerequisites plus replacement of the rendered wildcard customer ACL placeholder.
+
+## Previous Update - PBS Upload/RAG Scope Contract and Non-Stale Release Evidence
 
 Implemented after the topology/RAG parity and live-gate parallel review pass:
 

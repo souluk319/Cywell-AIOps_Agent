@@ -115,6 +115,7 @@ Required result:
 - `verify:pbs:preflight:live:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
 - `verify:pbs:preflight:live:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
 - `verify:pbs:preflight:live:preapply` confirms release-image evidence is current-head and sourced from non-stale CRC deployment evidence.
+- `verify:pbs:preflight:live:preapply` confirms the Gateway Kubernetes API NetworkPolicy allows the API IP and port in the same egress rule.
 
 Stop immediately if any gate fails.
 

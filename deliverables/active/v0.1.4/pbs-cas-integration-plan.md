@@ -243,6 +243,7 @@ Delivered:
   - selectable nodes
   - node inspector
   - relation grid
+  - Wiki Vault side-channel panels for ranked wikilinks/tags, selected uploads/context, and vault relations
   - direct RAG action from selected node
   - graph normalization checks that create explicit fallback endpoint nodes when PBS edges reference missing endpoints
 
@@ -351,6 +352,7 @@ v0.1.4 currently proves:
 - PBS-compatible upload and URL ingest payload metadata
 - PBS-compatible local Postgres schema and ingest shadow rows for document sources, parsed documents, and chunks
 - local Wiki Vault graph extraction for `[[wikilinks]]`, `#tags`, URLs, concepts, relations, backlinks, selected context/uploads, and RAG citations from vault-only context
+- local LLM Wiki staged run/status contract with `run_id`, compiler stages, `compiled_wiki_status`, and PBS-style note overlay metadata
 - base64 file upload with lightweight MIME-aware extraction
 - unsafe upload extension/MIME/base64/oversized OOXML rejection before local indexing or PBS-live outbound upload
 - PBS HTTP shadow/live adapter with fake PBS verification for upload, URL ingest, reports, RAG, wiki-loop, wiki status, wiki vault topology, and note save
@@ -360,7 +362,7 @@ v0.1.4 currently proves:
 - rendered PBS shadow/live deployment overlays with HTTPS service-token transport, shadow optional token Secret reference, live required token Secret reference, live required Postgres Secret references, no dev owner/DB Secret material, release image tags, and restricted knowledge-engine egress to labeled PBS runtime pods on `8765`
 - rendered PBS live overlay with Gateway customer ACL required from `cas-knowledge-live-config/customer-access-json`; the default wildcard placeholder fails strict preflight until target customer/group mapping is supplied
 - topology normalization across PBS `graph`, `topology.graph`, `links`, `relations`, `relationships`, `node_id`, `source_id`, and `target_id` variants without mixing wrapper and nested graph candidates
-- topology normalization preserves PBS summary counts, wikilinks, tags, entity/concept nodes, relation signals, degree/weight, selected context, and selected upload metadata
+- topology normalization preserves PBS summary counts, wikilinks, tags, entity/concept nodes, relation signals, degree/weight, selected context, selected upload metadata, and renders those Wiki Vault side-channel fields in the Cywell dashboard
 - Knowledge Engine ingress isolation so only the CAS gateway can call scoped data APIs in-cluster
 - optional real PBS live smoke verifier with skip/required modes and strict DB/pgvector/corpus readiness checks
 - owner-required scoped knowledge APIs with Gateway SelfSubjectReview owner mapping and deployed gateway rejection of spoofed owner headers

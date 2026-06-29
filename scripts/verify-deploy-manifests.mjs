@@ -685,6 +685,19 @@ for (const file of files) {
         "local RAG honors selected upload/source scope and emits source lineage citations",
         "local RAG must preserve active document/source filters and citation lineage fields"
       );
+      expect(
+        "knowledge-engine:wiki-loop-staged-contract",
+        text.includes("run_id") &&
+          text.includes('"wiki_compile"') &&
+          text.includes('"topology_refresh"') &&
+          text.includes("compiled_wiki_status") &&
+          text.includes("last_run") &&
+          text.includes("overlay_id") &&
+          text.includes("book_slug") &&
+          text.includes("note_type"),
+        "local LLM Wiki loop and note save expose PBS-style staged run/status and overlay metadata",
+        "local LLM Wiki must preserve PBS-style run_id, stages, compiled_wiki_status, last_run, overlay_id, book_slug, and note_type"
+      );
     }
     if (file.includes("apps/gateway/src/server.mjs")) {
       expect(
@@ -1286,6 +1299,8 @@ for (const file of files) {
         text.includes("must resolve to image.dockerImageReference with @sha256:") &&
         text.includes("cluster:pbs-runtime-ready-pods") &&
         text.includes("cluster:gateway-kubernetes-api-egress") &&
+        text.includes("ipBlockMatches") &&
+        text.includes("networkPolicyPortMatches") &&
         text.includes("cluster:release-image:") &&
         text.includes("preflight:live-postgres-image-pinned") &&
         text.includes("updatedReplicas") &&

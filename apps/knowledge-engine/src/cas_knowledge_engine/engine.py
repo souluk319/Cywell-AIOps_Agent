@@ -1265,6 +1265,9 @@ class KnowledgeEngine:
             body = str(note.get("body") or "")
             signals = self._text_signals(body, [str(tag) for tag in note.get("tags", [])])
             document_id = str(note.get("document_id") or "")
+            note_payload = note.get("payload") if isinstance(note.get("payload"), dict) else {}
+            note_type = str(note.get("note_type") or note_payload.get("note_type") or note.get("source", ""))
+            compiled_wiki = bool(note.get("compiled_wiki") or note_payload.get("compiled_wiki") or note.get("source") == "wiki-loop")
             add_node(
                 note_id,
                 "wiki-note",
@@ -1277,8 +1280,11 @@ class KnowledgeEngine:
                 source_document_id=note.get("provenance", {}).get("source_document_id") if isinstance(note.get("provenance"), dict) else document_id or None,
                 provenance=note.get("provenance", {}),
                 updated_at=note.get("updated_at"),
-                note_type=note.get("source", ""),
-                compiled_wiki=note.get("source") == "wiki-loop",
+                note_type=note_type,
+                compiled_wiki=compiled_wiki,
+                overlay_id=note.get("overlay_id"),
+                target_ref=note.get("target_ref") or note_payload.get("target_ref"),
+                book_slug=note.get("book_slug") or note_payload.get("book_slug"),
                 ready_for_chat=True,
             )
             if document_id:
@@ -1321,6 +1327,11 @@ class KnowledgeEngine:
                 "document_source_id": note.get("document_id"),
                 "viewer_path": f"/cywell/llm-wiki?customer_id={customer_id}&note_id={note['id']}",
                 "source_scope": "wiki_vault",
+                "note_type": note_type,
+                "compiled_wiki": compiled_wiki,
+                "overlay_id": note.get("overlay_id"),
+                "target_ref": note.get("target_ref") or note_payload.get("target_ref"),
+                "book_slug": note.get("book_slug") or note_payload.get("book_slug"),
             }
             for note in notes[:8]
         ]
@@ -1569,6 +1580,8 @@ class KnowledgeEngine:
         loop_payload = {"customer_id": customer_id, "document_id": document_id}
         if self._pbs_live_enabled():
             return self._pbs_wiki_loop_payload(self.pbs.wiki_loop_run(loop_payload, resolved_owner_id), customer_id=customer_id, owner_id=resolved_owner_id)
+        started_at = now_ms()
+        run_id = stable_id("wiki-run", f"{resolved_owner_id}:{customer_id}:{document_id or 'all'}:{started_at}")
         store = self.load_store()
         documents = [
             doc
@@ -1588,11 +1601,33 @@ class KnowledgeEngine:
             previous_note = existing.get(note_id) if isinstance(existing.get(note_id), dict) else {}
             previous_revision = int(previous_note.get("revision") or 0) if previous_note else 0
             links = [f"[[{term}]]" for term in document.get("terms", [])[:5]]
+            wikilinks = [term.strip("[]") for term in links]
+            tags = document.get("terms", [])[:6]
+            payload = {
+                "vault_note": True,
+                "note_type": "source",
+                "compiled_wiki": True,
+                "wikilinks": wikilinks,
+                "tags": tags,
+                "source_document_id": document["id"],
+                "target_ref": document["id"],
+                "book_slug": "pbs-llm-wiki",
+            }
             note = {
                 "id": note_id,
+                "overlay_id": note_id,
+                "kind": "note",
                 "customer_id": customer_id,
                 "owner_id": resolved_owner_id,
                 "document_id": document["id"],
+                "target_kind": "document",
+                "target_ref": document["id"],
+                "book_slug": "pbs-llm-wiki",
+                "card_title": f"{document['title']} Wiki",
+                "summary": document.get("summary", ""),
+                "note_type": "source",
+                "compiled_wiki": True,
+                "payload": payload,
                 "revision": previous_revision + 1,
                 "previous_revision": previous_revision,
                 "provenance": {
@@ -1614,30 +1649,71 @@ class KnowledgeEngine:
                         "핵심 연결: " + ", ".join(links),
                     ]
                 ),
-                "tags": document.get("terms", [])[:6],
-                "links": [term.strip("[]") for term in links],
+                "tags": tags,
+                "links": wikilinks,
                 "updated_at": now_ms(),
                 "source": "wiki-loop",
             }
             existing[note_id] = note
             upserted.append(note)
         store["notes"] = retained_notes + list(existing.values())
+        finished_at = now_ms()
+        health = self.store.health()
+        lint_warnings = [] if documents else ["no_documents_selected"]
+        vault = self._local_vault_graph(customer_id=customer_id, owner_id=resolved_owner_id, store=store)
+        stages = [
+            {
+                "name": "health",
+                "status": "done",
+                "database_ready": bool(health.get("database_ready", False)),
+                "vector_ready": health.get("mode") == "postgres-pgvector",
+            },
+            {"name": "wiki_compile", "status": "done", "notes_upserted": len(upserted), "document_count": len(documents)},
+            {
+                "name": "topology_refresh",
+                "status": "done",
+                "nodes": len(vault["topology"].get("nodes", [])),
+                "edges": len(vault["topology"].get("edges", [])),
+            },
+            {"name": "lint", "status": "warn" if lint_warnings else "done", "warnings": lint_warnings},
+        ]
+        summary = {
+            "document_count": len(documents),
+            "notes_upserted": len(upserted),
+            "compiled_note_count": len([note for note in store["notes"] if self._in_scope(note, customer_id=customer_id, owner_id=resolved_owner_id) and bool(note.get("compiled_wiki") or (note.get("payload") if isinstance(note.get("payload"), dict) else {}).get("compiled_wiki") or note.get("source") == "wiki-loop")]),
+            "topology_node_count": len(vault["topology"].get("nodes", [])),
+            "topology_edge_count": len(vault["topology"].get("edges", [])),
+        }
         store["events"].append(
             {
-                "id": stable_id("event", f"wiki:{resolved_owner_id}:{customer_id}:{document_id or 'all'}:{now_ms()}"),
+                "id": stable_id("event", f"wiki:{resolved_owner_id}:{customer_id}:{document_id or 'all'}:{finished_at}"),
+                "run_id": run_id,
                 "type": "wiki_loop_run",
                 "customer_id": customer_id,
                 "owner_id": resolved_owner_id,
                 "document_id": document_id,
                 "notes_upserted": len(upserted),
-                "created_at": now_ms(),
+                "stages": stages,
+                "warnings": lint_warnings,
+                "summary": summary,
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "duration_ms": max(0, finished_at - started_at),
+                "created_at": finished_at,
             }
         )
         self.save_store(store)
         result = {
             "status": "ok",
+            "run_id": run_id,
             "customer_id": customer_id,
             "owner_mode": self.owner_mode,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "duration_ms": max(0, finished_at - started_at),
+            "stages": stages,
+            "warnings": lint_warnings,
+            "summary": summary,
             "notes_upserted": len(upserted),
             "notes": upserted,
         }
@@ -1658,16 +1734,49 @@ class KnowledgeEngine:
         store = self.load_store()
         documents = [doc for doc in store["documents"] if self._in_scope(doc, customer_id=customer_id, owner_id=resolved_owner_id)]
         notes = [note for note in store["notes"] if self._in_scope(note, customer_id=customer_id, owner_id=resolved_owner_id)]
+        compiled_notes = [
+            note
+            for note in notes
+            if bool(note.get("compiled_wiki") or (note.get("payload") if isinstance(note.get("payload"), dict) else {}).get("compiled_wiki") or note.get("source") == "wiki-loop")
+        ]
+        wiki_events = [
+            event
+            for event in store["events"]
+            if self._in_scope(event, customer_id=customer_id, owner_id=resolved_owner_id) and event.get("type") == "wiki_loop_run"
+        ]
+        last_run = max(wiki_events, key=lambda event: int(event.get("created_at") or 0), default=None)
+        health = self.store.health()
+        vector_ready = health.get("mode") == "postgres-pgvector"
+        generated_at = max([int(note.get("updated_at") or 0) for note in compiled_notes], default=0)
         result = {
             "status": "ok",
             "customer_id": customer_id,
             "owner_mode": self.owner_mode,
-            "db_ready": self.store.health().get("database_ready", False),
-            "vector_ready": self.store.health().get("mode") == "postgres-pgvector",
-            "compiled_wiki_ready": bool(notes),
+            "db_ready": health.get("database_ready", False),
+            "vector_ready": vector_ready,
+            "pgvector_ready": vector_ready,
+            "compiled_wiki_ready": bool(compiled_notes),
+            "compiled_wiki_status": {
+                "ready": bool(compiled_notes),
+                "exists": bool(compiled_notes),
+                "note_count": len(compiled_notes),
+                "generated_at": generated_at,
+                "book_slug": "pbs-llm-wiki",
+            },
+            "last_run": {
+                "run_id": last_run.get("run_id", "") if isinstance(last_run, dict) else "",
+                "status": "ok" if isinstance(last_run, dict) else "none",
+                "stages": last_run.get("stages", []) if isinstance(last_run, dict) else [],
+                "warnings": last_run.get("warnings", []) if isinstance(last_run, dict) else [],
+                "started_at": last_run.get("started_at") if isinstance(last_run, dict) else None,
+                "finished_at": last_run.get("finished_at") if isinstance(last_run, dict) else None,
+                "duration_ms": last_run.get("duration_ms") if isinstance(last_run, dict) else None,
+                "summary": last_run.get("summary", {}) if isinstance(last_run, dict) else {},
+            },
             "summary": {
                 "document_count": len(documents),
                 "note_count": len(notes),
+                "compiled_note_count": len(compiled_notes),
             },
         }
         if self._pbs_shadow_enabled():
@@ -1689,9 +1798,26 @@ class KnowledgeEngine:
         body = str(payload.get("body") or "").strip()
         if not body:
             raise ValueError("body is required")
-        tags = payload.get("tags") if isinstance(payload.get("tags"), list) else top_terms(body, 6)
-        links = WIKI_LINK_RE.findall(body)
-        client_note_id = str(payload.get("id") or "").strip()
+        overlay_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+        tags = payload.get("tags") if isinstance(payload.get("tags"), list) else overlay_payload.get("tags") if isinstance(overlay_payload.get("tags"), list) else top_terms(body, 6)
+        links_payload = payload.get("wikilinks") if isinstance(payload.get("wikilinks"), list) else overlay_payload.get("wikilinks") if isinstance(overlay_payload.get("wikilinks"), list) else None
+        links = [str(item) for item in links_payload] if links_payload is not None else WIKI_LINK_RE.findall(body)
+        overlay_id = str(payload.get("overlay_id") or payload.get("overlayId") or "").strip()
+        client_note_id = str(overlay_id or payload.get("id") or "").strip()
+        target_ref = str(payload.get("target_ref") or payload.get("targetRef") or payload.get("document_id") or overlay_payload.get("target_ref") or "").strip()
+        note_type = str(payload.get("note_type") or payload.get("noteType") or overlay_payload.get("note_type") or "manual").strip()
+        compiled_wiki = payload_bool(payload, "compiled_wiki", "compiledWiki", default=bool(overlay_payload.get("compiled_wiki")))
+        book_slug = str(payload.get("book_slug") or payload.get("bookSlug") or overlay_payload.get("book_slug") or "pbs-llm-wiki").strip()
+        note_payload = {
+            **overlay_payload,
+            "vault_note": True,
+            "note_type": note_type,
+            "compiled_wiki": compiled_wiki,
+            "wikilinks": links,
+            "tags": tags,
+            "target_ref": target_ref,
+            "book_slug": book_slug,
+        }
         note_id = (
             stable_id("note", f"{resolved_owner_id}:{customer_id}:client:{client_note_id}")
             if client_note_id
@@ -1699,10 +1825,20 @@ class KnowledgeEngine:
         )
         note = {
             "id": note_id,
+            "overlay_id": overlay_id or note_id,
+            "kind": str(payload.get("kind") or "note"),
             "client_note_id": client_note_id,
             "customer_id": customer_id,
             "owner_id": resolved_owner_id,
-            "document_id": payload.get("document_id"),
+            "document_id": payload.get("document_id") or target_ref or None,
+            "target_kind": str(payload.get("target_kind") or payload.get("targetKind") or overlay_payload.get("target_kind") or "document"),
+            "target_ref": target_ref,
+            "book_slug": book_slug,
+            "card_title": str(payload.get("card_title") or payload.get("cardTitle") or title),
+            "summary": str(payload.get("summary") or overlay_payload.get("summary") or body[:180]),
+            "note_type": note_type,
+            "compiled_wiki": compiled_wiki,
+            "payload": note_payload,
             "title": title,
             "body": body,
             "tags": tags,
@@ -1718,7 +1854,16 @@ class KnowledgeEngine:
         ]
         store["notes"].append(note)
         self.save_store(store)
-        result = {"status": "ok", "note": note}
+        count = len([existing for existing in store["notes"] if self._in_scope(existing, customer_id=customer_id, owner_id=resolved_owner_id)])
+        result = {
+            "status": "ok",
+            "saved": True,
+            "overlay_id": note["overlay_id"],
+            "record": note,
+            "note": note,
+            "count": count,
+            "updated_at": note["updated_at"],
+        }
         if self._pbs_shadow_enabled():
             return self._with_shadow_write(result, "wiki_vault_note_save", lambda: self.pbs.save_note(payload, resolved_owner_id))
         return result

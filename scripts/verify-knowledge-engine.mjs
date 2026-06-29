@@ -928,6 +928,10 @@ try {
       selectedContext?.document_source_id &&
       typeof selectedContext?.viewer_path === "string" &&
       selectedContext?.source_scope === "wiki_vault" &&
+      selectedContext?.compiled_wiki === true &&
+      selectedContext?.note_type === "source" &&
+      selectedContext?.target_ref === uploadedDocumentId &&
+      selectedContext?.book_slug === "pbs-llm-wiki" &&
       selectedUpload?.graph_summary?.wikilinks?.includes("Router Latency") &&
       selectedUpload?.chunk_previews?.length >= 1,
     "gateway local wiki vault exposes PBS-style graph alias, wikilinks, tags, upload summaries, context viewer paths, relations, and selected context",
@@ -987,6 +991,16 @@ try {
     headers: ownerHeaders,
     body: JSON.stringify({
       customer_id: "verify",
+      overlay_id: "overlay-vault-only-router-signal",
+      target_ref: uploadedDocumentId,
+      book_slug: "pbs-llm-wiki",
+      note_type: "manual",
+      payload: {
+        wikilinks: ["Router Latency"],
+        tags: ["ingress"],
+        note_type: "manual",
+        compiled_wiki: false
+      },
       title: "Vault-only Router Signal",
       body: "This wiki-only context contains vault-only-signal-7421 and links [[Router Latency]] with #ingress."
     })
@@ -1003,10 +1017,17 @@ try {
   expect(
     "knowledge:rag-wiki-vault-context",
     vaultOnlyNote.response.status === 200 &&
+      vaultOnlyNote.body.saved === true &&
+      vaultOnlyNote.body.record?.overlay_id === "overlay-vault-only-router-signal" &&
+      vaultOnlyNote.body.record?.kind === "note" &&
+      vaultOnlyNote.body.record?.target_ref === uploadedDocumentId &&
+      vaultOnlyNote.body.record?.book_slug === "pbs-llm-wiki" &&
+      vaultOnlyNote.body.record?.payload?.wikilinks?.includes("Router Latency") &&
+      vaultOnlyNote.body.record?.payload?.tags?.includes("ingress") &&
       vaultOnlyRag.response.status === 200 &&
       vaultOnlyRag.body.trace?.wiki_vault_context_attached === true &&
       vaultOnlyCitations.some((citation) => citation.source === "wiki-vault" && String(citation.snippet ?? "").includes("vault-only-signal-7421")),
-    "gateway RAG can cite local wiki vault context that is not present in uploaded chunks",
+    "gateway RAG can cite local wiki vault context and manual notes preserve PBS overlay metadata",
     JSON.stringify({ note: vaultOnlyNote.body, rag: vaultOnlyRag.body })
   );
   const isolatedRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
@@ -1455,6 +1476,18 @@ try {
     body: JSON.stringify({ customer_id: "verify" })
   });
   expect("knowledge:wiki-loop", wiki.response.status === 200 && wiki.body.notes_upserted >= 1, "gateway wiki loop upserts notes");
+  const wikiStageNames = Array.isArray(wiki.body.stages) ? wiki.body.stages.map((stage) => stage.name) : [];
+  expect(
+    "knowledge:wiki-loop-staged-contract",
+    wiki.response.status === 200 &&
+      typeof wiki.body.run_id === "string" &&
+      wiki.body.run_id.length > 0 &&
+      Number.isFinite(Number(wiki.body.duration_ms)) &&
+      ["health", "wiki_compile", "topology_refresh", "lint"].every((stageName) => wikiStageNames.includes(stageName)) &&
+      wiki.body.summary?.compiled_note_count >= wiki.body.notes_upserted,
+    "gateway local wiki loop exposes PBS-style staged compiler run envelope",
+    JSON.stringify(wiki.body)
+  );
   const wikiNote = Array.isArray(wiki.body.notes) ? wiki.body.notes.find((note) => note.document_id === uploadedDocumentId) : null;
   expect(
     "knowledge:wiki-loop-lineage",
@@ -1481,6 +1514,22 @@ try {
       String(evolvedWikiNote?.provenance?.previous_body_hash ?? "").length > 0,
     "gateway wiki loop evolves the same uploaded document note across repeated runs",
     JSON.stringify({ uploadedDocumentId, evolvedWikiNote })
+  );
+  const wikiStatus = await fetchJson(`${gatewayBase}/api/knowledge/wiki-loop/status?customer_id=verify`, {
+    headers: ownerHeaders
+  });
+  expect(
+    "knowledge:wiki-loop-status-staged-contract",
+    wikiStatus.response.status === 200 &&
+      wikiStatus.body.compiled_wiki_status?.ready === true &&
+      wikiStatus.body.compiled_wiki_status?.note_count >= 1 &&
+      wikiStatus.body.compiled_wiki_status?.book_slug === "pbs-llm-wiki" &&
+      typeof wikiStatus.body.last_run?.run_id === "string" &&
+      Array.isArray(wikiStatus.body.last_run?.stages) &&
+      wikiStatus.body.last_run.stages.some((stage) => stage.name === "wiki_compile") &&
+      wikiStatus.body.pgvector_ready !== undefined,
+    "gateway local wiki-loop status exposes PBS-style last_run and compiled wiki readiness",
+    JSON.stringify(wikiStatus.body)
   );
 
   const topology = await fetchJson(`${gatewayBase}/api/knowledge/topology?customer_id=verify`, {
