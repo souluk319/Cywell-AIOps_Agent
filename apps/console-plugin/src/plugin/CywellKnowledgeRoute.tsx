@@ -1641,6 +1641,7 @@ function CorpusWorkbench({
       <div className="cas-knowledge-viewer-list">
         {reports.slice(0, 12).map((target) => {
           const active = selectedDocumentId === (target.document_source_id || target.id);
+          const previewText = firstString(target.chunk_previews?.[0], ["markdown", "text", "snippet"]);
           return (
             <button
               className="cas-knowledge-viewer-link"
@@ -1654,9 +1655,11 @@ function CorpusWorkbench({
               <span className="cas-knowledge-muted">
                 {[target.document_source_id || target.id, target.source_scope, target.chunk_count !== undefined ? `${target.chunk_count} chunks` : ""]
                   .filter(Boolean)
-                  .join(" · ")}
+                .join(" · ")}
               </span>
               <span className="cas-knowledge-muted">{target.ready_for_chat === true ? "ready for RAG" : "index pending"}</span>
+              {target.summary && <span>{target.summary}</span>}
+              {previewText && <span className="cas-knowledge-muted">{previewText}</span>}
             </button>
           );
         })}
@@ -1742,6 +1745,14 @@ function KnowledgeResultSummary({ result }: { result: ActionResult }) {
     ? result.notes.filter((item): item is ActionResult => typeof item === "object" && item !== null)
     : [];
   const topology = topologyPayload(result);
+  const document = recordValue(result.document);
+  const summary = recordValue(result.summary);
+  const highlights = [
+    firstString(result, ["document_id", "document_source_id"]) ?? firstString(document, ["document_source_id", "document_id", "id"]),
+    firstString(result, ["overlay_id", "note_id"]),
+    Number.isFinite(Number(result.chunks_indexed)) ? `${Number(result.chunks_indexed)} chunks indexed` : undefined,
+    Number.isFinite(Number(summary?.imported_url_count)) ? `${Number(summary?.imported_url_count)} URLs imported` : undefined
+  ].filter((item): item is string => Boolean(item));
   const answer = firstString(result, ["answer", "summary", "message", "error", "detail", "code"]);
   const isError = result.status === "error";
   return (
@@ -1753,6 +1764,15 @@ function KnowledgeResultSummary({ result }: { result: ActionResult }) {
         </span>
       </div>
       {answer && <p data-test="cas-knowledge-result-answer">{answer}</p>}
+      {highlights.length > 0 && (
+        <div className="cas-knowledge-scope-row" data-test="cas-knowledge-result-highlights">
+          {highlights.map((highlight) => (
+            <span className="cas-knowledge-badge" key={highlight}>
+              {highlight}
+            </span>
+          ))}
+        </div>
+      )}
       {citations.length > 0 && (
         <div className="cas-knowledge-citation-list" data-test="cas-knowledge-result-citations">
           {citations.slice(0, 5).map((citation, index) => (

@@ -188,6 +188,7 @@ function startFakePbsServer(port) {
         document_source_id: "pbs-doc-1",
         chunk_count: 2,
         indexed_count: 2,
+        customer_id: body.customer_id,
         owner_user_id: body.owner_user_id,
         ready_for_chat: true,
         stage_events: [{ stage: "fake", status: "done" }]
@@ -199,9 +200,11 @@ function startFakePbsServer(port) {
         schema_version: "url_ingestion_report_v1",
         import_id: "pbs-url-1",
         root_url: body.url,
+        customer_id: body.customer_id,
+        owner_user_id: body.owner_user_id,
         summary: { imported_url_count: 1, indexed_url_count: 1 },
-        pages: [{ url: body.url, status: "imported", chunk_count: 1, indexed_count: 1 }],
-        upload_results: [],
+        pages: [{ url: body.url, status: "imported", chunk_count: 1, indexed_count: 1, customer_id: body.customer_id }],
+        upload_results: [{ document_source_id: "pbs-url-1", customer_id: body.customer_id, owner_user_id: body.owner_user_id }],
         wiki_loop: { status: "done" },
         stage_events: []
       });
@@ -221,8 +224,21 @@ function startFakePbsServer(port) {
         });
         return;
       }
+      if (url.searchParams.get("customer_id") === "scope-unlabeled") {
+        sendFakePbsJson(response, 200, {
+          items: [{ document_source_id: "pbs-unlabeled-doc", filename: "unlabeled.txt" }]
+        });
+        return;
+      }
       sendFakePbsJson(response, 200, {
-        items: [{ document_source_id: "pbs-doc-1", filename: "fake-pbs.txt", owner_user_id: url.searchParams.get("user_id") }]
+        items: [
+          {
+            document_source_id: "pbs-doc-1",
+            filename: "fake-pbs.txt",
+            customer_id: url.searchParams.get("customer_id"),
+            owner_user_id: url.searchParams.get("user_id")
+          }
+        ]
       });
       return;
     }
@@ -259,6 +275,20 @@ function startFakePbsServer(port) {
         sendFakePbsJson(response, 200, {
           answer: "PBS primitive citation answer",
           sources: ["unscoped leaked citation text"]
+        });
+        return;
+      }
+      if (String(body.query ?? "").includes("scope-decoy-citation")) {
+        sendFakePbsJson(response, 200, {
+          answer: "PBS decoy citation answer",
+          citations: [
+            {
+              id: "pbs-decoy-citation",
+              title: "Decoy PBS Citation",
+              snippet: "PBS evidence with nested decoy scope only",
+              metadata: { unrelated: { customer_id: body.customer_id } }
+            }
+          ]
         });
         return;
       }
@@ -320,14 +350,79 @@ function startFakePbsServer(port) {
         });
         return;
       }
+      if (url.searchParams.get("customer_id") === "scope-unlabeled-vault") {
+        sendFakePbsJson(response, 200, {
+          user_id: url.searchParams.get("user_id"),
+          customer_id: url.searchParams.get("customer_id"),
+          notes: [{ id: "pbs-unlabeled-note", title: "PBS Unlabeled Note", body: "PBS body" }],
+          topology: {
+            graph: {
+              nodes: [
+                {
+                  node_id: "pbs-scoped-topology-note",
+                  kind: "wiki-note",
+                  title: "PBS Scoped Topology Note",
+                  metadata: { customer_id: url.searchParams.get("customer_id") }
+                }
+              ],
+              links: []
+            }
+          }
+        });
+        return;
+      }
+      if (url.searchParams.get("customer_id") === "scope-unlabeled-topology") {
+        sendFakePbsJson(response, 200, {
+          user_id: url.searchParams.get("user_id"),
+          customer_id: url.searchParams.get("customer_id"),
+          notes: [
+            {
+              id: "pbs-scoped-note",
+              title: "PBS Scoped Note",
+              body: "PBS body",
+              metadata: { customer_id: url.searchParams.get("customer_id") }
+            }
+          ],
+          topology: {
+            graph: {
+              nodes: [{ node_id: "pbs-unlabeled-topology-node", kind: "wiki-note", title: "PBS Unlabeled Topology Node" }],
+              links: [{ source_id: "pbs-unlabeled-topology-node", target_id: "pbs-unlabeled-target", kind: "references" }]
+            }
+          }
+        });
+        return;
+      }
       if (url.searchParams.get("customer_id") === "orphan-live") {
         sendFakePbsJson(response, 200, {
           user_id: url.searchParams.get("user_id"),
-          notes: [{ id: "pbs-orphan-note", title: "PBS Orphan Note", body: "PBS body", tags: ["orphan"], wikilinks: [] }],
+          notes: [
+            {
+              id: "pbs-orphan-note",
+              title: "PBS Orphan Note",
+              body: "PBS body",
+              tags: ["orphan"],
+              wikilinks: [],
+              metadata: { customer_id: url.searchParams.get("customer_id") }
+            }
+          ],
           topology: {
             graph: {
-              nodes: [{ node_id: "pbs-orphan-note", kind: "wiki-note", title: "PBS Orphan Note" }],
-              links: [{ source_id: "pbs-orphan-note", target_id: "pbs-missing-endpoint", kind: "references" }]
+              nodes: [
+                {
+                  node_id: "pbs-orphan-note",
+                  kind: "wiki-note",
+                  title: "PBS Orphan Note",
+                  metadata: { customer_id: url.searchParams.get("customer_id") }
+                }
+              ],
+              links: [
+                {
+                  source_id: "pbs-orphan-note",
+                  target_id: "pbs-missing-endpoint",
+                  kind: "references",
+                  provenance: { customer_id: url.searchParams.get("customer_id") }
+                }
+              ]
             }
           },
           summary: { graph_relation_count: 1 }
@@ -337,14 +432,38 @@ function startFakePbsServer(port) {
       if (url.searchParams.get("customer_id") === "mixed-live") {
         sendFakePbsJson(response, 200, {
           user_id: url.searchParams.get("user_id"),
-          relations: [{ source_id: "wrapper-noise-a", target_id: "wrapper-noise-b", kind: "should-not-render" }],
+          relations: [
+            {
+              source_id: "wrapper-noise-a",
+              target_id: "wrapper-noise-b",
+              kind: "should-not-render",
+              provenance: { customer_id: url.searchParams.get("customer_id") }
+            }
+          ],
           topology: {
             graph: {
               nodes: [
-                { node_id: "pbs-mixed-note", kind: "wiki-note", title: "PBS Mixed Note" },
-                { node_id: "pbs-mixed-term", kind: "term", title: "mixed" }
+                {
+                  node_id: "pbs-mixed-note",
+                  kind: "wiki-note",
+                  title: "PBS Mixed Note",
+                  metadata: { customer_id: url.searchParams.get("customer_id") }
+                },
+                {
+                  node_id: "pbs-mixed-term",
+                  kind: "term",
+                  title: "mixed",
+                  metadata: { customer_id: url.searchParams.get("customer_id") }
+                }
               ],
-              links: [{ source_id: "pbs-mixed-note", target_id: "pbs-mixed-term", kind: "tag" }]
+              links: [
+                {
+                  source_id: "pbs-mixed-note",
+                  target_id: "pbs-mixed-term",
+                  kind: "tag",
+                  provenance: { customer_id: url.searchParams.get("customer_id") }
+                }
+              ]
             }
           },
           summary: { graph_relation_count: 1 }
@@ -353,7 +472,16 @@ function startFakePbsServer(port) {
       }
       sendFakePbsJson(response, 200, {
         user_id: url.searchParams.get("user_id"),
-        notes: [{ id: "pbs-note-1", title: "PBS Note", body: "PBS body", tags: ["router"], wikilinks: ["HAProxy"] }],
+        notes: [
+          {
+            id: "pbs-note-1",
+            title: "PBS Note",
+            body: "PBS body",
+            tags: ["router"],
+            wikilinks: ["HAProxy"],
+            metadata: { customer_id: url.searchParams.get("customer_id") }
+          }
+        ],
         topology: {
           graph: {
             nodes: [
@@ -380,21 +508,21 @@ function startFakePbsServer(port) {
                 source_kind: "upload",
                 source_url: "cas://pbs/upload/pbs-doc-1",
                 basic_index_ready: true,
-                metadata: { source_document_id: "pbs-doc-1" }
+                metadata: { source_document_id: "pbs-doc-1", customer_id: url.searchParams.get("customer_id") }
               },
               {
                 node_id: "pbs-link-haproxy",
                 kind: "wikilink",
                 title: "HAProxy",
                 degree: 4,
-                metadata: { source_document_id: "pbs-doc-1" }
+                metadata: { source_document_id: "pbs-doc-1", customer_id: url.searchParams.get("customer_id") }
               },
               {
                 node_id: "pbs-tag-router",
                 kind: "tag",
                 title: "router",
                 degree: 2,
-                metadata: { source_document_id: "pbs-doc-1" }
+                metadata: { source_document_id: "pbs-doc-1", customer_id: url.searchParams.get("customer_id") }
               },
               {
                 node_id: "pbs-entity-route-shard",
@@ -402,14 +530,14 @@ function startFakePbsServer(port) {
                 entity_kind: "openshift_resource",
                 title: "route shard",
                 degree: 5,
-                metadata: { source_document_id: "pbs-doc-1" }
+                metadata: { source_document_id: "pbs-doc-1", customer_id: url.searchParams.get("customer_id") }
               },
               {
                 node_id: "pbs-concept-latency",
                 kind: "concept",
                 title: "latency",
                 degree: 4,
-                metadata: { source_document_id: "pbs-doc-1" }
+                metadata: { source_document_id: "pbs-doc-1", customer_id: url.searchParams.get("customer_id") }
               }
             ],
             links: [
@@ -417,19 +545,19 @@ function startFakePbsServer(port) {
                 source_id: "pbs-note-1",
                 target_id: "pbs-link-haproxy",
                 kind: "links_to",
-                provenance: { source_document_id: "pbs-doc-1" }
+                provenance: { source_document_id: "pbs-doc-1", customer_id: url.searchParams.get("customer_id") }
               },
               {
                 source_id: "pbs-note-1",
                 target_id: "pbs-tag-router",
                 kind: "tagged",
-                provenance: { source_document_id: "pbs-doc-1" }
+                provenance: { source_document_id: "pbs-doc-1", customer_id: url.searchParams.get("customer_id") }
               },
               {
                 source_id: "pbs-entity-route-shard",
                 target_id: "pbs-concept-latency",
                 kind: "explains",
-                provenance: { source_document_id: "pbs-doc-1" }
+                provenance: { source_document_id: "pbs-doc-1", customer_id: url.searchParams.get("customer_id") }
               }
             ]
           }
@@ -448,7 +576,7 @@ function startFakePbsServer(port) {
         top_wikilinks: [{ label: "HAProxy", count: 1 }],
         top_tags: [{ label: "router", count: 1 }],
         selected_context: [{ title: "PBS Note", body: "PBS body" }],
-        selected_uploads: [{ id: "pbs-doc-1", title: "PBS Upload Document" }]
+        selected_uploads: [{ id: "pbs-doc-1", title: "PBS Upload Document", customer_id: url.searchParams.get("customer_id") }]
       });
       return;
     }
@@ -456,6 +584,8 @@ function startFakePbsServer(port) {
       sendFakePbsJson(response, 201, {
         saved: true,
         overlay_id: "pbs-overlay-1",
+        customer_id: body.customer_id,
+        user_id: body.user_id,
         title: body.title,
         body: body.body,
         payload: { tags: ["router"], wikilinks: ["HAProxy"] }
@@ -1950,9 +2080,9 @@ try {
       force_reingest: false,
       source_metadata: {
         customer_id: "live",
-        customerId: "other-live-camel",
-        tenant_id: "other-tenant",
-        sourceCollection: "other-source-collection",
+        customerId: "live",
+        tenant_id: "live",
+        sourceCollection: "live",
         source_scope: "official_docs",
         sourceKind: "official",
         visibility: "shared",
@@ -1962,7 +2092,7 @@ try {
         harmless_label: "kept"
       },
       sourceMetadata: {
-        customerId: "camel-other-customer",
+        customerId: "live",
         source_scope: "official_docs",
         owner_user_id: "camel-attacker-owner"
       }
@@ -2023,6 +2153,30 @@ try {
       after: liveUploadRecordCountAfterScopeReject
     })
   );
+  const liveUploadRecordCountBeforeAliasReject = fakePbs.records.filter((record) => record.path === "/api/uploads/ingest").length;
+  const liveRejectedAliasUpload = await fetchJson(`${liveBase}/api/knowledge/uploads/ingest`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({
+      customer_id: "live",
+      customerId: "other-customer",
+      filename: "live-alias-spoof.txt",
+      content_base64: Buffer.from("PBS live alias spoof must not reach outbound.", "utf8").toString("base64")
+    })
+  });
+  const liveUploadRecordCountAfterAliasReject = fakePbs.records.filter((record) => record.path === "/api/uploads/ingest").length;
+  expect(
+    "knowledge:pbs-live-upload-customer-alias-before-outbound",
+    liveRejectedAliasUpload.response.status === 400 &&
+      String(liveRejectedAliasUpload.body.error ?? "").includes("customer scope alias") &&
+      liveUploadRecordCountAfterAliasReject === liveUploadRecordCountBeforeAliasReject,
+    "PBS live upload rejects conflicting customer aliases before any outbound PBS request",
+    JSON.stringify({
+      body: liveRejectedAliasUpload.body,
+      before: liveUploadRecordCountBeforeAliasReject,
+      after: liveUploadRecordCountAfterAliasReject
+    })
+  );
   const liveUrlIngest = await fetchJson(`${liveBase}/api/knowledge/uploads/url-ingest`, {
     method: "POST",
     headers: liveHeaders,
@@ -2034,13 +2188,13 @@ try {
       auto_compile_wiki: true,
       source_metadata: {
         customer_id: "live",
-        customerId: "url-other-customer",
+        customerId: "live",
         source_scope: "official_docs",
         owner_user_id: "url-attacker-owner",
         harmless_url_label: "kept-url"
       },
       sourceMetadata: {
-        customerId: "url-camel-other-customer",
+        customerId: "live",
         source_scope: "official_docs",
         owner_user_id: "url-camel-attacker-owner"
       }
@@ -2100,6 +2254,18 @@ try {
     "PBS live upload reports reject response rows outside the requested customer/owner scope",
     JSON.stringify(liveLeakedReports.body)
   );
+  const liveUnlabeledReports = await fetchJson(`${liveBase}/api/knowledge/uploads/reports?customer_id=scope-unlabeled`, {
+    headers: liveHeaders
+  });
+  expect(
+    "knowledge:pbs-live-reports-missing-scope-blocked",
+    liveUnlabeledReports.response.status === 502 &&
+      liveUnlabeledReports.body.status === "error" &&
+      liveUnlabeledReports.body.code === "pbs-scope-mismatch" &&
+      liveUnlabeledReports.body.pbs?.scope_mismatches?.some((item) => String(item.scope ?? "") === "scope_proof"),
+    "PBS live upload reports reject unscoped response rows without customer or owner proof",
+    JSON.stringify(liveUnlabeledReports.body)
+  );
   const liveRag = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
     method: "POST",
     headers: liveHeaders,
@@ -2142,6 +2308,45 @@ try {
     "PBS live RAG rejects privileged source scopes before any outbound PBS request",
     JSON.stringify({ body: liveRejectedScopeRag.body, before: liveChatRecordCountBeforeScopeReject, after: liveChatRecordCountAfterScopeReject })
   );
+  const liveChatRecordCountBeforeAliasReject = fakePbs.records.filter((record) => record.path === "/api/chat").length;
+  const liveRejectedAliasRag = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({
+      customer_id: "live",
+      customerId: "other-customer",
+      question: "router latency evidence"
+    })
+  });
+  const liveChatRecordCountAfterAliasReject = fakePbs.records.filter((record) => record.path === "/api/chat").length;
+  expect(
+    "knowledge:pbs-live-rag-customer-alias-before-outbound",
+    liveRejectedAliasRag.response.status === 400 &&
+      String(liveRejectedAliasRag.body.error ?? "").includes("customer scope alias") &&
+      liveChatRecordCountAfterAliasReject === liveChatRecordCountBeforeAliasReject,
+    "PBS live RAG rejects conflicting top-level customer aliases before any outbound PBS request",
+    JSON.stringify({ body: liveRejectedAliasRag.body, before: liveChatRecordCountBeforeAliasReject, after: liveChatRecordCountAfterAliasReject })
+  );
+  const liveChatRecordCountBeforeNestedReject = fakePbs.records.filter((record) => record.path === "/api/chat").length;
+  const liveRejectedNestedRag = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({
+      customer_id: "live",
+      question: "router latency evidence",
+      filters: { tenant_id: "other-tenant" },
+      source_metadata: { filters: { workspace_id: "other-workspace" } }
+    })
+  });
+  const liveChatRecordCountAfterNestedReject = fakePbs.records.filter((record) => record.path === "/api/chat").length;
+  expect(
+    "knowledge:pbs-live-rag-nested-scope-alias-before-outbound",
+    liveRejectedNestedRag.response.status === 400 &&
+      String(liveRejectedNestedRag.body.error ?? "").includes("customer scope alias") &&
+      liveChatRecordCountAfterNestedReject === liveChatRecordCountBeforeNestedReject,
+    "PBS live RAG rejects nested customer selector aliases before any outbound PBS request",
+    JSON.stringify({ body: liveRejectedNestedRag.body, before: liveChatRecordCountBeforeNestedReject, after: liveChatRecordCountAfterNestedReject })
+  );
   const liveLeakedRagCitation = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
     method: "POST",
     headers: liveHeaders,
@@ -2183,6 +2388,20 @@ try {
       livePrimitiveRagCitation.body.pbs?.scope_mismatches?.some((item) => String(item.scope ?? "") === "scope_proof"),
     "PBS live RAG rejects primitive citation/source rows without object scope proof",
     JSON.stringify(livePrimitiveRagCitation.body)
+  );
+  const liveDecoyRagCitation = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({ customer_id: "live", question: "scope-decoy-citation" })
+  });
+  expect(
+    "knowledge:pbs-live-rag-citation-decoy-proof-blocked",
+    liveDecoyRagCitation.response.status === 502 &&
+      liveDecoyRagCitation.body.status === "error" &&
+      liveDecoyRagCitation.body.code === "pbs-scope-mismatch" &&
+      liveDecoyRagCitation.body.pbs?.scope_mismatches?.some((item) => String(item.scope ?? "") === "scope_proof"),
+    "PBS live RAG rejects citations that hide scope proof only in unrelated nested objects",
+    JSON.stringify(liveDecoyRagCitation.body)
   );
   const liveRagFailure = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
     method: "POST",
@@ -2299,6 +2518,18 @@ try {
     "PBS live topology rejects graph payloads outside the requested customer/owner scope",
     JSON.stringify(liveLeakedTopology.body)
   );
+  const liveUnlabeledTopology = await fetchJson(`${liveBase}/api/knowledge/topology?customer_id=scope-unlabeled-topology`, {
+    headers: liveHeaders
+  });
+  expect(
+    "knowledge:pbs-live-topology-missing-scope-blocked",
+    liveUnlabeledTopology.response.status === 502 &&
+      liveUnlabeledTopology.body.status === "error" &&
+      liveUnlabeledTopology.body.code === "pbs-scope-mismatch" &&
+      liveUnlabeledTopology.body.pbs?.scope_mismatches?.some((item) => String(item.scope ?? "") === "scope_proof"),
+    "PBS live topology rejects graph rows without row-level customer or owner proof",
+    JSON.stringify(liveUnlabeledTopology.body)
+  );
   const liveVault = await fetchJson(`${liveBase}/api/knowledge/wiki-vault?customer_id=live`, {
     headers: liveHeaders
   });
@@ -2310,6 +2541,18 @@ try {
       liveVault.body.topology?.counts?.edges === 3 &&
       graphIntegrity(liveVault.body.topology),
     "PBS live wiki vault route exposes CAS-normalized topology even when PBS returns nested topology graph"
+  );
+  const liveUnlabeledVault = await fetchJson(`${liveBase}/api/knowledge/wiki-vault?customer_id=scope-unlabeled-vault`, {
+    headers: liveHeaders
+  });
+  expect(
+    "knowledge:pbs-live-vault-note-missing-scope-blocked",
+    liveUnlabeledVault.response.status === 502 &&
+      liveUnlabeledVault.body.status === "error" &&
+      liveUnlabeledVault.body.code === "pbs-scope-mismatch" &&
+      liveUnlabeledVault.body.pbs?.scope_mismatches?.some((item) => String(item.scope ?? "") === "scope_proof"),
+    "PBS live wiki vault rejects note rows without row-level customer or owner proof",
+    JSON.stringify(liveUnlabeledVault.body)
   );
   const liveStatus = await fetchJson(`${liveBase}/api/knowledge/wiki-loop/status?customer_id=live`, {
     headers: liveHeaders

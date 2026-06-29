@@ -1,6 +1,6 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - Customer Corpus Workbench and Source-Lane Hardening
+## Historical Update - Customer Corpus Workbench and Source-Lane Hardening
 
 Implemented after the latest product/runtime/backend review pass:
 

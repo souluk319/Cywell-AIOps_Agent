@@ -179,8 +179,8 @@ function commandPlan() {
 }
 
 function currentHeadMatches(evidence, meta) {
-  if (!evidence.exists || (!evidence.head && !evidence.fullHead) || (!meta.head && !meta.fullHead)) return false;
-  return evidence.head === meta.head || evidence.fullHead === meta.fullHead;
+  if (!evidence.exists || !evidence.fullHead || !meta.fullHead) return false;
+  return evidence.fullHead === meta.fullHead;
 }
 
 function hasRealRenderHashes(evidence) {
@@ -207,7 +207,8 @@ function sourceContractPinned(evidence) {
       pbsSource?.requireCleanSource === true &&
       pbsSource?.treeStatus === "clean" &&
       pbsSource?.expectedHead &&
-      (pbsSource?.head || pbsSource?.fullHead) &&
+      pbsSource?.fullHead &&
+      pbsSource.fullHead === pbsSource.expectedHead &&
       pbsSource?.contractFileSha256 &&
       Object.values(pbsSource.contractFileSha256).every(Boolean)
   );
@@ -400,6 +401,21 @@ async function runSelfTest() {
           return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
         })(),
         "fixture rejects dirty or unpinned PBS source evidence"
+      ],
+      [
+        "cutover-bundle:self-test-source-full-head-mismatch-rejected",
+        (() => {
+          write("cas-pbs-source-contract.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: { branch: "main", head: "def5678", fullHead: "def5678", treeStatus: "clean", requireCleanSource: true, expectedHead: "0000000", contractFileSha256: { "deploy/Dockerfile": "hash" } },
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
+        })(),
+        "fixture rejects PBS source-contract evidence when fullHead differs from expectedHead"
       ],
       [
         "cutover-bundle:self-test-prereq-self-test-rejected",

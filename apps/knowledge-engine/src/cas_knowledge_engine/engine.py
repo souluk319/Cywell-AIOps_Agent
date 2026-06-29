@@ -351,6 +351,40 @@ RESERVED_SOURCE_METADATA_KEYS = {
     "source_kind",
     "sourceKind",
 } | PBS_OWNER_SCOPE_KEYS | PBS_CUSTOMER_SCOPE_KEYS
+PBS_SCOPE_PROOF_CONTAINER_KEYS = {"metadata", "source_metadata", "sourceMetadata", "provenance"}
+
+
+def reject_customer_scope_conflicts(value: Any, *, customer_id: str, path: str = "$") -> None:
+    expected_customer_id = str(customer_id or "").strip()
+    if not expected_customer_id:
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            item_path = f"{path}.{key}"
+            if key in PBS_CUSTOMER_SCOPE_KEYS:
+                observed = str(item or "").strip()
+                if observed and observed != expected_customer_id:
+                    raise ValueError(
+                        f"customer scope alias {item_path}={observed} conflicts with customer_id={expected_customer_id}"
+                    )
+            if isinstance(item, (dict, list)):
+                reject_customer_scope_conflicts(item, customer_id=expected_customer_id, path=item_path)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            if isinstance(item, (dict, list)):
+                reject_customer_scope_conflicts(item, customer_id=expected_customer_id, path=f"{path}[{index}]")
+
+
+def strip_reserved_scope_aliases(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: strip_reserved_scope_aliases(item)
+            for key, item in value.items()
+            if key not in RESERVED_SOURCE_METADATA_KEYS
+        }
+    if isinstance(value, list):
+        return [strip_reserved_scope_aliases(item) for item in value]
+    return value
 
 
 def canonical_private_ingest_payload(payload: dict[str, Any], *, customer_id: str, source_kind: str) -> dict[str, Any]:
@@ -363,16 +397,14 @@ def canonical_private_ingest_payload(payload: dict[str, Any], *, customer_id: st
         raise ValueError("private customer ingest only accepts visibility=private_user")
     if requested_kind != source_kind:
         raise ValueError(f"private customer ingest only accepts source_kind={source_kind}")
-    normalized = dict(payload)
-    normalized.pop("sourceScope", None)
-    normalized.pop("sourceKind", None)
+    reject_customer_scope_conflicts(payload, customer_id=customer_id)
+    normalized = strip_reserved_scope_aliases(payload)
     normalized.pop("sourceMetadata", None)
+    normalized["customer_id"] = customer_id
     normalized["source_scope"] = PRIVATE_INGEST_SOURCE_SCOPE
     normalized["visibility"] = PRIVATE_INGEST_VISIBILITY
     normalized["source_kind"] = source_kind
-    metadata = source_metadata(normalized, customer_id)
-    for reserved_key in RESERVED_SOURCE_METADATA_KEYS:
-        metadata.pop(reserved_key, None)
+    metadata = strip_reserved_scope_aliases(source_metadata(payload, customer_id))
     metadata["customer_id"] = customer_id
     normalized["source_metadata"] = metadata
     return normalized
@@ -392,16 +424,27 @@ def source_scope_list(payload: dict[str, Any], *keys: str) -> list[str]:
     return []
 
 
-def canonical_private_rag_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def canonical_private_rag_payload(payload: dict[str, Any], *, customer_id: str) -> dict[str, Any]:
+    reject_customer_scope_conflicts(payload, customer_id=customer_id)
     requested_scopes = source_scope_list(payload, "enabled_source_scopes", "enabledSourceScopes")
     if not requested_scopes:
         requested_scopes = list(PRIVATE_RAG_DEFAULT_SOURCE_SCOPES)
     disallowed = sorted({scope for scope in requested_scopes if scope not in PRIVATE_RAG_SOURCE_SCOPES})
     if disallowed:
         raise ValueError(f"private RAG source scopes are not allowed: {', '.join(disallowed)}")
-    normalized = dict(payload)
+    normalized = strip_reserved_scope_aliases(payload)
     normalized.pop("enabledSourceScopes", None)
+    normalized.pop("sourceMetadata", None)
+    normalized["customer_id"] = customer_id
     normalized["enabled_source_scopes"] = requested_scopes
+    return normalized
+
+
+def canonical_private_customer_payload(payload: dict[str, Any], *, customer_id: str) -> dict[str, Any]:
+    reject_customer_scope_conflicts(payload, customer_id=customer_id)
+    normalized = strip_reserved_scope_aliases(payload)
+    normalized.pop("sourceMetadata", None)
+    normalized["customer_id"] = customer_id
     return normalized
 
 
@@ -578,50 +621,63 @@ class KnowledgeEngine:
         walk(value, path)
         return mismatches
 
+    def _pbs_direct_scope_proof_present(self, value: Any) -> bool:
+        if not isinstance(value, dict):
+            return False
+        return any(
+            key in PBS_CUSTOMER_SCOPE_KEYS | PBS_OWNER_SCOPE_KEYS and self._pbs_scope_value(item)
+            for key, item in value.items()
+        )
+
     def _pbs_scope_proof_present(self, value: Any) -> bool:
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if key in PBS_CUSTOMER_SCOPE_KEYS | PBS_OWNER_SCOPE_KEYS and self._pbs_scope_value(item):
-                    return True
-                if isinstance(item, (dict, list)) and self._pbs_scope_proof_present(item):
-                    return True
-        elif isinstance(value, list):
-            return any(self._pbs_scope_proof_present(item) for item in value)
+        if not isinstance(value, dict):
+            return False
+        if self._pbs_direct_scope_proof_present(value):
+            return True
+        for key in PBS_SCOPE_PROOF_CONTAINER_KEYS:
+            container = value.get(key)
+            if isinstance(container, dict) and self._pbs_direct_scope_proof_present(container):
+                return True
         return False
 
     def _pbs_missing_scope_proof(self, value: Any, *, path: str = "$") -> list[dict[str, str]]:
         missing: list[dict[str, str]] = []
+        if value is None:
+            return missing
+        rows = value if isinstance(value, list) else [value]
+        for index, item in enumerate(rows):
+            item_path = f"{path}[{index}]" if isinstance(value, list) else path
+            if isinstance(item, dict) and self._pbs_scope_proof_present(item):
+                continue
+            missing.append(
+                {
+                    "path": item_path,
+                    "expected": "row with direct customer_id/owner scope proof or approved metadata/provenance proof",
+                    "observed": "missing" if isinstance(item, dict) else type(item).__name__,
+                    "scope": "scope_proof",
+                }
+            )
+        return missing
 
-        def walk(candidate: Any, current_path: str) -> None:
-            if isinstance(candidate, list):
-                for index, item in enumerate(candidate):
-                    item_path = f"{current_path}[{index}]"
-                    if isinstance(item, dict) and not self._pbs_scope_proof_present(item):
-                        missing.append(
-                            {
-                                "path": item_path,
-                                "expected": "customer_id or owner scope proof",
-                                "observed": "missing",
-                                "scope": "scope_proof",
-                            }
-                        )
-                    elif not isinstance(item, (dict, list)):
-                        missing.append(
-                            {
-                                "path": item_path,
-                                "expected": "object citation with customer_id or owner scope proof",
-                                "observed": type(item).__name__,
-                                "scope": "scope_proof",
-                            }
-                        )
-                    elif isinstance(item, (dict, list)):
-                        walk(item, item_path)
-            elif isinstance(candidate, dict):
-                for key, item in candidate.items():
-                    if isinstance(item, (dict, list)):
-                        walk(item, f"{current_path}.{key}")
+    def _pbs_missing_scope_proof_for_keys(
+        self, body: dict[str, Any], keys: list[str], *, path: str = "$"
+    ) -> list[dict[str, str]]:
+        missing: list[dict[str, str]] = []
+        for key in keys:
+            value = body.get(key)
+            if isinstance(value, list):
+                missing.extend(self._pbs_missing_scope_proof(value, path=f"{path}.{key}"))
+        return missing
 
-        walk(value, path)
+    def _pbs_graph_missing_scope_proof(self, body: dict[str, Any], *, path: str = "$.graph") -> list[dict[str, str]]:
+        candidate = self._pbs_graph_candidate(body)
+        if not candidate:
+            return []
+        missing: list[dict[str, str]] = []
+        for key in ["nodes", "entities", "vertices", "edges", "links", "relations", "relationships"]:
+            value = candidate.get(key)
+            if isinstance(value, list):
+                missing.extend(self._pbs_missing_scope_proof(value, path=f"{path}.{key}"))
         return missing
 
     def _pbs_scope_error_payload(self, operation: str, pbs_result: Any, mismatches: list[dict[str, str]]) -> dict[str, Any]:
@@ -696,6 +752,9 @@ class KnowledgeEngine:
         body = self._pbs_scoped_body("upload_reports", pbs_result, customer_id=customer_id, owner_id=owner_id, defaults={"status": "ok"})
         if body.get("status") == "error":
             return body
+        missing_scope_proof = self._pbs_missing_scope_proof_for_keys(body, ["items", "documents", "reports"], path="$")
+        if missing_scope_proof:
+            return self._pbs_scope_error_payload("upload_reports", pbs_result, missing_scope_proof)
         items = body.get("items") if isinstance(body.get("items"), list) else body.get("documents") if isinstance(body.get("documents"), list) else []
         body.setdefault("documents", items)
         body.setdefault("counts", {"documents": len(items), "events": 0})
@@ -1522,9 +1581,9 @@ class KnowledgeEngine:
         }
 
     def search(self, payload: dict[str, Any], owner_id: str | None = None) -> dict[str, Any]:
-        payload = canonical_private_rag_payload(payload)
-        question = str(payload.get("question") or payload.get("query") or "").strip()
         customer_id = str(payload.get("customer_id") or payload.get("customerId") or "default")
+        payload = canonical_private_rag_payload(payload, customer_id=customer_id)
+        question = str(payload.get("question") or payload.get("query") or "").strip()
         resolved_owner_id = self.owner_id(owner_id)
         if not question:
             raise ValueError("question is required")
@@ -1917,13 +1976,21 @@ class KnowledgeEngine:
         customer_id = str(payload.get("customer_id") or payload.get("customerId") or "default")
         resolved_owner_id = self.owner_id(owner_id)
         if self._pbs_live_enabled():
-            return self._pbs_scoped_body(
+            payload = canonical_private_customer_payload(payload, customer_id=customer_id)
+            pbs_result = self.pbs.save_note(payload, resolved_owner_id)
+            body = self._pbs_scoped_body(
                 "wiki_vault_note_save",
-                self.pbs.save_note(payload, resolved_owner_id),
+                pbs_result,
                 customer_id=customer_id,
                 owner_id=resolved_owner_id,
                 defaults={"status": "ok"},
             )
+            if body.get("status") == "error":
+                return body
+            missing_scope_proof = self._pbs_missing_scope_proof(body, path="$")
+            if missing_scope_proof:
+                return self._pbs_scope_error_payload("wiki_vault_note_save", pbs_result, missing_scope_proof)
+            return body
         title = str(payload.get("title") or "Untitled note").strip()
         body = str(payload.get("body") or "").strip()
         if not body:
@@ -2005,6 +2072,10 @@ class KnowledgeEngine:
             body = self._pbs_scoped_body("wiki_vault", pbs_result, customer_id=customer_id, owner_id=resolved_owner_id, defaults={"status": "ok"})
             if body.get("status") == "error":
                 return body
+            missing_scope_proof = self._pbs_missing_scope_proof_for_keys(pbs_result.body, ["notes"], path="$")
+            missing_scope_proof.extend(self._pbs_graph_missing_scope_proof(pbs_result.body, path="$.topology"))
+            if missing_scope_proof:
+                return self._pbs_scope_error_payload("wiki_vault", pbs_result, missing_scope_proof)
             body.setdefault("customer_id", customer_id)
             if "topology" in body:
                 body.setdefault("pbs_topology", body.get("topology"))
@@ -2044,6 +2115,9 @@ class KnowledgeEngine:
                 mismatches = self._pbs_scope_mismatches(pbs_result.body, customer_id=customer_id, owner_id=resolved_owner_id)
                 if mismatches:
                     return self._pbs_scope_error_payload("wiki_vault_topology", pbs_result, mismatches)
+                missing_scope_proof = self._pbs_graph_missing_scope_proof(pbs_result.body, path="$.topology")
+                if missing_scope_proof:
+                    return self._pbs_scope_error_payload("wiki_vault_topology", pbs_result, missing_scope_proof)
             result = self._topology_from_pbs_vault(pbs_result.body if pbs_result.ok else {}, customer_id=customer_id, owner_id=resolved_owner_id)
             result["pbs"] = {
                 **result.get("pbs", {}),

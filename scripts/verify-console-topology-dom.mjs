@@ -269,6 +269,33 @@ function topologyResponse(customerId) {
   };
 }
 
+function workflowReportItems(customerId) {
+  return [
+    {
+      id: "workflow-doc-1",
+      document_source_id: "workflow-doc-1",
+      title: "Workflow Router Report",
+      filename: "workflow-router-report.md",
+      summary: `Router evidence for ${customerId}.`,
+      source_scope: "user_upload",
+      ready_for_chat: true,
+      chunk_count: 3,
+      graph_summary: { nodes: 4, edges: 2 },
+      chunk_previews: [{ id: "workflow-chunk-1", text: "router latency evidence" }]
+    },
+    {
+      id: "workflow-doc-2",
+      document_source_id: "workflow-doc-2",
+      title: "Workflow Secondary Evidence",
+      filename: "workflow-secondary.md",
+      summary: "Secondary namespace events.",
+      source_scope: "user_upload",
+      ready_for_chat: true,
+      chunk_count: 2
+    }
+  ];
+}
+
 function harnessHtml() {
   return `<!doctype html>
 <html lang="ko">
@@ -321,7 +348,7 @@ function harnessHtml() {
 function createHarnessServer() {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
-    if (url.pathname === "/cywell/topology") {
+    if (["/cywell/customer-data", "/cywell/rag", "/cywell/llm-wiki", "/cywell/topology"].includes(url.pathname)) {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(harnessHtml());
       return;
@@ -384,6 +411,63 @@ function createHarnessServer() {
         sendJson(response, 200, topologyResponse(url.searchParams.get("customer_id") || "default"));
         return;
       }
+      if (request.method === "GET" && knowledgePath === "/api/knowledge/uploads/reports") {
+        const customerId = url.searchParams.get("customer_id") || "default";
+        const items = workflowReportItems(customerId);
+        sendJson(response, 200, {
+          status: "ok",
+          customer_id: customerId,
+          items,
+          reports: items,
+          counts: { documents: items.length }
+        });
+        return;
+      }
+      if (request.method === "POST" && knowledgePath === "/api/knowledge/uploads/ingest") {
+        sendJson(response, 200, {
+          status: "indexed",
+          document: {
+            id: "uploaded-workflow-doc",
+            document_source_id: "uploaded-workflow-doc",
+            title: body?.file_name || body?.filename || "Uploaded Workflow Document",
+            filename: body?.file_name || body?.filename,
+            source_scope: "user_upload",
+            ready_for_chat: true,
+            chunk_count: 2
+          },
+          chunks_indexed: 2
+        });
+        return;
+      }
+      if (request.method === "POST" && knowledgePath === "/api/knowledge/uploads/url-ingest") {
+        sendJson(response, 200, {
+          status: "indexed",
+          schema_version: "url_ingestion_report_v1",
+          pages: [
+            {
+              id: "url-workflow-doc",
+              document_source_id: "url-workflow-doc",
+              title: "URL Workflow Runbook",
+              url: body?.url,
+              source_scope: "user_upload",
+              ready_for_chat: true,
+              chunk_count: 4
+            }
+          ],
+          upload_results: [
+            {
+              id: "url-workflow-doc",
+              document_source_id: "url-workflow-doc",
+              title: "URL Workflow Runbook",
+              source_scope: "user_upload",
+              ready_for_chat: true,
+              chunk_count: 4
+            }
+          ],
+          summary: { imported_url_count: 1 }
+        });
+        return;
+      }
       if (request.method === "GET" && knowledgePath === "/api/knowledge/wiki-vault") {
         if (url.searchParams.get("customer_id") === "vault-empty-topology") {
           sendJson(response, 200, {
@@ -406,8 +490,29 @@ function createHarnessServer() {
         sendJson(response, 200, {
           status: "ok",
           answer: `RAG answer for ${body?.question ?? "topology node"}`,
-          citations: [{ document_id: "doc-router", title: "ACME Router Evidence", snippet: "router latency evidence" }],
+          citations: [{ document_id: body?.active_document_id || "doc-router", title: "ACME Router Evidence", snippet: "router latency evidence" }],
           trace: { retriever: "dom-smoke" }
+        });
+        return;
+      }
+      if (request.method === "POST" && knowledgePath === "/api/knowledge/wiki-loop/run") {
+        sendJson(response, 200, {
+          status: "done",
+          run_id: "workflow-wiki-run",
+          stages: [{ name: "compile", status: "done" }],
+          summary: { compiled_note_count: 1 }
+        });
+        return;
+      }
+      if (request.method === "POST" && knowledgePath === "/api/knowledge/wiki-vault/notes") {
+        sendJson(response, 200, {
+          status: "saved",
+          overlay_id: "workflow-note-overlay",
+          note_id: "workflow-note-1",
+          document_id: body?.document_id,
+          target_ref: body?.target_ref,
+          title: body?.title,
+          payload: body?.payload
         });
         return;
       }
@@ -549,6 +654,171 @@ try {
       if (message.type() === "error") consoleErrors.push(message.text());
     });
     page.on("pageerror", (error) => pageErrors.push(error.message));
+
+    const reportLoad = page.waitForResponse(
+      (response) => response.url().includes("/api/knowledge/uploads/reports?customer_id=workflow-customer") && response.status() === 200
+    );
+    await page.goto(`${serverHandle.url}/cywell/customer-data?customer_id=workflow-customer`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-customer-data"]', { timeout: 15000 });
+    await Promise.all([reportLoad, page.locator('[data-test="cas-knowledge-upload-reports"]').click()]);
+    await page.waitForSelector('[data-test="cas-corpus-document"]', { timeout: 15000 });
+    const corpusText = await page.locator('[data-test="cas-corpus-workbench"]').innerText();
+    expect(
+      "console-topology-dom:corpus-reports-browser-flow",
+      corpusText.includes("Workflow Router Report") &&
+        corpusText.includes("workflow-doc-1") &&
+        corpusText.includes("3 chunks") &&
+        corpusText.includes("router latency evidence"),
+      "customer data browser flow renders report cards, document IDs, and chunk previews",
+      corpusText
+    );
+    await page.locator('[data-test="cas-corpus-document"]').filter({ hasText: "Workflow Router Report" }).click();
+    const selectedScopeText = await page.locator('[data-test="cas-knowledge-scope-bar"]').innerText();
+    expect(
+      "console-topology-dom:corpus-selected-scope-visible",
+      selectedScopeText.includes("Selected document") && selectedScopeText.includes("Workflow Router Report") && selectedScopeText.includes("workflow-doc-1"),
+      "selecting a corpus document exposes selected-document scope in the browser",
+      selectedScopeText
+    );
+
+    await page.goto(`${serverHandle.url}/cywell/customer-data?customer_id=url-customer`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-customer-data"]', { timeout: 15000 });
+    await page.getByLabel("URL ingest").fill("https://example.com/workflow-runbook");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/uploads/url-ingest") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-url-ingest"]').click()
+    ]);
+    const urlCorpusText = await page.locator('[data-test="cas-corpus-workbench"]').innerText();
+    const urlScopeText = await page.locator('[data-test="cas-knowledge-scope-bar"]').innerText();
+    expect(
+      "console-topology-dom:url-ingest-joins-corpus-browser-flow",
+      urlCorpusText.includes("URL Workflow Runbook") && urlScopeText.includes("url-workflow-doc"),
+      "URL ingest browser flow selects PBS pages/upload_results into the customer corpus",
+      JSON.stringify({ urlCorpusText, urlScopeText })
+    );
+
+    await page.goto(`${serverHandle.url}/cywell/customer-data?customer_id=upload-customer`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-customer-data"]', { timeout: 15000 });
+    await page.getByLabel("Document title").fill("Uploaded Workflow Evidence");
+    await page.getByLabel("Upload content").fill("uploaded workflow content for router shard evidence");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/uploads/ingest") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-upload"]').click()
+    ]);
+    const uploadCall = calls.findLast?.(
+      (call) => call.method === "POST" && call.path === "/api/knowledge/uploads/ingest" && call.body?.customer_id === "upload-customer"
+    );
+    const uploadCorpusText = await page.locator('[data-test="cas-corpus-workbench"]').innerText();
+    const uploadResultHighlights = await page.locator('[data-test="cas-knowledge-result-highlights"]').innerText();
+    expect(
+      "console-topology-dom:upload-index-browser-flow",
+      uploadCall?.body?.file_name === "Uploaded Workflow Evidence" &&
+        uploadCall?.body?.filename === "Uploaded Workflow Evidence" &&
+        uploadCall?.body?.source_kind === "upload" &&
+        uploadCall?.body?.source_scope === "user_upload" &&
+        uploadCall?.body?.visibility === "private_user" &&
+        uploadCall?.body?.index === true &&
+        uploadCall?.body?.content === "uploaded workflow content for router shard evidence" &&
+        uploadCorpusText.includes("uploaded-workflow-doc") &&
+        uploadResultHighlights.includes("uploaded-workflow-doc") &&
+        uploadResultHighlights.includes("2 chunks indexed"),
+      "upload browser flow sends private upload payload, selects corpus item, and surfaces indexed result",
+      JSON.stringify({ body: uploadCall?.body, uploadCorpusText, uploadResultHighlights })
+    );
+
+    const selectedRagReports = page.waitForResponse(
+      (response) => response.url().includes("/api/knowledge/uploads/reports?customer_id=workflow-customer") && response.status() === 200
+    );
+    await page.goto(`${serverHandle.url}/cywell/rag?customer_id=workflow-customer&document_id=workflow-doc-1`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-rag"]', { timeout: 15000 });
+    await selectedRagReports;
+    await page.waitForFunction(() => document.querySelector('[data-test="cas-knowledge-scope-bar"]')?.textContent?.includes("Workflow Router Report"));
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-rag-query"]').click()
+    ]);
+    const selectedRagCall = calls.findLast?.(
+      (call) => call.method === "POST" && call.path === "/api/knowledge/rag/query" && call.body?.customer_id === "workflow-customer"
+    );
+    expect(
+      "console-topology-dom:selected-document-rag-browser-flow",
+      selectedRagCall?.body?.active_document_id === "workflow-doc-1" &&
+        selectedRagCall?.body?.document_source_id === "workflow-doc-1" &&
+        Array.isArray(selectedRagCall?.body?.enabled_upload_document_ids) &&
+        selectedRagCall.body.enabled_upload_document_ids.includes("workflow-doc-1") &&
+        Array.isArray(selectedRagCall?.body?.enabled_source_scopes) &&
+        selectedRagCall.body.enabled_source_scopes.length === 1 &&
+        selectedRagCall.body.enabled_source_scopes[0] === "user_upload" &&
+        selectedRagCall?.body?.restrict_uploaded_sources === true,
+      "selected-document RAG browser flow sends document-scoped retrieval payload",
+      JSON.stringify(selectedRagCall?.body)
+    );
+    const selectedRagAnswer = await page.locator('[data-test="cas-knowledge-result-answer"]').innerText();
+    const selectedRagCitationText = await page.locator('[data-test="cas-knowledge-result-citation"]').first().innerText();
+    expect(
+      "console-topology-dom:rag-result-summary-visible",
+      selectedRagAnswer.includes("RAG answer for") && selectedRagCitationText.includes("ACME Router Evidence"),
+      "RAG result answer and citation render outside debug JSON",
+      JSON.stringify({ selectedRagAnswer, selectedRagCitationText })
+    );
+    await page.locator('[data-test="cas-knowledge-scope-all"]').click();
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-rag-query"]').click()
+    ]);
+    const allCorpusRagCall = calls.findLast?.(
+      (call) => call.method === "POST" && call.path === "/api/knowledge/rag/query" && call.body?.customer_id === "workflow-customer"
+    );
+    expect(
+      "console-topology-dom:full-corpus-rag-browser-flow",
+      allCorpusRagCall?.body?.active_document_id === undefined &&
+        allCorpusRagCall?.body?.restrict_uploaded_sources === false &&
+        Array.isArray(allCorpusRagCall?.body?.enabled_source_scopes) &&
+        allCorpusRagCall.body.enabled_source_scopes.includes("user_upload") &&
+        allCorpusRagCall.body.enabled_source_scopes.includes("wiki_vault"),
+      "full-corpus RAG browser flow removes document pinning but keeps private source lanes",
+      JSON.stringify(allCorpusRagCall?.body)
+    );
+
+    const noteReports = page.waitForResponse(
+      (response) => response.url().includes("/api/knowledge/uploads/reports?customer_id=workflow-customer") && response.status() === 200
+    );
+    await page.goto(`${serverHandle.url}/cywell/llm-wiki?customer_id=workflow-customer&document_id=workflow-doc-1`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-llm-wiki"]', { timeout: 15000 });
+    await noteReports;
+    await page.waitForFunction(() => document.querySelector('[data-test="cas-knowledge-scope-bar"]')?.textContent?.includes("workflow-doc-1"));
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/wiki-loop/run") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-wiki-loop"]').click()
+    ]);
+    const wikiStageText = await page.locator('[data-test="cas-knowledge-result-stage"]').first().innerText();
+    expect(
+      "console-topology-dom:wiki-loop-stage-summary-visible",
+      wikiStageText.includes("compile") && wikiStageText.includes("done"),
+      "LLM Wiki run stages render outside debug JSON",
+      wikiStageText
+    );
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/wiki-vault/notes") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-save-note"]').click()
+    ]);
+    const noteCall = calls.findLast?.(
+      (call) => call.method === "POST" && call.path === "/api/knowledge/wiki-vault/notes" && call.body?.customer_id === "workflow-customer"
+    );
+    const noteResultText = await page.locator('[data-test="cas-knowledge-result"]').innerText();
+    expect(
+      "console-topology-dom:selected-document-note-browser-flow",
+      noteCall?.body?.document_id === "workflow-doc-1" &&
+        noteCall?.body?.target_ref === "workflow-doc-1" &&
+        noteCall?.body?.note_type === "document-note" &&
+        noteCall?.body?.payload?.document_id === "workflow-doc-1" &&
+        noteCall?.body?.payload?.target_ref === "workflow-doc-1" &&
+        noteCall?.body?.title === "운영 Wiki 노트" &&
+        String(noteCall?.body?.body ?? "").includes("[[router]] latency") &&
+        noteResultText.includes("workflow-note-overlay"),
+      "selected-document wiki note browser flow sends document lineage and surfaces saved result",
+      JSON.stringify({ body: noteCall?.body, noteResultText })
+    );
 
     const initialTopologyLoad = page.waitForResponse(
       (response) => response.url().includes("/api/knowledge/topology?customer_id=default") && response.status() === 200
