@@ -1,6 +1,31 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - PBS Source Contract, Owner-HMAC, and Scope Guard Closure
+## Latest Update - Customer Corpus Workbench and Source-Lane Hardening
+
+Implemented after the latest product/runtime/backend review pass:
+
+- Added a Cywell Customer Corpus Workbench under customer data, with uploaded document/report cards, active document selection, viewer deep links, source scope labels, chunk previews, graph summary, and one-click RAG / LLM Wiki actions.
+- Added a document viewer panel for customer uploads, report rows, citations, selected topology context, and topology nodes. Viewer links use `/cywell/customer-data?customer_id=...&document_id=...` so uploaded corpus evidence stays addressable from topology, RAG, and reports.
+- Customer data upload responses and upload reports now include `viewer_path` for the selected customer/document.
+- RAG requests from the console now carry selected-corpus scope through `active_document_id`, `document_source_id`, `enabled_upload_document_ids`, `enabled_source_scopes`, and `restrict_uploaded_sources`.
+- LLM Wiki loop requests can now target the selected document when the operator is working from the corpus view.
+- Topology inspector and selected-context rows now expose viewer links for PBS-rich upload/report/citation targets while keeping the existing graph visual design owned by the Cywell console plugin.
+- Knowledge Engine now enforces the private ingest lane before local indexing or PBS outbound calls: upload and URL ingest must stay `source_scope=user_upload`, `visibility=private_user`, and expected `source_kind`.
+- RAG request scope selection is restricted to private CAS lanes (`user_upload`, `wiki_vault`) so clients cannot smuggle privileged corpus scopes into PBS/live or local retrieval.
+- PBS source-contract evidence now records the PBS checkout branch, short/full HEAD, tree status, optional expected HEAD, optional clean-tree requirement, and SHA-256 hashes of the contract source files. The current `F:\AI_Projects\PBS-Dev3` checkout passes the contract but is dirty, so the verifier records a WARN unless `--require-clean-source` is enforced.
+
+Proof captured in this pass:
+
+- `python -m py_compile apps/knowledge-engine/src/cas_knowledge_engine/engine.py`: PASS.
+- `node --check` passed for changed verifier scripts.
+- `npm run verify:knowledge-engine`: PASS, 94 checks.
+- `npm run verify:console-plugin`: PASS.
+- `npm run verify:console:integration:built`: PASS, 87 checks.
+- `npm run verify:console:topology-dom:built`: PASS, 33 browser-backed checks.
+- `npm run verify:pbs:source-contract:required`: PASS with a recorded dirty-source WARN for `F:\AI_Projects\PBS-Dev3`.
+- `npm run verify:deploy:manifests`: PASS, 275 checks.
+
+## Previous Update - PBS Source Contract, Owner-HMAC, and Scope Guard Closure
 
 Implemented after the latest parallel review pass:
 

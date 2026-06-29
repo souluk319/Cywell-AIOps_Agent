@@ -691,6 +691,18 @@ for (const file of files) {
         "local RAG must preserve active document/source filters and citation lineage fields"
       );
       expect(
+        "knowledge-engine:private-source-lane-policy",
+        text.includes("PRIVATE_INGEST_SOURCE_SCOPE") &&
+          text.includes("canonical_private_ingest_payload") &&
+          text.includes("canonical_private_rag_payload") &&
+          text.includes("source_scope=user_upload") &&
+          text.includes("visibility=private_user") &&
+          text.includes("PRIVATE_RAG_SOURCE_SCOPES") &&
+          text.includes("private RAG source scopes are not allowed"),
+        "knowledge engine rejects privileged PBS source lanes for private ingest and RAG requests",
+        "knowledge engine must reject caller-controlled official/study source lanes before private ingest, retrieval, or PBS outbound calls"
+      );
+      expect(
         "knowledge-engine:wiki-loop-staged-contract",
         text.includes("run_id") &&
           text.includes('"wiki_compile"') &&
@@ -1281,10 +1293,14 @@ for (const file of files) {
         "pbs-source-contract:evidence",
         text.includes("cas-pbs-source-contract.json") &&
           text.includes("CAS_PBS_SOURCE_DIR") &&
+          text.includes("CAS_PBS_SOURCE_HEAD") &&
+          text.includes("gitMetadata") &&
+          text.includes("contractFileSha256") &&
           text.includes("--require-source") &&
+          text.includes("--require-clean-source") &&
           text.includes("--self-test"),
-        "PBS source contract verifier writes evidence and supports explicit source/self-test modes",
-        "PBS source contract verifier must write evidence and support explicit source/self-test modes"
+        "PBS source contract verifier writes pinned source evidence and supports explicit source/self-test modes",
+        "PBS source contract verifier must write PBS source git/hash evidence and support explicit source/self-test modes"
       );
     }
     if (file.includes("promote-crc-release-images")) {

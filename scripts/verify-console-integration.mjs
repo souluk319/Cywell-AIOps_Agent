@@ -266,6 +266,36 @@ expectText(
   "knowledge route renders upload reports action"
 );
 expectText(
+  "console-knowledge:corpus-workbench",
+  knowledgeRouteSource,
+  "data-test=\"cas-corpus-workbench\"",
+  "knowledge route renders customer corpus workbench"
+);
+expectText(
+  "console-knowledge:corpus-document",
+  knowledgeRouteSource,
+  "data-test=\"cas-corpus-document\"",
+  "knowledge route renders selectable corpus document cards"
+);
+expectText(
+  "console-knowledge:viewer-panel",
+  knowledgeRouteSource,
+  "data-test=\"cas-knowledge-viewer\"",
+  "knowledge route renders document/wiki viewer panel"
+);
+expectText(
+  "console-knowledge:viewer-links",
+  knowledgeRouteSource,
+  "data-test=\"cas-knowledge-viewer-link\"",
+  "knowledge route renders PBS viewer deep links"
+);
+expectText(
+  "console-knowledge:viewer-query-params",
+  knowledgeRouteSource,
+  "document_id",
+  "knowledge route supports document deep-link query params"
+);
+expectText(
   "console-knowledge:rag-action",
   knowledgeRouteSource,
   "data-test=\"cas-knowledge-rag-query\"",
@@ -348,6 +378,18 @@ expectText(
   knowledgeRouteSource,
   "restrict_uploaded_sources",
   "knowledge route can restrict topology RAG actions to selected uploaded sources"
+);
+expectText(
+  "console-knowledge:rag-selected-corpus",
+  knowledgeRouteSource,
+  "selectedCorpusTarget",
+  "knowledge route sends selected corpus document scope into RAG requests"
+);
+expectText(
+  "console-knowledge:wiki-selected-document",
+  knowledgeRouteSource,
+  "document_id: activeDocumentId",
+  "knowledge route sends selected corpus document into wiki loop requests"
 );
 expectText(
   "console-knowledge:topology-nested-graph",
@@ -450,6 +492,24 @@ expectText(
   knowledgeRouteBundle,
   "/api/knowledge/uploads/reports",
   "built knowledge route bundle contains upload reports integration"
+);
+expectText(
+  "console-knowledge:bundle-corpus-workbench",
+  knowledgeRouteBundle,
+  "cas-corpus-workbench",
+  "built knowledge route bundle contains customer corpus workbench"
+);
+expectText(
+  "console-knowledge:bundle-viewer-panel",
+  knowledgeRouteBundle,
+  "cas-knowledge-viewer",
+  "built knowledge route bundle contains viewer panel"
+);
+expectText(
+  "console-knowledge:bundle-viewer-link",
+  knowledgeRouteBundle,
+  "cas-knowledge-viewer-link",
+  "built knowledge route bundle contains viewer deep links"
 );
 expectText(
   "console-knowledge:bundle-rag",

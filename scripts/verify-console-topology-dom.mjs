@@ -789,6 +789,12 @@ try {
     const tokenPanelText = await page.locator('[data-test="cas-topology-token-panel"]').innerText();
     const contextPanelText = await page.locator('[data-test="cas-topology-context-panel"]').innerText();
     const vaultRelationsText = await page.locator('[data-test="cas-topology-vault-relations"]').innerText();
+    const richViewerText = await page.locator('[data-test="cas-knowledge-viewer"]').innerText();
+    const richWikiViewerHref = await page
+      .locator('[data-test="cas-knowledge-viewer-link"]')
+      .filter({ hasText: "Rich Wiki Note" })
+      .first()
+      .getAttribute("href");
     expect(
       "console-topology-dom:pbs-rich-sidechannels",
       tokenPanelText.includes("HAProxy 4") &&
@@ -802,6 +808,14 @@ try {
         vaultRelationsText.includes("pbs-rich-upload -> pbs-rich-note"),
       "PBS-rich topology renders Wiki Vault tokens, selected uploads/context, and recent relation side-channel panels",
       JSON.stringify({ tokenPanelText, contextPanelText, vaultRelationsText })
+    );
+    expect(
+      "console-topology-dom:pbs-rich-viewer-links",
+      richViewerText.includes("Rich Wiki Note") &&
+        richViewerText.includes("/wiki/rich") &&
+        String(richWikiViewerHref ?? "").includes("/cywell/llm-wiki?customer_id=pbs-rich-topology&note_id=pbs-rich-note"),
+      "PBS-rich topology exposes Wiki note viewer deep links",
+      JSON.stringify({ richViewerText, richWikiViewerHref })
     );
     await page.getByRole("button", { name: "Links", exact: true }).click();
     expect(

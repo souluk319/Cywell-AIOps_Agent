@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,17 +13,53 @@ const evidencePath = join("test-results", "cas-pbs-source-contract.json");
 const repoDefaultSourceDir = resolve(process.cwd(), "..", "PBS-Dev3");
 const sourceDir = resolve(sourceDirArg || process.env.CAS_PBS_SOURCE_DIR || repoDefaultSourceDir);
 const requireSource = args.has("--require-source");
+const requireCleanSource = args.has("--require-clean-source") || /^(1|true|yes|y|on)$/i.test(process.env.CAS_PBS_REQUIRE_CLEAN_SOURCE || "");
+const expectedSourceHead = String(process.env.CAS_PBS_SOURCE_HEAD || "").trim();
 const selfTest = args.has("--self-test");
 const checks = [];
+const contractFiles = [
+  "deploy/Dockerfile",
+  "docker-compose.yml",
+  "src/play_book_studio/http/server_handler_factory.py",
+  "src/play_book_studio/http/upload_api.py",
+  "src/play_book_studio/http/url_ingest_api.py",
+  "src/play_book_studio/http/server_chat.py",
+  "src/play_book_studio/http/wiki_vault.py",
+  "src/play_book_studio/wiki_loop.py"
+];
 
-function runGit(gitArgs) {
+function runGit(gitArgs, cwd = process.cwd()) {
   const result = spawnSync("git", gitArgs, {
-    cwd: process.cwd(),
+    cwd,
     encoding: "utf8",
     timeout: 10000,
     windowsHide: true
   });
   return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function gitMetadata(root) {
+  const inside = runGit(["rev-parse", "--is-inside-work-tree"], root);
+  if (inside !== "true") return { available: false };
+  const status = runGit(["status", "--short"], root);
+  return {
+    available: true,
+    branch: runGit(["branch", "--show-current"], root),
+    head: runGit(["rev-parse", "--short", "HEAD"], root),
+    fullHead: runGit(["rev-parse", "HEAD"], root),
+    treeStatus: status ? "dirty" : "clean",
+    statusShort: status
+  };
+}
+
+function fileSha256(root, relativePath) {
+  const path = join(root, relativePath);
+  if (!existsSync(path)) return "";
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function contractFileHashes(root) {
+  return Object.fromEntries(contractFiles.map((relativePath) => [relativePath, fileSha256(root, relativePath)]));
 }
 
 function record(status, id, detail) {
@@ -275,6 +312,32 @@ if (!existsSync(sourceDir)) {
   else warn("pbs-source:source-dir", detail);
 } else {
   pass("pbs-source:source-dir", `using PBS source directory ${sourceDir}`);
+  const metadata = gitMetadata(sourceDir);
+  if (metadata.available) {
+    pass("pbs-source:git-head", `PBS source git head ${metadata.head} on ${metadata.branch || "detached"}`);
+    if (expectedSourceHead) {
+      expect(
+        "pbs-source:git-head-expected",
+        metadata.fullHead === expectedSourceHead || metadata.head === expectedSourceHead,
+        `PBS source head matches CAS_PBS_SOURCE_HEAD ${expectedSourceHead}`,
+        `PBS source head ${metadata.fullHead || metadata.head} does not match CAS_PBS_SOURCE_HEAD ${expectedSourceHead}`
+      );
+    }
+    if (requireCleanSource) {
+      expect(
+        "pbs-source:git-tree-clean",
+        metadata.treeStatus === "clean",
+        "PBS source git tree is clean",
+        `PBS source git tree is dirty: ${metadata.statusShort}`
+      );
+    } else if (metadata.treeStatus !== "clean") {
+      warn("pbs-source:git-tree-dirty", "PBS source git tree is dirty; evidence records file hashes for the checked contract files");
+    } else {
+      pass("pbs-source:git-tree-clean", "PBS source git tree is clean");
+    }
+  } else {
+    warn("pbs-source:git-metadata", "PBS source directory is not a git worktree; evidence records file hashes only");
+  }
   sourceContractChecks(sourceDir);
 }
 
@@ -295,7 +358,16 @@ writeFileSync(
       branch: runGit(["branch", "--show-current"]),
       head: runGit(["rev-parse", "--short", "HEAD"]),
       sourceDir,
+      pbsSource: existsSync(sourceDir)
+        ? {
+            ...gitMetadata(sourceDir),
+            expectedHead: expectedSourceHead || null,
+            requireCleanSource,
+            contractFileSha256: contractFileHashes(sourceDir)
+          }
+        : null,
       requireSource,
+      requireCleanSource,
       selfTest,
       summary,
       checks

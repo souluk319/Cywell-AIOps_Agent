@@ -13,7 +13,7 @@ import zipfile
 from collections import Counter
 from pathlib import PurePath
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -325,6 +325,59 @@ def pbs_common_payload(payload: dict[str, Any], *, customer_id: str, owner_id: s
         "force_reingest": payload_bool(payload, "force_reingest", "forceReingest", default=False),
         "index": payload_bool(payload, "index", default=True),
     }
+
+
+PRIVATE_INGEST_SOURCE_SCOPE = "user_upload"
+PRIVATE_INGEST_VISIBILITY = "private_user"
+PRIVATE_RAG_SOURCE_SCOPES = {"user_upload", "wiki_vault"}
+
+
+def canonical_private_ingest_payload(payload: dict[str, Any], *, customer_id: str, source_kind: str) -> dict[str, Any]:
+    requested_scope = str(payload.get("source_scope") or payload.get("sourceScope") or PRIVATE_INGEST_SOURCE_SCOPE).strip()
+    requested_visibility = str(payload.get("visibility") or PRIVATE_INGEST_VISIBILITY).strip()
+    requested_kind = str(payload.get("source_kind") or payload.get("sourceKind") or source_kind).strip()
+    if requested_scope != PRIVATE_INGEST_SOURCE_SCOPE:
+        raise ValueError("private customer ingest only accepts source_scope=user_upload")
+    if requested_visibility != PRIVATE_INGEST_VISIBILITY:
+        raise ValueError("private customer ingest only accepts visibility=private_user")
+    if requested_kind != source_kind:
+        raise ValueError(f"private customer ingest only accepts source_kind={source_kind}")
+    normalized = dict(payload)
+    normalized.pop("sourceScope", None)
+    normalized.pop("sourceKind", None)
+    normalized["source_scope"] = PRIVATE_INGEST_SOURCE_SCOPE
+    normalized["visibility"] = PRIVATE_INGEST_VISIBILITY
+    normalized["source_kind"] = source_kind
+    metadata = source_metadata(normalized, customer_id)
+    metadata["customer_id"] = customer_id
+    normalized["source_metadata"] = metadata
+    return normalized
+
+
+def source_scope_list(payload: dict[str, Any], *keys: str) -> list[str]:
+    for key in keys:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if value is not None:
+            return [str(value).strip()]
+    return []
+
+
+def canonical_private_rag_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    requested_scopes = source_scope_list(payload, "enabled_source_scopes", "enabledSourceScopes")
+    disallowed = sorted({scope for scope in requested_scopes if scope not in PRIVATE_RAG_SOURCE_SCOPES})
+    if disallowed:
+        raise ValueError(f"private RAG source scopes are not allowed: {', '.join(disallowed)}")
+    normalized = dict(payload)
+    normalized.pop("enabledSourceScopes", None)
+    if requested_scopes:
+        normalized["enabled_source_scopes"] = requested_scopes
+    return normalized
 
 
 def top_terms(text: str, limit: int = 8) -> list[str]:
@@ -989,6 +1042,7 @@ class KnowledgeEngine:
             "summary": clean_content[:360],
             "chunk_count": len(chunks),
             "bytes": len(clean_content.encode("utf-8")),
+            "viewer_path": f"/cywell/customer-data?customer_id={quote(customer_id)}&document_id={quote(document_id)}",
         }
         chunk_rows = [
             {
@@ -1031,6 +1085,7 @@ class KnowledgeEngine:
         validate_upload_policy(title, payload)
         validate_encoded_upload_size(payload)
         customer_id = str(payload.get("customer_id") or payload.get("customerId") or "default")
+        payload = canonical_private_ingest_payload(payload, customer_id=customer_id, source_kind="upload")
         if self._pbs_live_enabled():
             return self._pbs_upload_payload(self.pbs.upload_ingest(payload, resolved_owner_id), customer_id=customer_id, owner_id=resolved_owner_id)
         content, parser_metadata = extract_uploaded_text(title, payload)
@@ -1078,6 +1133,7 @@ class KnowledgeEngine:
             raise ValueError("url is required")
         parsed = validated_public_http_url(url)
         customer_id = str(payload.get("customer_id") or payload.get("customerId") or "default")
+        payload = canonical_private_ingest_payload(payload, customer_id=customer_id, source_kind="url")
         if self._pbs_live_enabled():
             return self._pbs_scoped_body(
                 "url_ingest",
@@ -1189,6 +1245,7 @@ class KnowledgeEngine:
             "basic_index_ready": len(chunks) > 0,
             "graph_summary": graph_summary,
             "chunk_previews": self._upload_chunk_previews(chunks, limit=2),
+            "viewer_path": f"/cywell/customer-data?customer_id={quote(str(document.get('customer_id') or 'default'))}&document_id={quote(document_id)}",
             "metadata": metadata,
         }
 
@@ -1402,6 +1459,7 @@ class KnowledgeEngine:
         }
 
     def search(self, payload: dict[str, Any], owner_id: str | None = None) -> dict[str, Any]:
+        payload = canonical_private_rag_payload(payload)
         question = str(payload.get("question") or payload.get("query") or "").strip()
         customer_id = str(payload.get("customer_id") or payload.get("customerId") or "default")
         resolved_owner_id = self.owner_id(owner_id)

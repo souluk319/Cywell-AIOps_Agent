@@ -111,6 +111,7 @@ type TopologyUploadItem = {
   document_source_id?: string;
   title: string;
   filename?: string;
+  viewer_path?: string;
   source_scope?: string;
   ready_for_chat?: boolean;
   chunk_count?: number;
@@ -129,6 +130,24 @@ type RouteItem = {
   href: string;
   endpoint: string;
   phase: string;
+};
+
+type ViewerKind = "document" | "wiki-note" | "citation" | "source";
+
+type ViewerTarget = {
+  kind: ViewerKind;
+  id: string;
+  title: string;
+  summary?: string;
+  body?: string;
+  viewer_path?: string;
+  source_url?: string;
+  source_scope?: string;
+  document_source_id?: string;
+  chunk_count?: number;
+  ready_for_chat?: boolean;
+  chunk_previews?: ActionResult[];
+  metadata?: ActionResult;
 };
 
 const routeItems: RouteItem[] = [
@@ -394,6 +413,67 @@ const styles = `
   overflow: auto;
   padding: 12px;
   white-space: pre-wrap;
+}
+
+.cas-knowledge-viewer {
+  border: 1px solid var(--cas-knowledge-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.cas-knowledge-viewer h3 {
+  font-size: 16px;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.cas-knowledge-viewer-list {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.cas-knowledge-viewer-link {
+  background: #fff;
+  border: 1px solid var(--cas-knowledge-line);
+  border-radius: 6px;
+  color: var(--cas-knowledge-ink);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  text-align: left;
+  text-decoration: none;
+}
+
+.cas-knowledge-viewer-link[data-active="true"] {
+  border-color: var(--cas-knowledge-accent);
+  box-shadow: 0 0 0 2px rgba(8, 127, 140, 0.14);
+}
+
+.cas-knowledge-viewer-link strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cas-knowledge-viewer-body {
+  background: #fbfcfe;
+  border: 1px solid var(--cas-knowledge-line);
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.cas-knowledge-viewer-body p {
+  margin: 0;
 }
 
 .cas-topology-dashboard {
@@ -829,6 +909,226 @@ function recordValue(value: unknown): ActionResult | null {
   return typeof value === "object" && value !== null ? (value as ActionResult) : null;
 }
 
+function stringValue(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text || undefined;
+}
+
+function firstString(record: ActionResult | null | undefined, keys: string[]) {
+  if (!record) return undefined;
+  for (const key of keys) {
+    const text = stringValue(record[key]);
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function currentSearchParams() {
+  return typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
+}
+
+function initialCustomerId() {
+  const params = currentSearchParams();
+  return params.get("customer_id") || params.get("customerId") || "default";
+}
+
+function initialViewerTarget(): ViewerTarget | null {
+  const params = currentSearchParams();
+  const documentId = stringValue(params.get("document_id") || params.get("documentId"));
+  if (documentId) {
+    return {
+      kind: "document",
+      id: documentId,
+      title: documentId,
+      document_source_id: documentId,
+      viewer_path: typeof window === "undefined" ? undefined : `${window.location.pathname}${window.location.search}`
+    };
+  }
+  const noteId = stringValue(params.get("note_id") || params.get("noteId"));
+  if (noteId) {
+    return {
+      kind: "wiki-note",
+      id: noteId,
+      title: noteId,
+      viewer_path: typeof window === "undefined" ? undefined : `${window.location.pathname}${window.location.search}`
+    };
+  }
+  return null;
+}
+
+function viewerTargetFromRecord(record: ActionResult | null | undefined, fallbackKind: ViewerKind = "document"): ViewerTarget | null {
+  if (!record) return null;
+  const id =
+    firstString(record, [
+      "id",
+      "document_source_id",
+      "source_document_id",
+      "document_id",
+      "note_id",
+      "chunk_id",
+      "citation_id"
+    ]) ?? "";
+  const documentSourceId = firstString(record, ["document_source_id", "source_document_id", "document_id"]);
+  const noteId = firstString(record, ["note_id"]);
+  const kind =
+    fallbackKind === "citation"
+      ? "citation"
+      : noteId || firstString(record, ["note_type", "book_slug", "overlay_id"])
+        ? "wiki-note"
+        : fallbackKind;
+  const title = firstString(record, ["title", "filename", "file_name", "label", "name"]) ?? id;
+  if (!id && !title) return null;
+  const chunkPreviews = Array.isArray(record.chunk_previews)
+    ? record.chunk_previews.filter((item): item is ActionResult => typeof item === "object" && item !== null)
+    : undefined;
+  const metadata = recordValue(record.metadata) ?? recordValue(record.provenance) ?? undefined;
+  return {
+    kind,
+    id: id || title,
+    title: title || id,
+    summary: firstString(record, ["summary", "snippet", "markdown"]),
+    body: firstString(record, ["body", "text", "answer"]),
+    viewer_path: firstString(record, ["viewer_path", "viewerPath"]),
+    source_url: firstString(record, ["source_url", "url"]),
+    source_scope: firstString(record, ["source_scope"]),
+    document_source_id: documentSourceId,
+    chunk_count: Number.isFinite(Number(record.chunk_count)) ? Number(record.chunk_count) : undefined,
+    ready_for_chat: typeof record.ready_for_chat === "boolean" ? record.ready_for_chat : undefined,
+    chunk_previews: chunkPreviews,
+    metadata
+  };
+}
+
+function viewerTargetFromTopologyNode(node: TopologyNode): ViewerTarget {
+  const tone = nodeTone(node.type);
+  const documentId = node.document_source_id || node.source_document_id || node.document_id || (tone === "document" ? node.id : undefined);
+  return {
+    kind: tone === "wiki-note" ? "wiki-note" : tone === "document" ? "document" : "source",
+    id: node.id,
+    title: node.label,
+    summary: node.summary,
+    viewer_path: node.viewer_path,
+    source_url: node.source_url,
+    source_scope: node.source_scope,
+    document_source_id: documentId,
+    chunk_count: Number.isFinite(Number(node.metadata?.chunk_count)) ? Number(node.metadata?.chunk_count) : undefined,
+    ready_for_chat: node.ready_for_chat,
+    metadata: node.metadata ?? node.provenance
+  };
+}
+
+function viewerHref(target: ViewerTarget, customerId: string) {
+  const params = new URLSearchParams();
+  params.set("customer_id", customerId);
+  if (target.kind === "wiki-note") {
+    params.set("note_id", target.id);
+    return `/cywell/llm-wiki?${params.toString()}`;
+  }
+  const documentId = target.document_source_id || target.id;
+  params.set("document_id", documentId);
+  return `/cywell/customer-data?${params.toString()}`;
+}
+
+function viewerTargetKey(target: ViewerTarget) {
+  return `${target.kind}:${target.id}:${target.title}`;
+}
+
+function mergeViewerTarget(left: ViewerTarget, right: ViewerTarget) {
+  return {
+    ...left,
+    ...right,
+    summary: left.summary || right.summary,
+    body: left.body || right.body,
+    viewer_path: left.viewer_path || right.viewer_path,
+    source_url: left.source_url || right.source_url,
+    source_scope: left.source_scope || right.source_scope,
+    document_source_id: left.document_source_id || right.document_source_id,
+    chunk_count: left.chunk_count ?? right.chunk_count,
+    ready_for_chat: left.ready_for_chat ?? right.ready_for_chat,
+    chunk_previews: left.chunk_previews ?? right.chunk_previews,
+    metadata: left.metadata ?? right.metadata
+  };
+}
+
+function collectViewerTargets(value: ActionResult | null, topology: TopologyPayload | null, customerId: string) {
+  const targets: ViewerTarget[] = [];
+  const add = (target: ViewerTarget | null) => {
+    if (!target) return;
+    const key = viewerTargetKey(target);
+    const existingIndex = targets.findIndex((item) => viewerTargetKey(item) === key);
+    if (existingIndex >= 0) {
+      targets[existingIndex] = mergeViewerTarget(targets[existingIndex], target);
+    } else {
+      targets.push(target);
+    }
+  };
+  const addRecordList = (items: unknown, kind: ViewerKind) => {
+    if (!Array.isArray(items)) return;
+    for (const item of items) add(viewerTargetFromRecord(recordValue(item), kind));
+  };
+  if (value) {
+    add(viewerTargetFromRecord(recordValue(value.document), "document"));
+    add(viewerTargetFromRecord(recordValue(value.note), "wiki-note"));
+    addRecordList(value.items, "document");
+    addRecordList(value.reports, "document");
+    addRecordList(value.documents, "document");
+    addRecordList(value.citations, "citation");
+    addRecordList(value.sources, "citation");
+    addRecordList(value.notes, "wiki-note");
+  }
+  for (const node of topology?.nodes ?? []) add(viewerTargetFromTopologyNode(node));
+  for (const upload of topology?.selected_uploads ?? []) {
+    add(
+      viewerTargetFromRecord(
+        {
+          id: upload.id ?? upload.document_source_id,
+          document_source_id: upload.document_source_id,
+          title: upload.title,
+          filename: upload.filename,
+          viewer_path: upload.viewer_path,
+          source_scope: upload.source_scope,
+          ready_for_chat: upload.ready_for_chat,
+          chunk_count: upload.chunk_count
+        },
+        "document"
+      )
+    );
+  }
+  for (const context of topology?.selected_context ?? []) {
+    add(
+      viewerTargetFromRecord(
+        {
+          id: context.id,
+          document_source_id: context.document_source_id,
+          title: context.title,
+          body: context.body,
+          viewer_path: context.viewer_path,
+          source_scope: context.source_scope,
+          note_type: "wiki_context"
+        },
+        "wiki-note"
+      )
+    );
+  }
+  return targets.map((target) => ({
+    ...target,
+    viewer_path: target.viewer_path || viewerHref(target, customerId)
+  }));
+}
+
+function mergeViewerTargets(...groups: ViewerTarget[][]) {
+  const merged: ViewerTarget[] = [];
+  for (const group of groups) {
+    for (const target of group) {
+      const key = viewerTargetKey(target);
+      const existingIndex = merged.findIndex((item) => viewerTargetKey(item) === key);
+      if (existingIndex >= 0) merged[existingIndex] = mergeViewerTarget(merged[existingIndex], target);
+      else merged.push(target);
+    }
+  }
+  return merged;
+}
+
 function topologyCandidateRecords(value: ActionResult) {
   const topology = recordValue(value.topology);
   const topologyGraph = topology ? recordValue(topology.graph) : null;
@@ -911,6 +1211,7 @@ function topologyUploadList(candidates: ActionResult[]): TopologyUploadItem[] {
         document_source_id: item.document_source_id || item.source_document_id || item.document_id ? String(item.document_source_id ?? item.source_document_id ?? item.document_id) : id,
         title: String(item.title ?? item.filename ?? item.file_name ?? id ?? "Upload"),
         filename: item.filename || item.file_name ? String(item.filename ?? item.file_name) : undefined,
+        viewer_path: item.viewer_path ? String(item.viewer_path) : undefined,
         source_scope: item.source_scope ? String(item.source_scope) : undefined,
         ready_for_chat: typeof item.ready_for_chat === "boolean" ? item.ready_for_chat : undefined,
         chunk_count: Number.isFinite(Number(item.chunk_count)) ? Number(item.chunk_count) : undefined
@@ -1167,13 +1468,169 @@ function CapabilityGrid({ capabilities }: { capabilities: KnowledgeCapability[] 
   );
 }
 
+function ViewerLink({
+  target,
+  customerId,
+  active,
+  openViewer
+}: {
+  target: ViewerTarget;
+  customerId: string;
+  active?: boolean;
+  openViewer: (target: ViewerTarget) => void;
+}) {
+  return (
+    <a
+      className="cas-knowledge-viewer-link"
+      data-active={active}
+      data-test="cas-knowledge-viewer-link"
+      href={viewerHref(target, customerId)}
+      onClick={(event) => {
+        event.preventDefault();
+        openViewer(target);
+      }}
+    >
+      <strong>{target.title}</strong>
+      <span className="cas-knowledge-muted">
+        {[target.kind, target.document_source_id || target.id, target.source_scope, target.chunk_count !== undefined ? `${target.chunk_count} chunks` : ""]
+          .filter(Boolean)
+          .join(" · ")}
+      </span>
+    </a>
+  );
+}
+
+function KnowledgeViewer({
+  customerId,
+  selected,
+  targets,
+  openViewer
+}: {
+  customerId: string;
+  selected: ViewerTarget | null;
+  targets: ViewerTarget[];
+  openViewer: (target: ViewerTarget) => void;
+}) {
+  const active =
+    selected ??
+    targets[0] ??
+    targets.find((target) => target.kind === "document") ??
+    targets.find((target) => target.kind === "wiki-note") ??
+    null;
+  if (!active && targets.length === 0) return null;
+  const previewRows = active?.chunk_previews ?? [];
+  return (
+    <section className="cas-knowledge-viewer" data-test="cas-knowledge-viewer">
+      <div className="cas-knowledge-status">
+        <h3>Viewer</h3>
+        {active && <span className="cas-knowledge-badge">{active.kind}</span>}
+        {active?.ready_for_chat === true && <span className="cas-knowledge-badge" data-state="ready">ready</span>}
+      </div>
+      {targets.length > 0 && (
+        <div className="cas-knowledge-viewer-list">
+          {targets.slice(0, 8).map((target) => (
+            <ViewerLink
+              active={Boolean(active && active.kind === target.kind && active.id === target.id)}
+              customerId={customerId}
+              key={`${target.kind}-${target.id}-${target.document_source_id ?? ""}-${target.title}`}
+              openViewer={openViewer}
+              target={target}
+            />
+          ))}
+        </div>
+      )}
+      {active && (
+        <div className="cas-knowledge-viewer-body">
+          <strong>{active.title}</strong>
+          <span className="cas-knowledge-muted">
+            {[active.document_source_id || active.id, active.source_scope, active.chunk_count !== undefined ? `${active.chunk_count} chunks` : ""]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+          {active.viewer_path && <div className="cas-knowledge-endpoint">{active.viewer_path}</div>}
+          {active.source_url && <div className="cas-knowledge-endpoint">{active.source_url}</div>}
+          {(active.summary || active.body) && <p className="cas-topology-node-summary">{active.summary ?? active.body}</p>}
+          {previewRows.length > 0 && (
+            <div className="cas-topology-relations" data-test="cas-knowledge-viewer-previews">
+              {previewRows.slice(0, 3).map((preview, index) => (
+                <div className="cas-topology-relation" key={`preview-${active.id}-${index}`}>
+                  <strong>{firstString(preview, ["heading_title"]) ?? `chunk ${index + 1}`}</strong>
+                  <span className="cas-knowledge-muted">{firstString(preview, ["markdown", "text", "snippet"]) ?? ""}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CorpusWorkbench({
+  customerId,
+  reports,
+  selectedDocumentId,
+  selectDocument,
+  openViewer
+}: {
+  customerId: string;
+  reports: ViewerTarget[];
+  selectedDocumentId: string;
+  selectDocument: (target: ViewerTarget) => void;
+  openViewer: (target: ViewerTarget) => void;
+}) {
+  if (reports.length === 0) return null;
+  return (
+    <section className="cas-knowledge-viewer" data-test="cas-corpus-workbench">
+      <div className="cas-knowledge-status">
+        <h3>Customer corpus</h3>
+        <span className="cas-knowledge-badge">{reports.length} sources</span>
+      </div>
+      <div className="cas-knowledge-viewer-list">
+        {reports.slice(0, 12).map((target) => {
+          const active = selectedDocumentId === (target.document_source_id || target.id);
+          return (
+            <button
+              className="cas-knowledge-viewer-link"
+              data-active={active}
+              data-test="cas-corpus-document"
+              key={`${target.kind}-${target.id}`}
+              onClick={() => selectDocument(target)}
+              type="button"
+            >
+              <strong>{target.title}</strong>
+              <span className="cas-knowledge-muted">
+                {[target.document_source_id || target.id, target.source_scope, target.chunk_count !== undefined ? `${target.chunk_count} chunks` : ""]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+              <span className="cas-knowledge-muted">{target.ready_for_chat === true ? "ready for RAG" : "index pending"}</span>
+            </button>
+          );
+        })}
+      </div>
+      {reports.slice(0, 6).map((target) => (
+        <ViewerLink
+          active={selectedDocumentId === (target.document_source_id || target.id)}
+          customerId={customerId}
+          key={`viewer-${target.kind}-${target.id}`}
+          openViewer={openViewer}
+          target={target}
+        />
+      ))}
+    </section>
+  );
+}
+
 function TopologyDashboard({
   topology,
   selectedNodeId,
   setSelectedNodeId,
   typeFilter,
   setTypeFilter,
-  askAboutNode
+  askAboutNode,
+  customerId,
+  openViewer
 }: {
   topology: TopologyPayload | null;
   selectedNodeId: string | null;
@@ -1181,6 +1638,8 @@ function TopologyDashboard({
   typeFilter: string;
   setTypeFilter: (filter: string) => void;
   askAboutNode: (node: TopologyNode) => void;
+  customerId: string;
+  openViewer: (target: ViewerTarget) => void;
 }) {
   const [nodeQuery, setNodeQuery] = React.useState("");
   const topologyNodes = topology?.nodes ?? [];
@@ -1194,6 +1653,7 @@ function TopologyDashboard({
   const positionById = new Map(positioned.map((item) => [item.node.id, item]));
   const renderedNodeIds = new Set(positioned.map((item) => item.node.id));
   const selectedNode = visibleNodes.find((node) => node.id === selectedNodeId) ?? null;
+  const selectedViewerTarget = selectedNode ? viewerTargetFromTopologyNode(selectedNode) : null;
   const selectedRelations = selectedNode
     ? visibleEdges
         .filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id)
@@ -1426,7 +1886,9 @@ function TopologyDashboard({
                 <div className="cas-topology-relations">
                   {selectedNode.entity_kind && <span className="cas-knowledge-badge">entity {selectedNode.entity_kind}</span>}
                   {selectedNode.source_kind && <span className="cas-knowledge-badge">source {selectedNode.source_kind}</span>}
-                  {selectedNode.viewer_path && <div className="cas-knowledge-endpoint">{selectedNode.viewer_path}</div>}
+                  {selectedViewerTarget && (
+                    <ViewerLink customerId={customerId} openViewer={openViewer} target={selectedViewerTarget} />
+                  )}
                   {selectedNode.source_url && <div className="cas-knowledge-endpoint">{selectedNode.source_url}</div>}
                 </div>
               )}
@@ -1485,7 +1947,20 @@ function TopologyDashboard({
               <h3>Vault context</h3>
               {selectedUploads.slice(0, 4).map((upload) => (
                 <div className="cas-topology-relation" data-test="cas-topology-selected-upload" key={`upload-${upload.document_source_id ?? upload.id ?? upload.title}`}>
-                  <strong>{upload.title}</strong>
+                  <ViewerLink
+                    customerId={customerId}
+                    openViewer={openViewer}
+                    target={{
+                      kind: "document",
+                      id: upload.document_source_id ?? upload.id ?? upload.title,
+                      title: upload.title,
+                      document_source_id: upload.document_source_id,
+                      viewer_path: upload.viewer_path,
+                      source_scope: upload.source_scope,
+                      chunk_count: upload.chunk_count,
+                      ready_for_chat: upload.ready_for_chat
+                    }}
+                  />
                   <span className="cas-knowledge-muted">
                     {[
                       upload.document_source_id,
@@ -1500,7 +1975,19 @@ function TopologyDashboard({
               ))}
               {selectedContext.slice(0, 4).map((context) => (
                 <div className="cas-topology-relation" data-test="cas-topology-selected-context" key={`context-${context.id ?? context.title}`}>
-                  <strong>{context.title}</strong>
+                  <ViewerLink
+                    customerId={customerId}
+                    openViewer={openViewer}
+                    target={{
+                      kind: "wiki-note",
+                      id: context.id ?? context.title,
+                      title: context.title,
+                      document_source_id: context.document_source_id,
+                      viewer_path: context.viewer_path,
+                      source_scope: context.source_scope,
+                      body: context.body
+                    }}
+                  />
                   {context.body && <span className="cas-knowledge-muted">{context.body.replace(/\s+/g, " ").slice(0, 110)}</span>}
                   <span className="cas-knowledge-muted">
                     {[context.document_source_id, context.source_scope, context.viewer_path].filter(Boolean).join(" · ")}
@@ -1552,7 +2039,7 @@ function TopologyDashboard({
 export default function CywellKnowledgeRoute() {
   const [health, setHealth] = React.useState<KnowledgeHealth | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [customerId, setCustomerId] = React.useState("default");
+  const [customerId, setCustomerId] = React.useState(initialCustomerId);
   const [uploadTitle, setUploadTitle] = React.useState("customer-runbook.txt");
   const [uploadContent, setUploadContent] = React.useState(
     "OpenShift router latency increased after ingress certificate rotation. Check route shards, HAProxy logs, and namespace events."
@@ -1567,6 +2054,9 @@ export default function CywellKnowledgeRoute() {
   const [isRunning, setIsRunning] = React.useState(false);
   const [actionResult, setActionResult] = React.useState<ActionResult | null>(null);
   const [topologyData, setTopologyData] = React.useState<TopologyPayload | null>(null);
+  const [corpusTargets, setCorpusTargets] = React.useState<ViewerTarget[]>([]);
+  const [selectedDocumentId, setSelectedDocumentId] = React.useState("");
+  const [selectedViewerTarget, setSelectedViewerTarget] = React.useState<ViewerTarget | null>(initialViewerTarget);
   const [topologyTypeFilter, setTopologyTypeFilter] = React.useState("all");
   const [selectedTopologyNodeId, setSelectedTopologyNodeId] = React.useState<string | null>(null);
   const autoTopologyLoadKey = React.useRef("");
@@ -1576,6 +2066,33 @@ export default function CywellKnowledgeRoute() {
   const activeRoute = routeItems.find((item) => item.key === activeKey) ?? routeItems[0];
   const capabilities = health?.capabilities?.length ? health.capabilities : fallbackCapabilities;
   const renderedTopology = topologyData ?? topologyPayload(actionResult);
+  const resultViewerTargets = React.useMemo(
+    () => collectViewerTargets(actionResult, renderedTopology, customerId),
+    [actionResult, customerId, renderedTopology]
+  );
+  const allViewerTargets = React.useMemo(() => mergeViewerTargets(corpusTargets, resultViewerTargets), [corpusTargets, resultViewerTargets]);
+  const selectedCorpusTarget =
+    corpusTargets.find((target) => (target.document_source_id || target.id) === selectedDocumentId) ?? corpusTargets[0] ?? null;
+  const activeDocumentId = selectedCorpusTarget?.document_source_id || selectedCorpusTarget?.id || "";
+
+  const openViewer = React.useCallback(
+    (target: ViewerTarget) => {
+      setSelectedViewerTarget(target);
+      if (target.kind === "document") setSelectedDocumentId(target.document_source_id || target.id);
+      if (typeof window !== "undefined") {
+        window.history.pushState(null, "", viewerHref(target, customerId));
+      }
+    },
+    [customerId]
+  );
+
+  const selectCorpusDocument = React.useCallback(
+    (target: ViewerTarget) => {
+      setSelectedDocumentId(target.document_source_id || target.id);
+      openViewer(target);
+    },
+    [openViewer]
+  );
 
   React.useEffect(() => {
     if (!renderedTopology?.nodes.length) return;
@@ -1653,8 +2170,8 @@ export default function CywellKnowledgeRoute() {
 
   const uploadDocument = React.useCallback(
     () =>
-      runAction(() =>
-        requestJson("/api/knowledge/uploads/ingest", {
+      runAction(async () => {
+        const result = await requestJson("/api/knowledge/uploads/ingest", {
           method: "POST",
           body: JSON.stringify({
             customer_id: customerId,
@@ -1676,9 +2193,15 @@ export default function CywellKnowledgeRoute() {
                 }
               : { content: uploadContent })
           })
-        })
-      ),
-    [customerId, runAction, selectedFileBase64, selectedFileMimeType, selectedFileName, uploadContent, uploadTitle]
+        });
+        const targets = collectViewerTargets(result, null, customerId).filter((target) => target.kind === "document");
+        if (targets.length > 0) {
+          setCorpusTargets((current) => mergeViewerTargets(targets, current));
+          selectCorpusDocument(targets[0]);
+        }
+        return result;
+      }),
+    [customerId, runAction, selectCorpusDocument, selectedFileBase64, selectedFileMimeType, selectedFileName, uploadContent, uploadTitle]
   );
 
   const ingestUrl = React.useCallback(
@@ -1705,8 +2228,17 @@ export default function CywellKnowledgeRoute() {
   );
 
   const loadUploadReports = React.useCallback(
-    () => runAction(() => requestJson(`/api/knowledge/uploads/reports?customer_id=${encodeURIComponent(customerId)}`)),
-    [customerId, runAction]
+    () =>
+      runAction(async () => {
+        const result = await requestJson(`/api/knowledge/uploads/reports?customer_id=${encodeURIComponent(customerId)}`);
+        const targets = collectViewerTargets(result, null, customerId).filter((target) => target.kind === "document");
+        setCorpusTargets(targets);
+        if (targets.length > 0 && !targets.some((target) => (target.document_source_id || target.id) === selectedDocumentId)) {
+          setSelectedDocumentId(targets[0].document_source_id || targets[0].id);
+        }
+        return result;
+      }),
+    [customerId, runAction, selectedDocumentId]
   );
 
   const loadSelectedFile = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1737,11 +2269,16 @@ export default function CywellKnowledgeRoute() {
           method: "POST",
           body: JSON.stringify({
             customer_id: customerId,
-            question
+            question,
+            active_document_id: activeDocumentId || undefined,
+            document_source_id: activeDocumentId || undefined,
+            enabled_upload_document_ids: activeDocumentId ? [activeDocumentId] : undefined,
+            enabled_source_scopes: selectedCorpusTarget?.source_scope ? [selectedCorpusTarget.source_scope] : undefined,
+            restrict_uploaded_sources: Boolean(activeDocumentId)
           })
         })
       ),
-    [customerId, question, runAction]
+    [activeDocumentId, customerId, question, runAction, selectedCorpusTarget]
   );
 
   const runWikiLoop = React.useCallback(
@@ -1749,10 +2286,10 @@ export default function CywellKnowledgeRoute() {
       runAction(() =>
         requestJson("/api/knowledge/wiki-loop/run", {
           method: "POST",
-          body: JSON.stringify({ customer_id: customerId })
+          body: JSON.stringify({ customer_id: customerId, document_id: activeDocumentId || undefined })
         })
       ),
-    [customerId, runAction]
+    [activeDocumentId, customerId, runAction]
   );
 
   const saveWikiNote = React.useCallback(
@@ -1926,6 +2463,13 @@ export default function CywellKnowledgeRoute() {
                       Load reports
                     </button>
                   </div>
+                  <CorpusWorkbench
+                    customerId={customerId}
+                    openViewer={openViewer}
+                    reports={corpusTargets}
+                    selectDocument={selectCorpusDocument}
+                    selectedDocumentId={selectedDocumentId}
+                  />
                 </>
               )}
 
@@ -1988,6 +2532,8 @@ export default function CywellKnowledgeRoute() {
                   </div>
                   <TopologyDashboard
                     askAboutNode={askAboutTopologyNode}
+                    customerId={customerId}
+                    openViewer={openViewer}
                     selectedNodeId={selectedTopologyNodeId}
                     setSelectedNodeId={setSelectedTopologyNodeId}
                     setTypeFilter={setTopologyTypeFilter}
@@ -1997,6 +2543,7 @@ export default function CywellKnowledgeRoute() {
                 </>
               )}
             </div>
+            <KnowledgeViewer customerId={customerId} openViewer={openViewer} selected={selectedViewerTarget} targets={allViewerTargets} />
             {actionResult && (
               <pre className="cas-knowledge-result" data-test="cas-knowledge-result" role={actionResult.status === "error" ? "alert" : undefined}>
                 {prettyJson(actionResult)}

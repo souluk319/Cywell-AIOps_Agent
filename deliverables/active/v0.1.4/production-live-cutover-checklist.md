@@ -30,6 +30,9 @@ These values must come from the target environment. Do not commit any secret val
   - `deliverables/active/v0.1.4/pbs-runtime-service-contract.sample.yaml`
 - Live PBS API base URL for smoke tests:
   - `CAS_PBS_BASE_URL=https://playbookstudio-runtime.playbookstudio.svc.cluster.local:8765`
+- Pinned PBS source revision for release evidence:
+  - `CAS_PBS_SOURCE_HEAD=<expected PBS git commit>`
+  - optional strict clean checkout gate: `CAS_PBS_REQUIRE_CLEAN_SOURCE=true`
 - Local cutover smoke PBS auth material:
   - `CAS_PBS_BEARER_TOKEN`, `CAS_PBS_API_KEY`, or `CAS_PBS_BEARER_TOKEN_FILE`
 - PBS bearer token material for:
@@ -119,7 +122,7 @@ npm run verify:pbs:preflight:live:site:preapply
 Required result:
 
 - `verify` passes.
-- `verify:pbs:source-contract:required` passes against the pinned PBS source checkout before live feature parity is claimed.
+- `verify:pbs:source-contract:required` passes against the pinned PBS source checkout before live feature parity is claimed. The evidence must include PBS source branch, HEAD, tree status, and contract file hashes. For strict release, set `CAS_PBS_SOURCE_HEAD` and `CAS_PBS_REQUIRE_CLEAN_SOURCE=true`; otherwise a dirty checkout is recorded as a WARN, not a pass/fail blocker.
 - `verify:pbs:live-prereqs` passes and writes `test-results/cas-pbs-live-prereqs-render.json`.
 - `verify:deploy:manifests` passes.
 - `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags. If `v0.1.4` tags already exist and must intentionally move, rerun as `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` and capture the old/new image evidence.
@@ -211,7 +214,7 @@ Save command output or JSON artifacts for the release record:
 - `test-results/cas-pbs-live-smoke-cluster-cutover.json`
 - `test-results/cas-release-images.json`
 - `test-results/cas-pbs-live-prereqs-render.json`
-- `test-results/cas-pbs-source-contract.json`
+- `test-results/cas-pbs-source-contract.json`, including `pbsSource.head`, `pbsSource.treeStatus`, and `pbsSource.contractFileSha256`
 
 ## Completion Definition
 

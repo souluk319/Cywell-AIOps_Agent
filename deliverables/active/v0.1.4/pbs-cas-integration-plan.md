@@ -179,6 +179,9 @@ Delivered:
 - URL ingest rejects private/loopback/unresolved targets, URL credentials, and redirects in the local guarded ingest path
 - URL ingest PBS-compatible metadata including `auto_compile_wiki`
 - upload report list
+- upload/report `viewer_path` deep links for customer corpus documents
+- Customer Corpus Workbench with uploaded document/report cards, graph summaries, chunk previews, source-scope labels, and selected document state
+- private ingest lane enforcement before local indexing or PBS outbound calls: upload and URL ingest must stay `source_scope=user_upload`, `visibility=private_user`, and the expected `source_kind`
 - customer_id scope
 - owner_id scope in the engine contract
 - Gateway-verified OpenShift/Kubernetes SelfSubjectReview owner scope
@@ -207,6 +210,8 @@ Delivered:
 - owner/customer scoped query
 - citation-bearing keyword retrieval
 - topology node to RAG action in the console UI
+- selected-corpus RAG requests from the console with `active_document_id`, `document_source_id`, `enabled_upload_document_ids`, `enabled_source_scopes`, and `restrict_uploaded_sources`
+- RAG source-scope allowlisting to private `user_upload` and `wiki_vault` lanes
 - PBS live chat adapter normalization into CAS `answer`, `citations`, and `trace` shape
 
 Not yet PBS parity:
@@ -235,6 +240,8 @@ Delivered:
 - manual wiki note save endpoint
 - wiki vault endpoint
 - topology endpoint
+- customer upload/report/citation viewer panel with deep links under `/cywell/customer-data`
+- selected-document LLM Wiki loop action from the corpus view
 - Cywell Topology dashboard with:
   - KPI stats strip
   - node type segmented filter
@@ -245,6 +252,7 @@ Delivered:
   - node inspector
   - relation grid
   - Wiki Vault side-channel panels for ranked wikilinks/tags, selected uploads/context, and vault relations
+  - viewer links for selected uploads, selected context, citations, and PBS-rich topology nodes
   - direct RAG action from selected node
   - graph normalization checks that create explicit fallback endpoint nodes when PBS edges reference missing endpoints
 
@@ -335,7 +343,7 @@ Latest closed review items:
 
 ## Risks
 
-- PBS-Dev3 워킹트리가 더럽기 때문에 소스 기준점을 먼저 고정해야 한다.
+- PBS-Dev3 워킹트리가 더럽기 때문에 소스 기준점을 먼저 고정해야 한다. 현재 source-contract evidence는 branch/HEAD/tree status와 contract file hash를 기록하며, strict release에는 `CAS_PBS_SOURCE_HEAD`와 `CAS_PBS_REQUIRE_CLEAN_SOURCE=true`를 걸 수 있다.
 - PBS Python dependency가 크다. CAS Node gateway에 합치지 말고 별도 image로 분리해야 한다.
 - pgvector embedding dimension, model 선택, migration 순서가 맞지 않으면 재색인이 필요하다.
 - PBS-live URL ingest는 실제 fetch가 PBS에서 수행되므로 PBS 런타임의 SSRF/redirect/DNS-rebind 방어 계약을 별도로 확인해야 한다.
@@ -352,8 +360,11 @@ v0.1.4 currently proves:
 - rejection of conflicting top-level and nested customer IDs before indexing or outbound PBS calls
 - CRC deployment of gateway, console plugin, knowledge engine, and Postgres
 - compact Cywell topology dashboard visual design in the live console plugin bundle
+- Cywell-owned topology/customer-corpus visualization design; no external dashboard design package is required for v0.1.4
 - topology KPI strip, PBS-rich node tones, type filters, Signal leaders, relation grid, selected-node inspector, source/viewer metadata, selected-source RAG action, and fallback endpoint handling in the live console plugin bundle
+- Customer Corpus Workbench with uploaded document cards, report cards, viewer deep links, selected document state, selected-corpus RAG, and selected-document wiki-loop actions
 - PBS-compatible upload and URL ingest payload metadata
+- private user-upload source-lane enforcement for upload, URL ingest, and RAG source selection before local indexing or PBS outbound calls
 - PBS-compatible local Postgres schema and ingest shadow rows for document sources, parsed documents, and chunks
 - local Wiki Vault graph extraction for `[[wikilinks]]`, `#tags`, URLs, concepts, relations, backlinks, selected context/uploads, and RAG citations from vault-only context
 - local LLM Wiki staged run/status contract with `run_id`, compiler stages, `compiled_wiki_status`, and PBS-style note overlay metadata
@@ -366,7 +377,7 @@ v0.1.4 currently proves:
 - rendered PBS shadow/live deployment overlays with HTTPS service-token transport, shadow optional token Secret reference, live required token Secret reference, live required Postgres Secret references, no dev owner/DB Secret material, release image tags, and restricted knowledge-engine egress to labeled PBS runtime pods on `8765`
 - rendered PBS live overlay with Gateway customer ACL required from `cas-knowledge-live-config/customer-access-json`; production cutover uses the generated `pbs-live-site` overlay from `render:pbs:live-prereqs` so strict preflight sees a reviewed concrete customer/group mapping instead of placeholder policy
 - rendered PBS live prerequisites include `cas-knowledge-internal-auth/owner-hmac-secret` for Gateway/Knowledge Engine owner-header signing and verification
-- source/API contract verification against `F:\AI_Projects\PBS-Dev3` through `verify:pbs:source-contract:required`
+- source/API contract verification against `F:\AI_Projects\PBS-Dev3` through `verify:pbs:source-contract:required`, including PBS source branch/HEAD/tree status and contract file hashes
 - topology normalization across PBS `graph`, `topology.graph`, `links`, `relations`, `relationships`, `node_id`, `source_id`, and `target_id` variants without mixing wrapper and nested graph candidates
 - topology normalization preserves PBS summary counts, wikilinks, tags, entity/concept nodes, relation signals, degree/weight, selected context, selected upload metadata, and renders those Wiki Vault side-channel fields in the Cywell dashboard
 - Knowledge Engine ingress isolation so only the CAS gateway can call scoped data APIs in-cluster

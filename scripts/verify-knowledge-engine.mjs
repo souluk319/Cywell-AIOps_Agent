@@ -834,6 +834,40 @@ try {
     "gateway upload rejects invalid base64 payloads before indexing",
     JSON.stringify(invalidBase64Upload.body)
   );
+  const privilegedScopeUpload = await fetchJson(`${gatewayBase}/api/knowledge/uploads/ingest`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      filename: "official-docs-spoof.txt",
+      content: "Private upload must not enter official_docs source scope.",
+      source_scope: "official_docs",
+      visibility: "private_user"
+    })
+  });
+  expect(
+    "knowledge:upload-blocks-privileged-source-scope",
+    privilegedScopeUpload.response.status === 400 && String(privilegedScopeUpload.body.error ?? "").includes("source_scope=user_upload"),
+    "gateway upload rejects privileged PBS source scopes before indexing",
+    JSON.stringify(privilegedScopeUpload.body)
+  );
+  const sharedVisibilityUpload = await fetchJson(`${gatewayBase}/api/knowledge/uploads/ingest`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      filename: "workspace-shared-spoof.txt",
+      content: "Private upload must not claim workspace_shared visibility.",
+      source_scope: "user_upload",
+      visibility: "workspace_shared"
+    })
+  });
+  expect(
+    "knowledge:upload-blocks-shared-visibility",
+    sharedVisibilityUpload.response.status === 400 && String(sharedVisibilityUpload.body.error ?? "").includes("visibility=private_user"),
+    "gateway upload rejects non-private PBS visibility before indexing",
+    JSON.stringify(sharedVisibilityUpload.body)
+  );
 
   const urlIngest = await fetchJson(`${gatewayBase}/api/knowledge/uploads/url-ingest`, {
     method: "POST",
@@ -860,6 +894,23 @@ try {
       urlIngest.body.document?.metadata?.pbs_payload?.url === "https://93.184.216.34/verify-runbook" &&
       urlIngest.body.document?.metadata?.pbs_payload?.auto_compile_wiki === true,
     "gateway URL ingest records PBS wiki compile contract"
+  );
+  const privilegedScopeUrl = await fetchJson(`${gatewayBase}/api/knowledge/uploads/url-ingest`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      url: "https://93.184.216.34/official-docs-spoof",
+      content: "Private URL ingest must not enter official_docs source scope.",
+      source_scope: "official_docs",
+      visibility: "private_user"
+    })
+  });
+  expect(
+    "knowledge:url-ingest-blocks-privileged-source-scope",
+    privilegedScopeUrl.response.status === 400 && String(privilegedScopeUrl.body.error ?? "").includes("source_scope=user_upload"),
+    "gateway URL ingest rejects privileged PBS source scopes before indexing",
+    JSON.stringify(privilegedScopeUrl.body)
   );
   const mismatchedCustomerUpload = await fetchJson(`${gatewayBase}/api/knowledge/uploads/ingest`, {
     method: "POST",
@@ -936,6 +987,8 @@ try {
       uploadReport?.ready_for_chat === true &&
       uploadReport?.basic_index_ready === true &&
       uploadReport?.chunk_count >= 1 &&
+      typeof uploadReport?.viewer_path === "string" &&
+      uploadReport.viewer_path.includes(`/cywell/customer-data?customer_id=verify&document_id=${uploadedDocumentId}`) &&
       uploadReport?.graph_summary?.wikilinks?.includes("Router Latency") &&
       uploadReport?.graph_summary?.tags?.includes("ingress") &&
       uploadReport?.graph_summary?.urls?.includes("https://example.com/verify-runbook.") &&
@@ -1026,6 +1079,21 @@ try {
       scopedRag.body.trace?.restrict_uploaded_sources === true,
     "gateway RAG honors active uploaded document scope and emits source lineage citations",
     JSON.stringify(scopedRag.body)
+  );
+  const privilegedScopeRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      question: "router latency evidence",
+      enabled_source_scopes: ["official_docs", "user_upload"]
+    })
+  });
+  expect(
+    "knowledge:rag-blocks-privileged-source-scope",
+    privilegedScopeRag.response.status === 400 && String(privilegedScopeRag.body.error ?? "").includes("official_docs"),
+    "gateway RAG rejects privileged PBS source scopes before retrieval",
+    JSON.stringify(privilegedScopeRag.body)
   );
   const vaultOnlyNote = await fetchJson(`${gatewayBase}/api/knowledge/wiki-vault/notes`, {
     method: "POST",
@@ -1879,6 +1947,31 @@ try {
     "PBS live upload rejects unsafe files before any outbound PBS request",
     JSON.stringify({ body: liveRejectedUpload.body, before: liveUploadRecordCountBeforeReject, after: liveUploadRecordCountAfterReject })
   );
+  const liveUploadRecordCountBeforeScopeReject = fakePbs.records.filter((record) => record.path === "/api/uploads/ingest").length;
+  const liveRejectedScopeUpload = await fetchJson(`${liveBase}/api/knowledge/uploads/ingest`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({
+      customer_id: "live",
+      filename: "live-official-docs-spoof.txt",
+      content_base64: Buffer.from("PBS live private upload must not enter official docs.", "utf8").toString("base64"),
+      source_scope: "official_docs",
+      visibility: "private_user"
+    })
+  });
+  const liveUploadRecordCountAfterScopeReject = fakePbs.records.filter((record) => record.path === "/api/uploads/ingest").length;
+  expect(
+    "knowledge:pbs-live-upload-source-scope-before-outbound",
+    liveRejectedScopeUpload.response.status === 400 &&
+      String(liveRejectedScopeUpload.body.error ?? "").includes("source_scope=user_upload") &&
+      liveUploadRecordCountAfterScopeReject === liveUploadRecordCountBeforeScopeReject,
+    "PBS live upload rejects privileged source scopes before any outbound PBS request",
+    JSON.stringify({
+      body: liveRejectedScopeUpload.body,
+      before: liveUploadRecordCountBeforeScopeReject,
+      after: liveUploadRecordCountAfterScopeReject
+    })
+  );
   const liveUrlIngest = await fetchJson(`${liveBase}/api/knowledge/uploads/url-ingest`, {
     method: "POST",
     headers: liveHeaders,
@@ -1898,6 +1991,27 @@ try {
       liveUrlIngest.body.summary?.imported_url_count === 1,
     "PBS live URL ingest response is preserved and marked as PBS live",
     JSON.stringify(liveUrlIngest.body)
+  );
+  const liveUrlRecordCountBeforeScopeReject = fakePbs.records.filter((record) => record.path === "/api/uploads/url-ingest").length;
+  const liveRejectedScopeUrl = await fetchJson(`${liveBase}/api/knowledge/uploads/url-ingest`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({
+      customer_id: "live",
+      url: "https://93.184.216.34/live-official-docs-spoof",
+      content: "PBS live private URL ingest must not enter official docs.",
+      source_scope: "official_docs",
+      visibility: "private_user"
+    })
+  });
+  const liveUrlRecordCountAfterScopeReject = fakePbs.records.filter((record) => record.path === "/api/uploads/url-ingest").length;
+  expect(
+    "knowledge:pbs-live-url-source-scope-before-outbound",
+    liveRejectedScopeUrl.response.status === 400 &&
+      String(liveRejectedScopeUrl.body.error ?? "").includes("source_scope=user_upload") &&
+      liveUrlRecordCountAfterScopeReject === liveUrlRecordCountBeforeScopeReject,
+    "PBS live URL ingest rejects privileged source scopes before any outbound PBS request",
+    JSON.stringify({ body: liveRejectedScopeUrl.body, before: liveUrlRecordCountBeforeScopeReject, after: liveUrlRecordCountAfterScopeReject })
   );
   const liveReports = await fetchJson(`${liveBase}/api/knowledge/uploads/reports?customer_id=live`, {
     headers: liveHeaders
@@ -1936,6 +2050,25 @@ try {
       liveRag.body.trace?.retriever === "pbs-http",
     "PBS live chat response is normalized into CAS RAG shape",
     JSON.stringify(liveRag.body)
+  );
+  const liveChatRecordCountBeforeScopeReject = fakePbs.records.filter((record) => record.path === "/api/chat").length;
+  const liveRejectedScopeRag = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({
+      customer_id: "live",
+      question: "router latency evidence",
+      enabled_source_scopes: ["official_docs", "user_upload"]
+    })
+  });
+  const liveChatRecordCountAfterScopeReject = fakePbs.records.filter((record) => record.path === "/api/chat").length;
+  expect(
+    "knowledge:pbs-live-rag-source-scope-before-outbound",
+    liveRejectedScopeRag.response.status === 400 &&
+      String(liveRejectedScopeRag.body.error ?? "").includes("official_docs") &&
+      liveChatRecordCountAfterScopeReject === liveChatRecordCountBeforeScopeReject,
+    "PBS live RAG rejects privileged source scopes before any outbound PBS request",
+    JSON.stringify({ body: liveRejectedScopeRag.body, before: liveChatRecordCountBeforeScopeReject, after: liveChatRecordCountAfterScopeReject })
   );
   const liveLeakedRagCitation = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
     method: "POST",
