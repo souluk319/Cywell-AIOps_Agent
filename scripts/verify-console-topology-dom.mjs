@@ -231,6 +231,67 @@ function topologyResponse(customerId) {
       }
     };
   }
+  if (customerId === "workflow-customer") {
+    return {
+      status: "ok",
+      customer_id: customerId,
+      topology: {
+        graph: {
+          counts: { nodes: 3, edges: 2, documents: 1, notes: 1, upload_node_count: 1, note_count: 1, graph_relation_count: 2 },
+          nodes: [
+            {
+              node_id: "workflow-doc-1",
+              kind: "upload_document",
+              title: "Workflow Router Report",
+              summary: "Selected customer upload that feeds RAG and LLM Wiki.",
+              document_source_id: "workflow-doc-1",
+              source_scope: "user_upload",
+              ready_for_chat: true,
+              chunk_count: 3
+            },
+            {
+              node_id: "workflow-wiki-1",
+              kind: "wiki-note",
+              title: "Workflow Router Wiki",
+              summary: "Compiled wiki note for the selected workflow document.",
+              document_source_id: "workflow-doc-1",
+              source_scope: "wiki_vault",
+              compiled_wiki: true,
+              revision: 2,
+              previous_revision: 1,
+              viewer_path: "/wiki/workflow-router"
+            },
+            { node_id: "workflow-runtime", kind: "runtime", title: "PBS Runtime" }
+          ],
+          links: [
+            { source_id: "workflow-wiki-1", target_id: "workflow-doc-1", kind: "compiled_from", source_document_id: "workflow-doc-1" },
+            { source_id: "workflow-runtime", target_id: "workflow-wiki-1", kind: "feeds", source_document_id: "workflow-doc-1" }
+          ]
+        },
+        pbs: {
+          selected_uploads: [
+            {
+              document_source_id: "workflow-doc-1",
+              title: "Workflow Router Report",
+              source_scope: "user_upload",
+              ready_for_chat: true,
+              chunk_count: 3
+            }
+          ],
+          selected_context: [
+            {
+              id: "workflow-wiki-1",
+              title: "Workflow Router Wiki",
+              body: "Compiled wiki context for the workflow router report.",
+              document_source_id: "workflow-doc-1",
+              source_scope: "wiki_vault"
+            }
+          ],
+          relations: [{ source: "workflow-doc-1", target: "workflow-wiki-1", type: "compiled_to" }]
+        }
+      }
+    };
+  }
   const graph =
     customerId === "dense-topology"
       ? denseTopologyGraph()
@@ -697,13 +758,23 @@ try {
       page.waitForResponse((response) => response.url().includes("/api/knowledge/uploads/url-ingest") && response.status() === 200),
       page.locator('[data-test="cas-knowledge-url-ingest"]').click()
     ]);
+    const urlIngestCall = calls.findLast?.(
+      (call) => call.method === "POST" && call.path === "/api/knowledge/uploads/url-ingest" && call.body?.customer_id === "url-customer"
+    );
     const urlCorpusText = await page.locator('[data-test="cas-corpus-workbench"]').innerText();
     const urlScopeText = await page.locator('[data-test="cas-knowledge-scope-bar"]').innerText();
     expect(
       "console-topology-dom:url-ingest-joins-corpus-browser-flow",
-      urlCorpusText.includes("URL Workflow Runbook") && urlScopeText.includes("url-workflow-doc"),
+      urlIngestCall?.body?.url === "https://example.com/workflow-runbook" &&
+        urlIngestCall?.body?.source_kind === "url" &&
+        urlIngestCall?.body?.source_scope === "user_upload" &&
+        urlIngestCall?.body?.visibility === "private_user" &&
+        urlIngestCall?.body?.index === true &&
+        urlIngestCall?.body?.auto_compile_wiki === true &&
+        urlCorpusText.includes("URL Workflow Runbook") &&
+        urlScopeText.includes("url-workflow-doc"),
       "URL ingest browser flow selects PBS pages/upload_results into the customer corpus",
-      JSON.stringify({ urlCorpusText, urlScopeText })
+      JSON.stringify({ body: urlIngestCall?.body, urlCorpusText, urlScopeText })
     );
 
     await page.goto(`${serverHandle.url}/cywell/customer-data?customer_id=upload-customer`, { waitUntil: "networkidle" });
@@ -733,6 +804,36 @@ try {
         uploadResultHighlights.includes("2 chunks indexed"),
       "upload browser flow sends private upload payload, selects corpus item, and surfaces indexed result",
       JSON.stringify({ body: uploadCall?.body, uploadCorpusText, uploadResultHighlights })
+    );
+
+    await page.goto(`${serverHandle.url}/cywell/customer-data?customer_id=base64-upload-customer`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-customer-data"]', { timeout: 15000 });
+    await page.locator('[data-test="cas-knowledge-file-input"]').setInputFiles({
+      name: "base64-workflow-evidence.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from("base64 uploaded workflow evidence")
+    });
+    await page.waitForFunction(() => document.body.textContent?.includes("selected base64-workflow-evidence.md"));
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/uploads/ingest") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-upload"]').click()
+    ]);
+    const base64UploadCall = calls.findLast?.(
+      (call) => call.method === "POST" && call.path === "/api/knowledge/uploads/ingest" && call.body?.customer_id === "base64-upload-customer"
+    );
+    expect(
+      "console-topology-dom:file-input-base64-upload-browser-flow",
+      base64UploadCall?.body?.file_name === "base64-workflow-evidence.md" &&
+        base64UploadCall?.body?.filename === "base64-workflow-evidence.md" &&
+        base64UploadCall?.body?.mime_type === "text/markdown" &&
+        base64UploadCall?.body?.content_base64 === Buffer.from("base64 uploaded workflow evidence").toString("base64") &&
+        base64UploadCall?.body?.source_kind === "upload" &&
+        base64UploadCall?.body?.source_scope === "user_upload" &&
+        base64UploadCall?.body?.visibility === "private_user" &&
+        base64UploadCall?.body?.force_reingest === false &&
+        base64UploadCall?.body?.index === true,
+      "file-input browser flow sends PBS-compatible base64 private upload payload",
+      JSON.stringify(base64UploadCall?.body)
     );
 
     await page.goto(`${serverHandle.url}/cywell/customer-data?customer_id=slow-upload`, { waitUntil: "networkidle" });
@@ -991,6 +1092,41 @@ try {
         noteResultText.includes("workflow-note-overlay"),
       "selected-document wiki note browser flow sends document lineage and surfaces saved result",
       JSON.stringify({ body: noteCall?.body, noteResultText })
+    );
+
+    const continuityTopologyLoad = page.waitForResponse(
+      (response) => response.url().includes("/api/knowledge/topology?customer_id=workflow-customer") && response.status() === 200
+    );
+    await page.locator('nav[aria-label="Cywell Knowledge"] a').filter({ hasText: "Topology" }).click();
+    await page.waitForSelector('[data-test="cas-knowledge-panel-topology"]', { timeout: 15000 });
+    await continuityTopologyLoad;
+    await page.waitForFunction(() => document.body.textContent?.includes("Workflow Router Wiki"));
+    const continuityUrl = page.url();
+    const continuityDashboardText = await page.locator('[data-test="cas-topology-dashboard"]').innerText();
+    await page.locator('[data-test="cas-topology-node"]').filter({ hasText: "Workflow Router Wiki" }).click();
+    const continuityRagStart = calls.length;
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
+      page.locator('[data-test="cas-topology-rag-action"]').click()
+    ]);
+    const continuityRagCall = calls
+      .slice(continuityRagStart)
+      .find((call) => call.method === "POST" && call.path === "/api/knowledge/rag/query" && call.body?.customer_id === "workflow-customer");
+    expect(
+      "console-topology-dom:continuous-upload-rag-wiki-topology-lineage-flow",
+      continuityUrl.includes("/cywell/topology") &&
+        continuityUrl.includes("customer_id=workflow-customer") &&
+        continuityUrl.includes("document_id=workflow-doc-1") &&
+        continuityDashboardText.includes("Workflow Router Report") &&
+        continuityDashboardText.includes("Workflow Router Wiki") &&
+        continuityRagCall?.body?.active_document_id === "workflow-doc-1" &&
+        continuityRagCall?.body?.document_source_id === "workflow-doc-1" &&
+        Array.isArray(continuityRagCall?.body?.enabled_upload_document_ids) &&
+        continuityRagCall.body.enabled_upload_document_ids.includes("workflow-doc-1") &&
+        continuityRagCall?.body?.restrict_uploaded_sources === true &&
+        String(continuityRagCall?.body?.question ?? "").includes("Workflow Router Wiki"),
+      "one browser journey preserves a selected customer document from upload reports through RAG, LLM Wiki, topology, and topology-to-RAG",
+      JSON.stringify({ continuityUrl, continuityDashboardText, body: continuityRagCall?.body })
     );
 
     const initialTopologyLoad = page.waitForResponse(

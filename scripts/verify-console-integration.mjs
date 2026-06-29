@@ -130,24 +130,32 @@ expectText(
   "/cywell/topology",
   "built plugin registers the topology route"
 );
-const topologyNavExtension = (manifestJson.extensions ?? []).find((extension) => {
-  const startsWith = extension?.properties?.startsWith;
-  return (
-    extension?.type === "console.navigation/href" &&
-    extension?.properties?.id === "cywell-topology" &&
-    extension?.properties?.section === "cywell" &&
-    extension?.properties?.name === "Topology" &&
-    extension?.properties?.href === "/cywell/topology" &&
-    Array.isArray(startsWith) &&
-    startsWith.includes("/cywell/topology")
+const expectedKnowledgeRoutes = [
+  { key: "customer-data", id: "cywell-customer-data", name: "고객 데이터", href: "/cywell/customer-data" },
+  { key: "rag", id: "cywell-rag", name: "RAG", href: "/cywell/rag" },
+  { key: "llm-wiki", id: "cywell-llm-wiki", name: "LLM Wiki", href: "/cywell/llm-wiki" },
+  { key: "topology", id: "cywell-topology", name: "Topology", href: "/cywell/topology" }
+];
+for (const route of expectedKnowledgeRoutes) {
+  const navExtension = (manifestJson.extensions ?? []).find((extension) => {
+    const startsWith = extension?.properties?.startsWith;
+    return (
+      extension?.type === "console.navigation/href" &&
+      extension?.properties?.id === route.id &&
+      extension?.properties?.section === "cywell" &&
+      extension?.properties?.name === route.name &&
+      extension?.properties?.href === route.href &&
+      Array.isArray(startsWith) &&
+      startsWith.includes(route.href)
+    );
+  });
+  expectText(
+    `console-nav:${route.key}-structural`,
+    navExtension ? JSON.stringify(navExtension) : "",
+    route.href,
+    `built manifest structurally registers the ${route.name} navigation item`
   );
-});
-expectText(
-  "console-nav:topology-structural",
-  topologyNavExtension ? JSON.stringify(topologyNavExtension) : "",
-  "/cywell/topology",
-  "built manifest structurally registers the Topology navigation item"
-);
+}
 expectText(
   "console-route:registered",
   manifest,
@@ -160,21 +168,23 @@ expectText(
   "CywellKnowledgeRoute",
   "built plugin exposes the Cywell knowledge route module"
 );
-const cywellKnowledgeRouteExtension = (manifestJson.extensions ?? []).find((extension) => {
-  const path = extension?.properties?.path;
-  const paths = Array.isArray(path) ? path : [path];
-  return (
-    extension?.type === "console.page/route" &&
-    paths.includes("/cywell/topology") &&
-    extension?.properties?.component?.$codeRef === "CywellKnowledgeRoute"
+for (const route of expectedKnowledgeRoutes) {
+  const routeExtension = (manifestJson.extensions ?? []).find((extension) => {
+    const path = extension?.properties?.path;
+    const paths = Array.isArray(path) ? path : [path];
+    return (
+      extension?.type === "console.page/route" &&
+      paths.includes(route.href) &&
+      extension?.properties?.component?.$codeRef === "CywellKnowledgeRoute"
+    );
+  });
+  expectText(
+    `console-route:${route.key}-structural`,
+    routeExtension ? JSON.stringify(routeExtension) : "",
+    route.href,
+    `built manifest structurally maps ${route.href} to CywellKnowledgeRoute`
   );
-});
-expectText(
-  "console-route:topology-structural",
-  cywellKnowledgeRouteExtension ? JSON.stringify(cywellKnowledgeRouteExtension) : "",
-  "/cywell/topology",
-  "built manifest structurally maps /cywell/topology to CywellKnowledgeRoute"
-);
+}
 expectText(
   "console-route:sentinel-module",
   manifest,

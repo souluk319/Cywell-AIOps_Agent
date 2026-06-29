@@ -9,7 +9,8 @@ import { dirname, join, resolve } from "node:path";
 const args = new Set(process.argv.slice(2).filter((arg) => !arg.startsWith("--source-dir=")));
 const sourceDirArg = process.argv.find((arg) => arg.startsWith("--source-dir="))?.split("=")[1];
 const checkedAt = new Date().toISOString();
-const repoDefaultSourceDir = resolve(process.cwd(), "..", "PBS-Dev3");
+const repoPinnedSourceDir = resolve(process.cwd(), "..", "PBS-Dev3-cywell-v014-source-pin-clone");
+const repoDefaultSourceDir = existsSync(repoPinnedSourceDir) ? repoPinnedSourceDir : resolve(process.cwd(), "..", "PBS-Dev3");
 const sourceDir = resolve(sourceDirArg || process.env.CAS_PBS_SOURCE_DIR || repoDefaultSourceDir);
 const requireSource = args.has("--require-source");
 const requireCleanSource = args.has("--require-clean-source") || /^(1|true|yes|y|on)$/i.test(process.env.CAS_PBS_REQUIRE_CLEAN_SOURCE || "");
@@ -31,7 +32,10 @@ const checks = [];
 const contractFiles = [
   "deploy/Dockerfile",
   "docker-compose.yml",
+  "src/play_book_studio/config/settings.py",
+  "src/play_book_studio/http/public_chat_gateway.py",
   "src/play_book_studio/http/server_handler_factory.py",
+  "src/play_book_studio/http/server_handler_base.py",
   "src/play_book_studio/http/upload_api.py",
   "src/play_book_studio/http/url_ingest_api.py",
   "src/play_book_studio/http/server_chat.py",
@@ -172,7 +176,10 @@ function hasAll(text, values) {
 function sourceContractChecks(root) {
   const dockerfile = readRequired(root, "deploy/Dockerfile");
   const compose = readRequired(root, "docker-compose.yml");
+  const settings = readRequired(root, "src/play_book_studio/config/settings.py");
+  const publicChatGateway = readRequired(root, "src/play_book_studio/http/public_chat_gateway.py");
   const serverFactory = readRequired(root, "src/play_book_studio/http/server_handler_factory.py");
+  const serverHandlerBase = readRequired(root, "src/play_book_studio/http/server_handler_base.py");
   const uploadApi = readRequired(root, "src/play_book_studio/http/upload_api.py");
   const urlIngestApi = readRequired(root, "src/play_book_studio/http/url_ingest_api.py");
   const serverChat = readRequired(root, "src/play_book_studio/http/server_chat.py");
@@ -240,6 +247,58 @@ function sourceContractChecks(root) {
     serverFactory.includes('parsed_request.path == "/api/chat"') && serverChat.includes("def handle_chat("),
     "PBS-Dev3 serves POST /api/chat through server_chat",
     "PBS-Dev3 must serve POST /api/chat through server_chat"
+  );
+  expect(
+    "pbs-source:route:public-chat",
+    serverFactory.includes("PUBLIC_CHAT_PATHS") &&
+      serverFactory.includes("_handle_public_chat_gateway") &&
+      publicChatGateway.includes('PUBLIC_CHAT_PATH = "/api/public/chat"') &&
+      publicChatGateway.includes("def authenticate_public_chat(") &&
+      publicChatGateway.includes("def run_public_chat("),
+    "PBS-Dev3 serves the public chat gateway through an explicit guarded route",
+    "PBS-Dev3 must expose the public chat gateway through an explicit guarded route"
+  );
+  expect(
+    "pbs-source:public-chat:closed-authenticated",
+    hasAll(publicChatGateway, [
+      "pbs_public_chat_enabled",
+      "public_chat_disabled",
+      "pbs_public_chat_api_keys",
+      "hmac.compare_digest",
+      "public_chat_unauthorized"
+    ]),
+    "PBS-Dev3 public chat gateway is disabled by default and requires configured API keys",
+    "PBS-Dev3 public chat gateway must be disabled by default and require configured API keys"
+  );
+  expect(
+    "pbs-source:public-chat:body-limit",
+    serverFactory.includes("pbs_public_chat_max_body_bytes") &&
+      serverFactory.includes("max_body_bytes") &&
+      serverHandlerBase.includes("max_body_bytes") &&
+      serverHandlerBase.includes("HTTPStatus.REQUEST_ENTITY_TOO_LARGE"),
+    "PBS-Dev3 public chat gateway enforces a configurable request body limit before chat execution",
+    "PBS-Dev3 public chat gateway must enforce a configurable request body limit before chat execution"
+  );
+  expect(
+    "pbs-source:public-chat:settings",
+    hasAll(settings, [
+      "PBS_PUBLIC_CHAT_ENABLED",
+      "PBS_PUBLIC_CHAT_API_KEYS",
+      "PBS_PUBLIC_CHAT_RATE_LIMIT_PER_MINUTE",
+      "PBS_PUBLIC_CHAT_MAX_CONCURRENT",
+      "PBS_PUBLIC_CHAT_MAX_BODY_BYTES",
+      "PBS_PUBLIC_CHAT_OWNER_USER_ID"
+    ]),
+    "PBS-Dev3 settings expose the public chat gateway runtime controls",
+    "PBS-Dev3 settings must expose the public chat gateway runtime controls"
+  );
+  expect(
+    "pbs-source:route:attachment-transcribe-boundary",
+    serverFactory.includes('/api/chat/attachments/transcribe') &&
+      serverChat.includes("def handle_chat_attachment_transcribe(") &&
+      serverChat.includes("chat_attachment_transcribe_not_available"),
+    "PBS-Dev3 attachment transcription route has an explicit unavailable runtime boundary instead of a missing import",
+    "PBS-Dev3 attachment transcription route must not break server import when transcription is unavailable"
   );
   expect(
     "pbs-source:route:wiki-vault",
@@ -338,19 +397,53 @@ CMD ["python", "-m", "play_book_studio.cli", "ui", "--no-browser", "--host", "0.
   );
   await write(
     "src/play_book_studio/http/server_handler_factory.py",
-    `if request_path == "/api/health": pass
+    `from play_book_studio.http.public_chat_gateway import PUBLIC_CHAT_PATHS
+if request_path == "/api/health": pass
 if request_path == "/api/wiki-vault": pass
 if request_path == "/api/wiki-loop/status": pass
+if parsed_request.path in PUBLIC_CHAT_PATHS: self._handle_public_chat_gateway(parsed_request.path)
 if parsed_request.path == "/api/chat": pass
+if parsed_request.path == "/api/chat/attachments/transcribe": pass
 if parsed_request.path == "/api/uploads/ingest": pass
 if parsed_request.path == "/api/uploads/url-ingest": pass
 if parsed_request.path == "/api/wiki-vault/notes": pass
 if parsed_request.path == "/api/wiki-loop/run": pass
+payload = self._parse_request_payload(max_body_bytes=settings.pbs_public_chat_max_body_bytes)
+def _handle_public_chat_gateway(): pass
+`
+  );
+  await write(
+    "src/play_book_studio/config/settings.py",
+    `PBS_PUBLIC_CHAT_ENABLED = "PBS_PUBLIC_CHAT_ENABLED"
+PBS_PUBLIC_CHAT_API_KEYS = "PBS_PUBLIC_CHAT_API_KEYS"
+PBS_PUBLIC_CHAT_RATE_LIMIT_PER_MINUTE = "PBS_PUBLIC_CHAT_RATE_LIMIT_PER_MINUTE"
+PBS_PUBLIC_CHAT_MAX_CONCURRENT = "PBS_PUBLIC_CHAT_MAX_CONCURRENT"
+PBS_PUBLIC_CHAT_MAX_BODY_BYTES = "PBS_PUBLIC_CHAT_MAX_BODY_BYTES"
+PBS_PUBLIC_CHAT_OWNER_USER_ID = "PBS_PUBLIC_CHAT_OWNER_USER_ID"
+`
+  );
+  await write(
+    "src/play_book_studio/http/public_chat_gateway.py",
+    `import hmac
+PUBLIC_CHAT_PATH = "/api/public/chat"
+pbs_public_chat_enabled = False
+pbs_public_chat_api_keys = ()
+public_chat_disabled = "public_chat_disabled"
+public_chat_unauthorized = "public_chat_unauthorized"
+def authenticate_public_chat(): hmac.compare_digest("a", "a")
+def run_public_chat(): pass
+`
+  );
+  await write(
+    "src/play_book_studio/http/server_handler_base.py",
+    `from http import HTTPStatus
+def _parse_request_payload(max_body_bytes=None):
+  return HTTPStatus.REQUEST_ENTITY_TOO_LARGE
 `
   );
   await write("src/play_book_studio/http/upload_api.py", `def handle_upload_ingest(): pass\nowner_user_id = ""\nraise Exception("upload report is not visible to this session")\n`);
   await write("src/play_book_studio/http/url_ingest_api.py", `def build_url_ingest_response(): pass\n`);
-  await write("src/play_book_studio/http/server_chat.py", `def handle_chat(): pass\n`);
+  await write("src/play_book_studio/http/server_chat.py", `def handle_chat(): pass\ndef handle_chat_attachment_transcribe(): pass\nchat_attachment_transcribe_not_available = "chat_attachment_transcribe_not_available"\n`);
   await write("src/play_book_studio/http/wiki_vault.py", `def handle_wiki_vault(): pass\ndef handle_wiki_vault_note_save(): pass\nselected_uploads = []\ngraph = {"nodes": [], "edges": [], "chunk_previews": []}\n`);
   await write("src/play_book_studio/wiki_loop.py", `def run_wiki_loop_once(): pass\ndef build_wiki_loop_status(): pass\n`);
   return root;

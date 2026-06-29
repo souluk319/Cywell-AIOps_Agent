@@ -1345,13 +1345,16 @@ for (const file of files) {
         text.includes('/api/uploads/ingest') &&
           text.includes('/api/uploads/url-ingest') &&
           text.includes('/api/chat') &&
+          text.includes('/api/public/chat') &&
           text.includes('/api/wiki-vault') &&
           text.includes('/api/wiki-vault/notes') &&
           text.includes('/api/wiki-loop/run') &&
           text.includes('/api/wiki-loop/status') &&
+          text.includes("PBS_PUBLIC_CHAT_ENABLED") &&
+          text.includes("max_body_bytes") &&
           text.includes("owner_user_id") &&
           text.includes("selected_uploads"),
-        "PBS source contract verifier checks upload, URL ingest, chat, Wiki Vault, Wiki loop, owner-scope, and topology signal API surface",
+        "PBS source contract verifier checks upload, URL ingest, chat, public chat gateway, Wiki Vault, Wiki loop, owner-scope, and topology signal API surface",
         "PBS source contract verifier must check the PBS API surface Cywell depends on"
       );
       expect(

@@ -23,7 +23,7 @@ Implemented after the parallel console/cutover/evidence review pass:
 - Strict preflight parses rendered Kubernetes objects for the live generated-site overlay and checks the exact NetworkPolicy shape for PBS egress and Knowledge Engine ingress instead of relying on string presence.
 - Strict preflight now treats only real Kubernetes NotFound responses as proof that the legacy `cas-knowledge-postgres` Secret is absent; RBAC/API errors no longer pass the absence check.
 - The tracked pbs-live overlay now fails closed with `customer-access-json={}`; production mappings must come from `render:pbs:live-prereqs` generated site overlay.
-- The v0.1.4 PBS source baseline is now pinned through a clean clone at `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`, branch `kugnus/cywell-v0.1.4-source-contract`, commit `7b3c28fccc656cf862065f0e6877e4dd3a71e0f1`, pushed to approved remote `https://github.com/souluk319/PBS_DEV_Part3.git`.
+- The v0.1.4 PBS source baseline is now pinned through a clean clone at `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`, branch `kugnus/cywell-v0.1.4-source-contract`, commit `0c6b23c46acb6d3a7d87f416b6512d23f53a8c3b`, pushed to approved remote `https://github.com/souluk319/PBS_DEV_Part3.git`.
 - The PBS companion branch now adds `deploy/openshift-cywell-v014`, a real OpenShift overlay that renders namespace `playbookstudio`, Service `playbookstudio-runtime` on port `8765`, and runtime labels `app.kubernetes.io/name=playbookstudio` plus `app.kubernetes.io/component=runtime` without faking `/api/health`.
 
 Proof captured in this pass:
@@ -34,10 +34,10 @@ Proof captured in this pass:
 - `npm run verify:console:topology-dom:built`: PASS, 53 browser-backed checks.
 - `npm run verify:console:integration:built`: PASS, 113 checks.
 - `npm run verify:pbs:cutover-bundle`: PASS, 21 self-test checks.
-- `$env:CAS_PBS_SOURCE_HEAD="7b3c28fccc656cf862065f0e6877e4dd3a71e0f1"; $env:CAS_PBS_SOURCE_DIR="F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone"; npm run verify:release:source-pinning`: PASS, 34 checks; strict source pin evidence is now clean, full-SHA, approved-remote, and remote-ref-contained.
-- `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`. Source pinning is no longer the blocker for the current evidence set. Remaining local blockers are stale/dirty `cas-pbs-live-prereqs-render.json` from old head `7e12aad`, missing current real-render/hash-bound generated-site preapply evidence, and missing ready PBS runtime pod source stamps for `7b3c28fccc656cf862065f0e6877e4dd3a71e0f1`. External live preapply blockers are retained in the active blocker list even when local evidence is invalid.
+- `$env:CAS_PBS_SOURCE_HEAD="0c6b23c46acb6d3a7d87f416b6512d23f53a8c3b"; $env:CAS_PBS_SOURCE_DIR="F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone"; npm run verify:release:source-pinning`: PASS, 42 checks; strict source pin evidence is now clean, full-SHA, approved-remote, and remote-ref-contained.
+- `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`. Source pinning is no longer the blocker for the current evidence set. Remaining local blockers are stale/dirty `cas-pbs-live-prereqs-render.json` from old head `7e12aad`, missing current real-render/hash-bound generated-site preapply evidence, and missing ready PBS runtime pod source stamps for `0c6b23c46acb6d3a7d87f416b6512d23f53a8c3b`. External live preapply blockers are retained in the active blocker list even when local evidence is invalid.
 - `npm run verify:deploy:manifests`: PASS, 286 checks.
-- `npm run verify:pbs:source-contract:required`: PASS, 32 total checks: 31 PASS / 1 WARN for dirty `F:\AI_Projects\PBS-Dev3`; the checked PBS remote is `git@github.com:souluk319/PBS_DEV_Part3.git`.
+- `npm run verify:pbs:source-contract:required`: PASS, 40 total checks: 40 PASS / 0 WARN against clean clone `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`; the checked PBS remote is `https://github.com/souluk319/PBS_DEV_Part3.git`.
 - `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, 48 PASS / 7 FAIL. Current release image evidence and strict pinned PBS source evidence pass; remaining failures are the missing external `playbookstudio` namespace/service, missing `cas-pbs-auth`, missing `cas-knowledge-postgres-live`, legacy dev Secret cleanup, and ready PBS runtime source revision evidence once the Service exists.
 - `npm run render:pbs:live-prereqs`: blocked in the current shell until approved non-placeholder PBS bearer token, owner HMAC, service owner, concrete customer ACL JSON, and live Postgres DB credentials/URL are supplied.
 - `npm run verify:pbs:live-prereqs`: PASS, 12 self-test checks.
@@ -55,7 +55,7 @@ Implemented after the latest product/runtime/backend review pass:
 - Topology inspector and selected-context rows now expose viewer links for PBS-rich upload/report/citation targets while keeping the existing graph visual design owned by the Cywell console plugin.
 - Knowledge Engine now enforces the private ingest lane before local indexing or PBS outbound calls: upload and URL ingest must stay `source_scope=user_upload`, `visibility=private_user`, and expected `source_kind`.
 - RAG request scope selection is restricted to private CAS lanes (`user_upload`, `wiki_vault`) so clients cannot smuggle privileged corpus scopes into PBS/live or local retrieval.
-- PBS source-contract evidence now records the PBS checkout branch, short/full HEAD, tree status, optional expected HEAD, optional clean-tree requirement, and SHA-256 hashes of the contract source files. The current `F:\AI_Projects\PBS-Dev3` checkout passes the contract but is dirty, so the verifier records a WARN unless `--require-clean-source` is enforced.
+- PBS source-contract evidence now records the PBS checkout branch, short/full HEAD, tree status, optional expected HEAD, optional clean-tree requirement, and SHA-256 hashes of the contract source files. The verifier defaults to the clean v0.1.4 companion clone when present, so required source-contract evidence is not based on the dirty original `F:\AI_Projects\PBS-Dev3` working tree.
 
 Proof captured in this pass:
 
@@ -65,14 +65,14 @@ Proof captured in this pass:
 - `npm run verify:console-plugin`: PASS.
 - `npm run verify:console:integration:built`: PASS, 87 checks.
 - `npm run verify:console:topology-dom:built`: PASS, 33 browser-backed checks.
-- `npm run verify:pbs:source-contract:required`: PASS with a recorded dirty-source WARN for `F:\AI_Projects\PBS-Dev3`.
+- `npm run verify:pbs:source-contract:required`: PASS against clean clone `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`, 40 checks with no WARN.
 - `npm run verify:deploy:manifests`: PASS, 275 checks.
 
 ## Previous Update - PBS Source Contract, Owner-HMAC, and Scope Guard Closure
 
 Implemented after the latest parallel review pass:
 
-- Added `verify:pbs:source-contract` and `verify:pbs:source-contract:required` to check the real `F:\AI_Projects\PBS-Dev3` runtime/API contract before claiming PBS feature import coverage.
+- Added `verify:pbs:source-contract` and `verify:pbs:source-contract:required` to check the pinned PBS runtime/API contract before claiming PBS feature import coverage; current default evidence uses the clean companion clone.
 - The source contract verifier checks the PBS app Docker/compose shape, port `8765`, `/api/health`, upload, URL ingest, chat/RAG, Wiki Vault, Wiki Loop, owner-scoped upload reports, selected uploads, graph, and chunk-preview API surface.
 - Live prerequisite rendering now creates the required `cas-knowledge-internal-auth/owner-hmac-secret` manifest, validates non-placeholder signing material, and records only redacted HMAC metadata.
 - Strict live preflight now validates the applied `cas-knowledge-internal-auth` Secret alongside `cas-pbs-auth` and `cas-knowledge-postgres-live`.
