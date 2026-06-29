@@ -81,6 +81,10 @@ function sendJson(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
+function delay(ms) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
 function denseTopologyGraph() {
   const nodes = Array.from({ length: 28 }, (_, index) => {
     const type = index % 5 === 0 ? "document" : index % 5 === 1 ? "wiki-note" : index % 5 === 2 ? "term" : index % 5 === 3 ? "runtime" : "image";
@@ -490,6 +494,7 @@ function createHarnessServer() {
         return;
       }
       if (request.method === "POST" && knowledgePath === "/api/knowledge/rag/query") {
+        if (body?.question === "slow-selected-rag") await delay(250);
         sendJson(response, 200, {
           status: "ok",
           answer: `RAG answer for ${body?.question ?? "topology node"}`,
@@ -804,7 +809,25 @@ try {
       "RAG result answer and citation render outside debug JSON",
       JSON.stringify({ selectedRagAnswer, selectedRagCitationText })
     );
+    await page.getByLabel("RAG question").fill("slow-selected-rag");
+    const slowSelectedRagResponse = page.waitForResponse(
+      (response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200
+    );
+    await page.locator('[data-test="cas-knowledge-rag-query"]').click();
     await page.locator('[data-test="cas-knowledge-scope-all"]').click();
+    await slowSelectedRagResponse;
+    await page.waitForTimeout(100);
+    const staleRagScopeText = await page.locator('[data-test="cas-knowledge-scope-bar"]').innerText();
+    const staleRagResultText =
+      (await page.locator('[data-test="cas-knowledge-result"]').count()) > 0
+        ? await page.locator('[data-test="cas-knowledge-result"]').innerText()
+        : "";
+    expect(
+      "console-topology-dom:late-rag-response-ignored-after-scope-change",
+      staleRagScopeText.includes("Full corpus") && !staleRagResultText.includes("slow-selected-rag"),
+      "late selected-document RAG responses cannot render after switching to full-corpus scope",
+      JSON.stringify({ staleRagScopeText, staleRagResultText })
+    );
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
       page.locator('[data-test="cas-knowledge-rag-query"]').click()
@@ -1163,6 +1186,21 @@ try {
     const richTopologyUrl = page.url();
     await page.locator('[data-test="cas-knowledge-viewer-link"]').filter({ hasText: "Rich Wiki Note" }).first().click();
     await page.waitForFunction(() => window.location.href.includes("/cywell/llm-wiki") && window.location.href.includes("document_id=pbs-rich-upload"));
+    const richWikiScopeText = await page.locator('[data-test="cas-knowledge-scope-bar"]').innerText();
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/wiki-loop/run") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-wiki-loop"]').click()
+    ]);
+    const richWikiRunCalls = calls.filter(
+      (call) => call.method === "POST" && call.path === "/api/knowledge/wiki-loop/run" && call.body?.customer_id === "pbs-rich-topology"
+    );
+    const richWikiRunCall = richWikiRunCalls.at(-1);
+    expect(
+      "console-topology-dom:wiki-note-deeplink-uses-document-scope",
+      richWikiScopeText.includes("pbs-rich-upload") && richWikiRunCall?.body?.document_id === "pbs-rich-upload",
+      "wiki-note deep links with document_id activate selected-document scope for LLM Wiki requests",
+      JSON.stringify({ richWikiScopeText, url: page.url(), calls: richWikiRunCalls.map((call) => call.body) })
+    );
     await page.goBack();
     await page.waitForFunction(
       (expectedUrl) =>

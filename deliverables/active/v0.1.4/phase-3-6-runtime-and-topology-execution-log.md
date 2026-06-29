@@ -1,15 +1,16 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - Scope Reset, Input Template, and Cutover Evidence Hardening
+## Latest Update - Scope Reset, Input Template, Cutover Evidence, and Deep-Link Scope Hardening
 
 Implemented after the parallel console/cutover/evidence review pass:
 
 - Console Knowledge customer changes now clear selected corpus document, viewer state, previous action result, topology state, and document/note query params before the next RAG/Wiki/topology action, while scope revision guards ignore late upload/RAG/wiki/topology responses from the previous customer.
-- Knowledge route navigation preserves the active customer/document query context across customer data, RAG, LLM Wiki, and topology pages. Wiki-note deep links now include source `document_id` when present, and browser back/forward reconciles URL state back into React state.
-- The browser DOM gate now proves that switching from `workflow-customer` to `workflow-switched` clears stale `workflow-doc-1` selected-document RAG scope before sending `/api/knowledge/rag/query`, that a late upload response cannot restore a previous customer corpus selection, and that a viewer deep-link back navigation restores route state.
+- Knowledge route navigation preserves the active customer/document query context across customer data, RAG, LLM Wiki, and topology pages. Wiki-note deep links now include source `document_id` when present, deep-linked notes use that selected-document scope before upload reports load, and browser back/forward reconciles URL state back into React state.
+- The browser DOM gate now proves that switching from `workflow-customer` to `workflow-switched` clears stale `workflow-doc-1` selected-document RAG scope before sending `/api/knowledge/rag/query`, that late upload/RAG/topology responses cannot restore stale scope/results, that Wiki-note deep links carry `pbs-rich-upload` into LLM Wiki requests, and that a viewer deep-link back navigation restores route state.
 - PBS preflight evidence for generated-site live checks now writes `test-results/cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json`, preventing generated `pbs-live-site` evidence from overwriting default pbs-live evidence.
 - `render:pbs:live-prereqs:template` now writes non-secret handoff templates under `test-results/pbs-live-prereqs-input-template/`; operators copy them outside the repo before filling approved token, owner-HMAC, ACL, and Postgres values.
-- The cutover bundle now requires current clean `fullHead/treeStatus` evidence, generated-site preapply flags/path, exact live prereq output hash keys, clean real-render prereq evidence bound to `test-results/pbs-live-prereqs`, and strict PBS source pinning.
+- The cutover bundle now requires current clean `fullHead/treeStatus` evidence, generated-site preapply flags/path, matching CRC/release/preapply cluster identity, exact live prereq output hash keys, recomputed generated-file/site-overlay/redacted-summary hashes, clean real-render prereq evidence bound to `test-results/pbs-live-prereqs`, and strict full-SHA PBS source pinning.
+- Strict preflight parses rendered Kubernetes objects for the live generated-site overlay and checks the exact NetworkPolicy shape for PBS egress and Knowledge Engine ingress instead of relying on string presence.
 - Strict preflight now treats only real Kubernetes NotFound responses as proof that the legacy `cas-knowledge-postgres` Secret is absent; RBAC/API errors no longer pass the absence check.
 - The tracked pbs-live overlay now fails closed with `customer-access-json={}`; production mappings must come from `render:pbs:live-prereqs` generated site overlay.
 
@@ -17,13 +18,13 @@ Proof captured in this pass:
 
 - `node --check` passed for changed verifier/release/cutover scripts.
 - `npm run verify:console-plugin`: PASS.
-- `npm run verify:console:topology-dom:built`: PASS, 47 browser-backed checks.
-- `npm run verify:console:integration:built`: PASS, 105 checks.
-- `npm run verify:pbs:cutover-bundle`: PASS, 9 self-test checks.
-- `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`, until live prereqs are regenerated from the current clean HEAD and PBS source evidence is strictly pinned.
+- `npm run verify:console:topology-dom:built`: PASS, 49 browser-backed checks.
+- `npm run verify:console:integration:built`: PASS, 109 checks.
+- `npm run verify:pbs:cutover-bundle`: PASS, 14 self-test checks.
+- `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`, until the git tree is committed, live prereqs are regenerated from the current clean HEAD, generated-site preapply evidence is clean/current, and PBS source evidence is strictly full-SHA pinned.
 - `npm run verify:deploy:manifests`: PASS, 283 checks.
 - `npm run verify:pbs:source-contract:required`: PASS, 31 total checks: 30 PASS / 1 WARN for dirty `F:\AI_Projects\PBS-Dev3`.
-- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `46 PASS / 7 FAIL`; failures remain missing external `playbookstudio` namespace/service, missing `cas-pbs-auth`, missing `cas-knowledge-postgres-live`, and existing legacy `cas-knowledge-postgres` dev Secret.
+- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `47 PASS / 7 FAIL`; failures remain missing external `playbookstudio` namespace/service, missing `cas-pbs-auth`, missing `cas-knowledge-postgres-live`, and existing legacy `cas-knowledge-postgres` dev Secret.
 - `npm run render:pbs:live-prereqs`: blocked in the current shell until approved non-placeholder PBS bearer token, owner HMAC, service owner, concrete customer ACL JSON, and live Postgres DB credentials/URL are supplied.
 - `npm run verify:pbs:live-prereqs`: PASS, 11 self-test checks.
 - `npm run verify`: PASS.
@@ -79,7 +80,7 @@ Proof captured in this pass:
 - `npm run verify:pbs:live-prereqs`: PASS, 11 checks in the current renderer self-test.
 - `npm run verify:knowledge-engine`: PASS, 87 checks.
 - `npm run verify:deploy:manifests`: PASS, 274 checks.
-- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `46 PASS / 7 FAIL`; failures remain external PBS namespace/service, required live Secrets, and legacy CRC dev Secret cleanup. The rendered wildcard ACL blocker is closed, owner-HMAC Secret checks pass in generated prereq evidence, and release evidence cluster identity matches the current cluster.
+- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `47 PASS / 7 FAIL`; failures remain external PBS namespace/service, required live Secrets, and legacy CRC dev Secret cleanup. The rendered wildcard ACL blocker is closed, owner-HMAC Secret checks pass in generated prereq evidence, and release evidence cluster identity matches the current cluster.
 
 ## Previous Update - Live Cutover Gate Hardening
 
@@ -99,7 +100,7 @@ Proof captured in this pass:
 - `node --check` passed for changed verification and preflight scripts.
 - `npm run verify:knowledge-engine`: PASS, 83 checks.
 - `npm run verify:deploy:manifests`: PASS, 260 checks.
-- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `46 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `47 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
 - `npm run verify`: PASS.
 
 ## Previous Update - Wiki Vault Side-Channels, Staged Wiki Loop, and Structural API Egress
@@ -120,7 +121,7 @@ Proof captured in that pass:
 - `npm run verify:console:topology-dom`: PASS, 32 browser-backed checks.
 - `npm run verify:console:integration`: PASS, 77 checks.
 - `npm run verify:deploy:manifests`: PASS, 260 checks.
-- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `46 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `47 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
 
 ## Previous Update - PBS Upload/RAG Scope Contract and Non-Stale Release Evidence
 
@@ -166,7 +167,7 @@ Proof captured in that pass:
 - `npm run verify`: PASS.
 - `npm run deploy:crc`: PASS, 68 runtime checks.
 - `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4`: PASS, 21 release checks.
-- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `46 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `47 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
 
 Latest CRC `v0.1.4` release image references are intentionally not duplicated in this tracked document. The source of truth is ignored evidence under `test-results/cas-release-images.json`, specifically `branch`, `head`, `status`, and `promotedImages`.
 
@@ -192,7 +193,7 @@ Proof captured in that pass:
 - `npm run verify`: PASS.
 - `npm run deploy:crc`: PASS, 68 runtime checks.
 - `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4`: PASS, 21 release checks.
-- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `46 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `47 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
 
 Latest CRC `v0.1.4` release image references are intentionally not duplicated in this tracked document. The source of truth is ignored evidence under `test-results/cas-release-images.json`, specifically `branch`, `head`, `status`, and `promotedImages`.
 
@@ -317,11 +318,11 @@ Results:
 - `verify:knowledge-engine`: PASS with PBS HTTP shadow/live fake-backend checks and live outbound owner/hash/customer_id contract checks across upload, URL ingest, reports, chat, wiki run/status, wiki vault, and note save
 - `verify:console:integration`: PASS with source and bundle checks for PBS payload fields, topology variant normalization, and topology KPI/relation-grid UI
 
-Latest CRC verifier evidence:
+Latest persisted CRC verifier evidence before the current hardening changes:
 
 - `test-results/cas-crc-deployment.json`
 - status: `PASS`
-- total checks: `68`
+- total checks: `71`
 - live bundle check: `console:topology-dashboard-bundle`
 - verified release-source image checks:
   - `runtime:verified-image:cas-gateway`
@@ -345,11 +346,11 @@ Latest CRC verifier evidence:
   - `runtime:knowledge-pbs-compat-shadow-persisted`
   - `runtime:knowledge-smoke-persisted`
 
-Latest manifest verifier evidence:
+Current working-tree manifest verifier evidence:
 
 - `test-results/cas-deploy-manifests.json`
 - status: `PASS`
-- total checks: `257`
+- total checks: `283`
 - rendered kustomize checks:
   - `base` remains `pbs-compatible-local`
   - `pbs-shadow` renders `pbs-http-shadow` with no provider env duplication
@@ -368,7 +369,7 @@ Latest PBS preflight evidence:
 - `test-results/cas-pbs-preflight-pbs-shadow-diagnostic-local-optional-secrets.json`
 - `test-results/cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json`
 - shadow diagnostic status: `PASS/WARN` in the local CRC environment because the real `playbookstudio` namespace/service and optional `cas-pbs-auth` Secret are absent
-- live preapply status: expected `FAIL`, `46 PASS / 7 FAIL`
+- live preapply status: expected `FAIL`, `47 PASS / 7 FAIL`
 - rendered live overlay checks pass for provider, ConfigMap env refs, required token Secret ref, live Postgres Secret refs, no literal Secret material, no dev defaults, HTTPS PBS service-token transport, PBS base URL shape, timeout/response bounds, labeled PBS egress, knowledge ingress, runtime readiness gate, corpus readiness gate, and disabled shadow writes
 - WARNs/failures are expected in local CRC until the real `playbookstudio` namespace/service, required `cas-pbs-auth` Secret, required `cas-knowledge-postgres-live` Secret, and cleanup of legacy `cas-knowledge-postgres` Secret are handled
 

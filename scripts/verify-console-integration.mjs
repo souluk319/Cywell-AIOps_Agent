@@ -310,7 +310,7 @@ expectText(
 expectText(
   "console-knowledge:url-ingest-selects-corpus",
   knowledgeRouteSource,
-  "selectCorpusDocument(targets[0])",
+  "selectCorpusDocument(targets[0], { invalidate: false })",
   "URL ingest joins the selected customer corpus workflow"
 );
 expectText(
@@ -404,22 +404,40 @@ expectText(
   "knowledge route sends selected corpus document scope into RAG requests"
 );
 expectText(
+  "console-knowledge:deeplink-document-fallback-scope",
+  knowledgeRouteSource,
+  "selectedDocumentFallback",
+  "knowledge route uses document_id query params as selected-document scope even before upload reports load"
+);
+expectText(
+  "console-knowledge:upload-report-repair-updates-document-query",
+  knowledgeRouteSource,
+  "params.set(\"document_id\", replacementDocumentId)",
+  "knowledge route keeps URL document_id aligned when upload reports repair an invalid selected document"
+);
+expectText(
+  "console-knowledge:upload-report-repair-preserves-viewer-lineage",
+  knowledgeRouteSource,
+  "selectedViewerDocumentId !== selectedDocumentId",
+  "knowledge route does not replace topology/wiki viewer document lineage just because upload reports omit that document"
+);
+expectText(
   "console-knowledge:wiki-selected-document",
   knowledgeRouteSource,
-  "document_id: activeDocumentId",
+  "body: JSON.stringify({ customer_id: customerId, document_id: requestDocumentId || undefined })",
   "knowledge route sends selected corpus document into wiki loop requests"
 );
 expectText(
   "console-knowledge:note-selected-document",
   knowledgeRouteSource,
-  "target_ref: activeDocumentId",
+  "target_ref: requestDocumentId",
   "knowledge route links saved wiki notes to the selected document"
 );
 expectText(
-  "console-knowledge:note-selected-document-dependency",
+  "console-knowledge:note-selected-document-ref",
   knowledgeRouteSource,
-  "[activeDocumentId, customerId, noteBody, noteTitle, runAction]",
-  "knowledge route note save callback refreshes when selected document changes"
+  "activeDocumentIdRef.current",
+  "knowledge route note/RAG/wiki actions read the latest selected document at click time"
 );
 expectText(
   "console-knowledge:wiki-note-link-preserves-document",
@@ -438,6 +456,12 @@ expectText(
   knowledgeRouteSource,
   "scope.isStale()",
   "knowledge route ignores stale async action results after customer scope changes"
+);
+expectText(
+  "console-knowledge:stale-action-document-scope-guard",
+  knowledgeRouteSource,
+  "requestScopeKey !== activeScopeKeyRef.current",
+  "knowledge route ignores stale async action results after document scope changes"
 );
 expectText(
   "console-knowledge:customer-change-invalidates-topology",

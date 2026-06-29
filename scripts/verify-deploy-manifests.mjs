@@ -1348,6 +1348,8 @@ for (const file of files) {
           text.includes("CAS_PBS_SOURCE_HEAD") &&
           text.includes("CAS_PBS_REQUIRE_SOURCE_HEAD") &&
           text.includes("gitMetadata") &&
+          text.includes("fullGitSha") &&
+          text.includes("git-head-expected-full-sha") &&
           text.includes("contractFileSha256") &&
           text.includes("--require-source") &&
           text.includes("--require-clean-source") &&
@@ -1385,6 +1387,13 @@ for (const file of files) {
           text.includes("git-tree-clean") &&
           text.includes("sourceContractPinned") &&
           text.includes("hasRealRenderHashes") &&
+          text.includes("recordedFileHashesMatch") &&
+          text.includes("resolvedPathUnder") &&
+          text.includes("isAbsolute") &&
+          text.includes("renderedSiteOverlayHash") &&
+          text.includes("evidence.renderedSiteOverlaySha256 === livePrereqsRender?.renderedSiteOverlaySha256") &&
+          text.includes("clusterEvidenceFailures") &&
+          text.includes("clusterIdentityMatches") &&
           text.includes("expectedLivePrereqOutputDir") &&
           text.includes("underOutputDir") &&
           text.includes("isStrictGeneratedSitePreapply") &&
@@ -1392,6 +1401,8 @@ for (const file of files) {
           text.includes("expectedGeneratedSiteOverlayPath") &&
           text.includes("live-prereqs-real-render") &&
           text.includes("source-contract-pinned") &&
+          text.includes("localGateFailures") &&
+          text.includes("externalLiveBlockers") &&
           text.includes("artifactSummary") &&
           text.includes("sha256File") &&
           text.includes("cas-pbs-cutover-bundle.json") &&
@@ -1406,11 +1417,16 @@ for (const file of files) {
           text.includes("self-test-blockers") &&
           text.includes("self-test-redaction") &&
           text.includes("self-test-artifact-hashes") &&
+          text.includes("self-test-prereq-hash-drift-rejected") &&
+          text.includes("self-test-prereq-path-escape-rejected") &&
+          text.includes("self-test-preapply-hash-mismatch-rejected") &&
+          text.includes("self-test-cluster-mismatch-rejected") &&
           text.includes("self-test-dirty-source-rejected") &&
           text.includes("self-test-prereq-self-test-rejected") &&
-          text.includes("self-test-prereq-output-dir-rejected"),
-        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, dirty source rejection, self-test evidence rejection, and prereq output directory binding",
-        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, dirty source rejection, self-test evidence rejection, and prereq output directory binding"
+          text.includes("self-test-prereq-output-dir-rejected") &&
+          text.includes("self-test-fail-retains-external-blockers"),
+        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding, cluster mismatch rejection, dirty source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention",
+        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding, cluster mismatch rejection, dirty source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention"
       );
     }
     if (file.includes("promote-crc-release-images")) {
@@ -1548,7 +1564,12 @@ for (const file of files) {
       if (
         text.includes("CAS_PBS_REQUIRE_RUNTIME_READY") &&
         text.includes("CAS_PBS_REQUIRE_CORPUS_READY") &&
+        text.includes("sha256Text") &&
+        text.includes("renderedSiteOverlaySha256") &&
         text.includes("cas-knowledge-postgres-live") &&
+        text.includes("renderKustomizeObjects") &&
+        text.includes("preflight:render-json") &&
+        text.includes("policyTypesEqual") &&
         text.includes("validOverlays") &&
         text.includes("overlayPathArg") &&
         text.includes("CAS_PBS_PREFLIGHT_OVERLAY_PATH") &&
@@ -1558,6 +1579,8 @@ for (const file of files) {
         text.includes("service-token-transport") &&
         text.includes("appliedPbsEgressScoped") &&
         text.includes("appliedKnowledgeIngressScoped") &&
+        text.includes("Boolean(pbsEgressObject)") &&
+        text.includes("Boolean(knowledgeIngressObject)") &&
         text.includes("appliedKnowledgeIngressUnionScoped") &&
         text.includes("cluster:applied-knowledge-ingress-union-scoped") &&
         text.includes("appliedKnowledgeEgressUnionScoped") &&

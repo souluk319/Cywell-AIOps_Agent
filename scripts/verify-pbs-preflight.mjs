@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const namespace = process.env.CAS_PBS_PREFLIGHT_NAMESPACE || "cywell-ai-sentinel";
@@ -29,6 +30,10 @@ function envBool(name, defaultValue = false) {
 
 function normalizePath(value) {
   return String(value ?? "").replace(/\\/g, "/");
+}
+
+function sha256Text(value) {
+  return createHash("sha256").update(String(value)).digest("hex");
 }
 
 function lastPathSegment(value) {
@@ -128,10 +133,87 @@ function renderKustomize(path) {
   return "";
 }
 
+function parseJsonObjectStream(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed?.kind === "List" && Array.isArray(parsed.items) ? parsed.items : [parsed];
+  } catch {
+    const objects = [];
+    let start = -1;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = 0; index < trimmed.length; index += 1) {
+      const char = trimmed[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === "\"") inString = false;
+        continue;
+      }
+      if (char === "\"") {
+        inString = true;
+        continue;
+      }
+      if (char === "{") {
+        if (depth === 0) start = index;
+        depth += 1;
+      } else if (char === "}") {
+        depth -= 1;
+        if (depth === 0 && start >= 0) {
+          const parsed = JSON.parse(trimmed.slice(start, index + 1));
+          if (parsed?.kind === "List" && Array.isArray(parsed.items)) objects.push(...parsed.items);
+          else objects.push(parsed);
+          start = -1;
+        }
+      }
+    }
+    if (depth !== 0 || objects.length === 0) throw new Error("could not split rendered JSON objects");
+    return objects;
+  }
+}
+
+function renderKustomizeObjects(rendered) {
+  if (!rendered.trim()) return [];
+  const attempts = [
+    ["oc", ["create", "--dry-run=client", "-f", "-", "-o", "json"]],
+    ["kubectl", ["create", "--dry-run=client", "-f", "-", "-o", "json"]]
+  ];
+  const errors = [];
+  for (const [command, args] of attempts) {
+    const result = spawnSync(command, args, {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      input: rendered,
+      timeout: 90000,
+      windowsHide: true
+    });
+    if (result.status === 0 && result.stdout.trim()) {
+      try {
+        const objects = parseJsonObjectStream(result.stdout);
+        pass("preflight:render-json", `${command} parsed rendered ${overlayPath} into ${objects.length} Kubernetes objects`);
+        return objects;
+      } catch (error) {
+        errors.push(`${command}: ${error.message}`);
+      }
+    } else {
+      errors.push(`${command}: ${result.stderr?.trim() || result.error?.message || `exit ${result.status}`}`);
+    }
+  }
+  fail("preflight:render-json", `unable to parse rendered ${overlayPath} as Kubernetes JSON: ${errors.join("; ")}`);
+  return [];
+}
+
 function renderedDoc(rendered, kind, name) {
   const kindPattern = new RegExp(`^kind:\\s*${escapeRegExp(kind)}\\s*$`, "m");
   const namePattern = new RegExp(`^\\s*name:\\s*${escapeRegExp(name)}\\s*$`, "m");
   return rendered.split(/^---\s*$/m).find((doc) => kindPattern.test(doc) && namePattern.test(doc)) ?? "";
+}
+
+function renderedObject(objects, kind, name) {
+  return objects.find((object) => object?.kind === kind && object?.metadata?.name === name);
 }
 
 function envBlock(deployment, envName) {
@@ -350,12 +432,17 @@ function portsEqual(actual = [], expected = []) {
   return JSON.stringify(normalize(actual)) === JSON.stringify(normalize(expected));
 }
 
+function policyTypesEqual(actual = [], expected = []) {
+  return JSON.stringify([...actual].sort()) === JSON.stringify([...expected].sort());
+}
+
 function appliedKnowledgeIngressScoped(policy) {
   const spec = policy?.spec ?? {};
   const ingress = spec.ingress ?? [];
   if (!selectorMatches(spec.podSelector, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "knowledge-engine" })) {
     return false;
   }
+  if (!policyTypesEqual(spec.policyTypes ?? [], ["Ingress"])) return false;
   if (ingress.length !== 1 || (spec.egress ?? []).length > 0) return false;
   const rule = ingress[0];
   const from = rule.from ?? [];
@@ -429,6 +516,7 @@ function appliedPbsEgressScoped(policy) {
   if (!selectorMatches(spec.podSelector, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "knowledge-engine" })) {
     return false;
   }
+  if (!policyTypesEqual(spec.policyTypes ?? [], ["Egress"])) return false;
   if (egress.length !== 3 || (spec.ingress ?? []).length > 0) return false;
   const dnsRule = egress.find((rule) => portsEqual(rule.ports ?? [], [
     { protocol: "TCP", port: 53 },
@@ -561,6 +649,7 @@ function writeEvidence(status) {
         clusterIdentity: currentClusterIdentity(),
         overlay,
         overlayPath,
+        renderedSiteOverlaySha256: sha256Text(rendered),
         requireCluster,
         requireSecret,
         skipApplied,
@@ -973,6 +1062,7 @@ expect(
   `unsupported PBS preflight overlay '${overlayArg}'; expected pbs-shadow or pbs-live`
 );
 const rendered = renderKustomize(overlayPath);
+const renderedObjects = renderKustomizeObjects(rendered);
 const deployment = renderedDoc(rendered, "Deployment", "cas-knowledge-engine");
 const gatewayDeployment = renderedDoc(rendered, "Deployment", "cas-gateway");
 const configMap = renderedDoc(rendered, "ConfigMap", "cas-pbs-config");
@@ -980,6 +1070,8 @@ const liveConfigMap = renderedDoc(rendered, "ConfigMap", "cas-knowledge-live-con
 const postgresStatefulSet = renderedDoc(rendered, "StatefulSet", "cas-knowledge-postgres");
 const pbsEgress = renderedDoc(rendered, "NetworkPolicy", "cas-knowledge-engine-pbs-egress");
 const knowledgeIngress = renderedDoc(rendered, "NetworkPolicy", "cas-knowledge-engine-ingress");
+const pbsEgressObject = renderedObject(renderedObjects, "NetworkPolicy", "cas-knowledge-engine-pbs-egress");
+const knowledgeIngressObject = renderedObject(renderedObjects, "NetworkPolicy", "cas-knowledge-engine-ingress");
 
 expect("preflight:knowledge-deployment", Boolean(deployment), `${overlay} renders cas-knowledge-engine deployment`);
 expect(
@@ -1044,22 +1136,13 @@ expect(
 );
 expect(
   "preflight:pbs-egress-policy",
-  Boolean(pbsEgress) &&
-    pbsEgress.includes("app.kubernetes.io/component: knowledge-engine") &&
-    pbsRuntimeEgressScoped(pbsEgress) &&
-    pbsEgress.includes("port: 5432") &&
-    pbsEgress.includes("port: 53") &&
-    policyHasNoBroadAccess(pbsEgress),
-  "PBS egress is limited to DNS, Postgres, and labeled playbookstudio runtime pods on 8765"
+  Boolean(pbsEgress) && Boolean(pbsEgressObject) && appliedPbsEgressScoped(pbsEgressObject),
+  "PBS egress is exactly limited to DNS, Postgres, and labeled playbookstudio runtime pods on 8765"
 );
 expect(
   "preflight:knowledge-ingress-policy",
-  Boolean(knowledgeIngress) &&
-    knowledgeIngress.includes("app.kubernetes.io/component: knowledge-engine") &&
-    knowledgeIngress.includes("app.kubernetes.io/component: gateway") &&
-    knowledgeIngress.includes("port: 8080") &&
-    policyHasNoBroadAccess(knowledgeIngress),
-  "knowledge-engine ingress remains restricted to gateway pods on 8080"
+  Boolean(knowledgeIngress) && Boolean(knowledgeIngressObject) && appliedKnowledgeIngressScoped(knowledgeIngressObject),
+  "knowledge-engine ingress is exactly restricted to gateway pods on 8080"
 );
 if (overlay === "pbs-live") {
   const postgresImage = firstContainerImage(postgresStatefulSet);

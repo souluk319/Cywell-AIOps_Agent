@@ -2309,12 +2309,43 @@ export default function CywellKnowledgeRoute() {
     [actionResult, customerId, renderedTopology]
   );
   const allViewerTargets = React.useMemo(() => mergeViewerTargets(corpusTargets, resultViewerTargets), [corpusTargets, resultViewerTargets]);
+  const selectedDocumentFallback = React.useMemo<ViewerTarget | null>(() => {
+    if (!selectedDocumentId) return null;
+    return {
+      kind: "document",
+      id: selectedDocumentId,
+      document_source_id: selectedDocumentId,
+      title: selectedDocumentId,
+      source_scope: "user_upload",
+      customer_id: customerId
+    };
+  }, [customerId, selectedDocumentId]);
   const selectedCorpusTarget =
     corpusTargets.find((target) => (target.document_source_id || target.id) === selectedDocumentId) ??
-    (selectedViewerTarget?.kind === "document" ? selectedViewerTarget : null);
+    allViewerTargets.find((target) => (target.document_source_id || target.id) === selectedDocumentId && (target.kind === "document" || target.document_source_id)) ??
+    (selectedViewerTarget?.kind === "document" ? selectedViewerTarget : null) ??
+    selectedDocumentFallback;
   const activeDocumentId = scopeMode === "selected" ? selectedCorpusTarget?.document_source_id || selectedCorpusTarget?.id || "" : "";
   const activeSourceScopes =
     scopeMode === "selected" && selectedCorpusTarget?.source_scope ? [selectedCorpusTarget.source_scope] : ["user_upload", "wiki_vault"];
+  const activeDocumentIdRef = React.useRef(activeDocumentId);
+  const activeSourceScopesRef = React.useRef(activeSourceScopes);
+  const scopeModeRef = React.useRef(scopeMode);
+  const selectedViewerTargetRef = React.useRef(selectedViewerTarget);
+  activeDocumentIdRef.current = activeDocumentId;
+  activeSourceScopesRef.current = activeSourceScopes;
+  scopeModeRef.current = scopeMode;
+  selectedViewerTargetRef.current = selectedViewerTarget;
+  const activeScopeKey = `${customerId}:${scopeMode}:${activeDocumentId}:${activeSourceScopes.join("|")}`;
+  const activeScopeKeyRef = React.useRef(activeScopeKey);
+  activeScopeKeyRef.current = activeScopeKey;
+
+  const currentSelectedDocumentId = React.useCallback(() => {
+    if (scopeModeRef.current !== "selected") return "";
+    const viewerTarget = selectedViewerTargetRef.current;
+    const viewerDocumentId = viewerTarget?.document_source_id || (viewerTarget?.kind === "document" ? viewerTarget.id : "");
+    return viewerDocumentId || documentIdFromParams(currentSearchParams()) || activeDocumentIdRef.current;
+  }, []);
 
   React.useEffect(() => {
     customerIdRef.current = customerId;
@@ -2381,10 +2412,21 @@ export default function CywellKnowledgeRoute() {
   }, [invalidateScope]);
 
   const openViewer = React.useCallback(
-    (target: ViewerTarget) => {
+    (target: ViewerTarget, options: { invalidate?: boolean } = {}) => {
+      const nextDocumentId = target.kind === "document" || target.document_source_id ? target.document_source_id || target.id : "";
+      if (options.invalidate !== false && nextDocumentId && (nextDocumentId !== selectedDocumentId || scopeMode !== "selected")) {
+        invalidateScope();
+        setIsRunning(false);
+        setActionResult(null);
+      }
+      selectedViewerTargetRef.current = target;
       setSelectedViewerTarget(target);
-      if (target.kind === "document" || target.document_source_id) {
-        setSelectedDocumentId(target.document_source_id || target.id);
+      if (nextDocumentId) {
+        activeDocumentIdRef.current = nextDocumentId;
+        if (target.source_scope) activeSourceScopesRef.current = [target.source_scope];
+        scopeModeRef.current = "selected";
+        activeScopeKeyRef.current = `${customerIdRef.current}:${scopeModeRef.current}:${activeDocumentIdRef.current}:${activeSourceScopesRef.current.join("|")}`;
+        setSelectedDocumentId(nextDocumentId);
         setScopeMode("selected");
       }
       if (typeof window !== "undefined") {
@@ -2392,16 +2434,26 @@ export default function CywellKnowledgeRoute() {
         setLocationState(currentLocationSnapshot());
       }
     },
-    [customerId]
+    [customerId, invalidateScope, scopeMode, selectedDocumentId]
   );
 
   const selectCorpusDocument = React.useCallback(
-    (target: ViewerTarget) => {
-      setSelectedDocumentId(target.document_source_id || target.id);
-      setScopeMode("selected");
-      openViewer(target);
+    (target: ViewerTarget, options: { invalidate?: boolean } = {}) => {
+      openViewer(target, options);
     },
     [openViewer]
+  );
+
+  const changeScopeMode = React.useCallback(
+    (mode: "all" | "selected") => {
+      if (mode !== scopeMode) {
+        invalidateScope();
+        setIsRunning(false);
+        setActionResult(null);
+      }
+      setScopeMode(mode);
+    },
+    [invalidateScope, scopeMode]
   );
 
   React.useEffect(() => {
@@ -2434,13 +2486,17 @@ export default function CywellKnowledgeRoute() {
   }, [refreshHealth]);
 
   const runAction = React.useCallback(
-    async (action: (scope: ActionScope) => Promise<ActionResult>) => {
+    async (action: (scope: ActionScope) => Promise<ActionResult>, options: { allowResultScopeChange?: boolean } = {}) => {
       const requestRevision = scopeRevision.current;
       const requestCustomerId = customerIdRef.current;
+      const requestScopeKey = activeScopeKeyRef.current;
       const scope: ActionScope = {
         customerId: requestCustomerId,
         revision: requestRevision,
-        isStale: () => requestRevision !== scopeRevision.current || requestCustomerId !== customerIdRef.current
+        isStale: () =>
+          requestRevision !== scopeRevision.current ||
+          requestCustomerId !== customerIdRef.current ||
+          (!options.allowResultScopeChange && requestScopeKey !== activeScopeKeyRef.current)
       };
       setIsRunning(true);
       try {
@@ -2522,10 +2578,10 @@ export default function CywellKnowledgeRoute() {
         if (scope.isStale()) return result;
         if (targets.length > 0) {
           setCorpusTargets((current) => mergeViewerTargets(targets, current));
-          selectCorpusDocument(targets[0]);
+          selectCorpusDocument(targets[0], { invalidate: false });
         }
         return result;
-      }),
+      }, { allowResultScopeChange: true }),
     [customerId, runAction, selectCorpusDocument, selectedFileBase64, selectedFileMimeType, selectedFileName, uploadContent, uploadTitle]
   );
 
@@ -2552,10 +2608,10 @@ export default function CywellKnowledgeRoute() {
         if (scope.isStale()) return result;
         if (targets.length > 0) {
           setCorpusTargets((current) => mergeViewerTargets(targets, current));
-          selectCorpusDocument(targets[0]);
+          selectCorpusDocument(targets[0], { invalidate: false });
         }
         return result;
-      }),
+      }, { allowResultScopeChange: true }),
     [customerId, runAction, selectCorpusDocument, urlValue]
   );
 
@@ -2566,11 +2622,34 @@ export default function CywellKnowledgeRoute() {
         const targets = collectViewerTargets(result, null, scope.customerId).filter((target) => target.kind === "document");
         if (scope.isStale()) return result;
         setCorpusTargets(targets);
-        if (targets.length > 0 && selectedDocumentId && !targets.some((target) => (target.document_source_id || target.id) === selectedDocumentId)) {
-          setSelectedDocumentId(targets[0].document_source_id || targets[0].id);
+        const selectedViewerDocumentId =
+          selectedViewerTargetRef.current?.document_source_id ||
+          (selectedViewerTargetRef.current?.kind === "document" ? selectedViewerTargetRef.current.id : "");
+        if (
+          targets.length > 0 &&
+          selectedDocumentId &&
+          selectedViewerDocumentId !== selectedDocumentId &&
+          !targets.some((target) => (target.document_source_id || target.id) === selectedDocumentId)
+        ) {
+          const replacementDocumentId = targets[0].document_source_id || targets[0].id;
+          activeDocumentIdRef.current = replacementDocumentId;
+          if (targets[0].source_scope) activeSourceScopesRef.current = [targets[0].source_scope];
+          scopeModeRef.current = "selected";
+          activeScopeKeyRef.current = `${scope.customerId}:${scopeModeRef.current}:${activeDocumentIdRef.current}:${activeSourceScopesRef.current.join("|")}`;
+          selectedViewerTargetRef.current = targets[0];
+          setSelectedViewerTarget(targets[0]);
+          setSelectedDocumentId(replacementDocumentId);
+          if (typeof window !== "undefined") {
+            const params = new URLSearchParams(window.location.search);
+            params.set("customer_id", scope.customerId);
+            params.set("document_id", replacementDocumentId);
+            const query = params.toString();
+            window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+            setLocationState(currentLocationSnapshot());
+          }
         }
         return result;
-      }),
+      }, { allowResultScopeChange: true }),
     [customerId, runAction, selectedDocumentId]
   );
 
@@ -2602,51 +2681,55 @@ export default function CywellKnowledgeRoute() {
 
   const askRag = React.useCallback(
     () =>
-      runAction(() =>
-        requestJson("/api/knowledge/rag/query", {
+      runAction(() => {
+        const requestDocumentId = currentSelectedDocumentId();
+        const requestSourceScopes = activeSourceScopesRef.current;
+        return requestJson("/api/knowledge/rag/query", {
           method: "POST",
           body: JSON.stringify({
             customer_id: customerId,
             question,
-            active_document_id: activeDocumentId || undefined,
-            document_source_id: activeDocumentId || undefined,
-            enabled_upload_document_ids: activeDocumentId ? [activeDocumentId] : undefined,
-            enabled_source_scopes: activeSourceScopes,
-            restrict_uploaded_sources: Boolean(activeDocumentId)
+            active_document_id: requestDocumentId || undefined,
+            document_source_id: requestDocumentId || undefined,
+            enabled_upload_document_ids: requestDocumentId ? [requestDocumentId] : undefined,
+            enabled_source_scopes: requestSourceScopes,
+            restrict_uploaded_sources: Boolean(requestDocumentId)
           })
-        })
-      ),
-    [activeDocumentId, activeSourceScopes, customerId, question, runAction]
+        });
+      }),
+    [currentSelectedDocumentId, customerId, question, runAction]
   );
 
   const runWikiLoop = React.useCallback(
     () =>
-      runAction(() =>
-        requestJson("/api/knowledge/wiki-loop/run", {
+      runAction(() => {
+        const requestDocumentId = currentSelectedDocumentId();
+        return requestJson("/api/knowledge/wiki-loop/run", {
           method: "POST",
-          body: JSON.stringify({ customer_id: customerId, document_id: activeDocumentId || undefined })
-        })
-      ),
-    [activeDocumentId, customerId, runAction]
+          body: JSON.stringify({ customer_id: customerId, document_id: requestDocumentId || undefined })
+        });
+      }),
+    [currentSelectedDocumentId, customerId, runAction]
   );
 
   const saveWikiNote = React.useCallback(
     () =>
-      runAction(() =>
-        requestJson("/api/knowledge/wiki-vault/notes", {
+      runAction(() => {
+        const requestDocumentId = currentSelectedDocumentId();
+        return requestJson("/api/knowledge/wiki-vault/notes", {
           method: "POST",
           body: JSON.stringify({
             customer_id: customerId,
-            document_id: activeDocumentId || undefined,
-            target_ref: activeDocumentId || undefined,
-            note_type: activeDocumentId ? "document-note" : "manual",
-            payload: activeDocumentId ? { target_ref: activeDocumentId, document_id: activeDocumentId } : undefined,
+            document_id: requestDocumentId || undefined,
+            target_ref: requestDocumentId || undefined,
+            note_type: requestDocumentId ? "document-note" : "manual",
+            payload: requestDocumentId ? { target_ref: requestDocumentId, document_id: requestDocumentId } : undefined,
             title: noteTitle,
             body: noteBody
           })
-        })
-      ),
-    [activeDocumentId, customerId, noteBody, noteTitle, runAction]
+        });
+      }),
+    [currentSelectedDocumentId, customerId, noteBody, noteTitle, runAction]
   );
 
   const loadVault = React.useCallback(
@@ -2785,7 +2868,7 @@ export default function CywellKnowledgeRoute() {
                 customerId={customerId}
                 scopeMode={scopeMode}
                 selectedTarget={selectedCorpusTarget}
-                setScopeMode={setScopeMode}
+                setScopeMode={changeScopeMode}
               />
               <div className="cas-knowledge-fields">
                 <label>

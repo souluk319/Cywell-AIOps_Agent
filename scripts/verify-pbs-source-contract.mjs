@@ -85,6 +85,10 @@ function expect(id, condition, passDetail, failDetail = passDetail) {
   else fail(id, failDetail);
 }
 
+function fullGitSha(value) {
+  return /^[a-f0-9]{40}$/i.test(String(value ?? "").trim());
+}
+
 function readRequired(root, relativePath) {
   const path = join(root, relativePath);
   if (!existsSync(path)) {
@@ -316,13 +320,15 @@ if (!existsSync(sourceDir)) {
   const metadata = gitMetadata(sourceDir);
   if (requireExpectedHead && !expectedSourceHead) {
     fail("pbs-source:git-head-expected-required", "CAS_PBS_SOURCE_HEAD is required when --require-expected-head is set");
+  } else if (requireExpectedHead && !fullGitSha(expectedSourceHead)) {
+    fail("pbs-source:git-head-expected-full-sha", "CAS_PBS_SOURCE_HEAD must be the approved full 40-character PBS git SHA when --require-expected-head is set");
   }
   if (metadata.available) {
     pass("pbs-source:git-head", `PBS source git head ${metadata.head} on ${metadata.branch || "detached"}`);
     if (expectedSourceHead) {
       expect(
         "pbs-source:git-head-expected",
-        metadata.fullHead === expectedSourceHead || metadata.head === expectedSourceHead,
+        fullGitSha(expectedSourceHead) && metadata.fullHead === expectedSourceHead,
         `PBS source head matches CAS_PBS_SOURCE_HEAD ${expectedSourceHead}`,
         `PBS source head ${metadata.fullHead || metadata.head} does not match CAS_PBS_SOURCE_HEAD ${expectedSourceHead}`
       );

@@ -137,6 +137,9 @@ Required result:
 - `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags. Run it normally when publishing empty or already-matching tags. If `v0.1.4` tags already exist and must intentionally move, rerun as `$env:CAS_RELEASE_FORCE="true"; npm run release:crc:v0.1.4` and capture the old/new image evidence.
 - `verify:pbs:preflight:live:site:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
 - `render-pbs-cutover-bundle.mjs --require-live-ready` writes `test-results/cas-pbs-cutover-bundle.json` with `status=PASS` and `phase=live-preapply-ready`.
+- `render-pbs-cutover-bundle.mjs --require-live-ready` confirms CRC deployment, release-image, and generated-site preapply evidence share the same cluster identity.
+- `render-pbs-cutover-bundle.mjs --require-live-ready` recomputes the current generated live-prereq file hashes, generated `pbs-live-site` render hash, and redacted-summary hash before accepting the evidence.
+- `render-pbs-cutover-bundle.mjs --require-live-ready` accepts PBS source evidence only when `CAS_PBS_SOURCE_HEAD` is a full 40-character approved SHA and the PBS checkout is clean.
 - `verify:pbs:preflight:live:site:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
 - `verify:pbs:preflight:live:site:preapply` confirms release-image evidence is current-head and sourced from non-stale CRC deployment evidence.
 - `verify:pbs:preflight:live:site:preapply` confirms the Gateway Kubernetes API NetworkPolicy allows the API IP and port in the same egress rule.
