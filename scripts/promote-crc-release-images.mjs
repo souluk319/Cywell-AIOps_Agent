@@ -44,8 +44,31 @@ function currentGitHead() {
   return run("git", ["rev-parse", "--short", "HEAD"]);
 }
 
+function currentGitFullHead() {
+  return run("git", ["rev-parse", "HEAD"]);
+}
+
 function currentGitBranch() {
   return run("git", ["branch", "--show-current"]);
+}
+
+function currentClusterIdentity() {
+  return {
+    context: run("oc", ["config", "current-context"]),
+    server: run("oc", ["whoami", "--show-server"]),
+    namespace,
+    namespaceUid: run("oc", ["get", "namespace", namespace, "-o", "jsonpath={.metadata.uid}"]),
+    infrastructureName: run("oc", ["get", "infrastructure", "cluster", "-o", "jsonpath={.status.infrastructureName}"])
+  };
+}
+
+function clusterIdentityMatches(expected = {}, actual = {}) {
+  return (
+    expected.namespace === actual.namespace &&
+    expected.namespaceUid === actual.namespaceUid &&
+    expected.server === actual.server &&
+    expected.infrastructureName === actual.infrastructureName
+  );
 }
 
 function extractDigest(value) {
@@ -63,8 +86,20 @@ function loadDeploymentEvidence() {
   }
   const evidenceHead = String(evidence.head ?? "");
   const head = currentGitHead();
+  const evidenceFullHead = String(evidence.fullHead ?? "");
+  const fullHead = currentGitFullHead();
   if (evidenceHead !== head && !allowStaleEvidence) {
     throw new Error(`${releaseEvidencePath} was generated for head ${evidenceHead || "missing"}, current head is ${head}; rerun npm run deploy:crc or set CAS_RELEASE_ALLOW_STALE_EVIDENCE=true intentionally`);
+  }
+  if (evidenceFullHead !== fullHead && !allowStaleEvidence) {
+    throw new Error(`${releaseEvidencePath} fullHead ${evidenceFullHead || "missing"} does not match current head ${fullHead}; rerun npm run deploy:crc or set CAS_RELEASE_ALLOW_STALE_EVIDENCE=true intentionally`);
+  }
+  if (evidence.treeStatus !== "clean" && !allowStaleEvidence) {
+    throw new Error(`${releaseEvidencePath} was generated from a ${evidence.treeStatus || "missing"} git tree; rerun npm run deploy:crc from a clean committed tree`);
+  }
+  const actualClusterIdentity = currentClusterIdentity();
+  if (!clusterIdentityMatches(evidence.clusterIdentity, actualClusterIdentity) && !allowStaleEvidence) {
+    throw new Error(`${releaseEvidencePath} cluster identity does not match the current cluster; rerun npm run deploy:crc against this cluster`);
   }
   const checkedAtMs = Date.parse(evidence.checkedAt ?? "");
   if (!Number.isFinite(checkedAtMs)) {
@@ -263,8 +298,12 @@ try {
         releaseEvidencePath,
         sourceEvidencePath: releaseEvidencePath,
         sourceEvidenceHead: deploymentEvidence?.head ?? "",
+        sourceEvidenceFullHead: deploymentEvidence?.fullHead ?? "",
+        sourceEvidenceTreeStatus: deploymentEvidence?.treeStatus ?? "",
         sourceEvidenceCheckedAt: deploymentEvidence?.checkedAt ?? "",
         staleEvidenceAllowed: allowStaleEvidence,
+        clusterIdentity: currentClusterIdentity(),
+        sourceClusterIdentity: deploymentEvidence?.clusterIdentity ?? {},
         branch: currentGitBranch(),
         head: currentGitHead(),
         forceRelease,
@@ -291,8 +330,18 @@ try {
         releaseEvidencePath,
         sourceEvidencePath: releaseEvidencePath,
         sourceEvidenceHead: deploymentEvidence?.head ?? "",
+        sourceEvidenceFullHead: deploymentEvidence?.fullHead ?? "",
+        sourceEvidenceTreeStatus: deploymentEvidence?.treeStatus ?? "",
         sourceEvidenceCheckedAt: deploymentEvidence?.checkedAt ?? "",
         staleEvidenceAllowed: allowStaleEvidence,
+        clusterIdentity: (() => {
+          try {
+            return currentClusterIdentity();
+          } catch {
+            return {};
+          }
+        })(),
+        sourceClusterIdentity: deploymentEvidence?.clusterIdentity ?? {},
         branch: (() => {
           try {
             return currentGitBranch();

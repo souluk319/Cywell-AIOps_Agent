@@ -4,10 +4,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const namespace = process.env.CAS_PBS_PREFLIGHT_NAMESPACE || "cywell-ai-sentinel";
 const overlayArg = process.argv.find((arg) => arg.startsWith("--overlay="))?.split("=")[1] ?? process.env.CAS_PBS_PREFLIGHT_OVERLAY ?? "pbs-live";
+const overlayPathArg = process.argv.find((arg) => arg.startsWith("--overlay-path="))?.split("=")[1] ?? process.env.CAS_PBS_PREFLIGHT_OVERLAY_PATH ?? "";
 const validOverlays = new Set(["pbs-shadow", "pbs-live"]);
 const overlayNameValid = validOverlays.has(overlayArg);
 const overlay = overlayNameValid ? overlayArg : overlayArg || "invalid";
-const overlayPath = `deploy/kustomize/overlays/${overlay}`;
+const overlayPath = overlayPathArg || `deploy/kustomize/overlays/${overlay}`;
 const requireCluster = process.argv.includes("--require-cluster") || envBool("CAS_PBS_PREFLIGHT_REQUIRE_CLUSTER");
 const requireSecret = process.argv.includes("--require-secret") || envBool("CAS_PBS_PREFLIGHT_REQUIRE_SECRET");
 const skipApplied = process.argv.includes("--skip-applied") || envBool("CAS_PBS_PREFLIGHT_SKIP_APPLIED");
@@ -38,6 +39,29 @@ function run(command, args, options = {}) {
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? result.error?.message ?? ""
   };
+}
+
+function currentClusterIdentity() {
+  const value = (args) => {
+    const result = run("oc", args, { timeoutMs: 10000 });
+    return result.ok ? result.stdout.trim() : "";
+  };
+  return {
+    context: value(["config", "current-context"]),
+    server: value(["whoami", "--show-server"]),
+    namespace,
+    namespaceUid: value(["get", "namespace", namespace, "-o", "jsonpath={.metadata.uid}"]),
+    infrastructureName: value(["get", "infrastructure", "cluster", "-o", "jsonpath={.status.infrastructureName}"])
+  };
+}
+
+function clusterIdentityMatches(expected = {}, actual = {}) {
+  return (
+    expected.namespace === actual.namespace &&
+    expected.namespaceUid === actual.namespaceUid &&
+    expected.server === actual.server &&
+    expected.infrastructureName === actual.infrastructureName
+  );
 }
 
 function record(status, id, detail, extra = {}) {
@@ -204,19 +228,41 @@ function configMapDataValue(configMapJson, key) {
 function customerAccessPolicyIsConcrete(jsonText) {
   try {
     const policy = JSON.parse(jsonText);
-    const entriesFromTable = (table) =>
-      table && typeof table === "object" && !Array.isArray(table) ? Object.values(table).flatMap((value) => (Array.isArray(value) ? value : [])) : [];
-    const defaultEntries = Array.isArray(policy?.default) ? policy.default : [];
-    const entries = [
-      ...defaultEntries,
-      ...entriesFromTable(policy?.owners),
-      ...entriesFromTable(policy?.groups),
-      ...entriesFromTable(policy?.users)
-    ];
-    return entries.length > 0 && entries.every((value) => {
-      const clean = String(value).trim();
-      return clean && !clean.includes("*");
-    }) && defaultEntries.length === 0;
+    if (!policy || typeof policy !== "object" || Array.isArray(policy)) return false;
+    if (Object.hasOwn(policy, "default")) return false;
+    const allowedTopLevelKeys = new Set(["owners", "users", "groups"]);
+    if (Object.keys(policy).some((key) => !allowedTopLevelKeys.has(key))) return false;
+    const placeholder = (value) => /^(changeme|change-me|todo|placeholder|example|sample|dummy|default|customer|tenant|none|null|x+|\*+)$/i.test(String(value ?? "").trim());
+    const broadPrincipal = (table, principal) => {
+      const clean = String(principal ?? "").trim().toLowerCase();
+      return (
+        !clean ||
+        clean.includes("*") ||
+        placeholder(clean) ||
+        (table === "groups" &&
+          (clean === "system:authenticated" ||
+            clean === "system:authenticated:oauth" ||
+            clean === "system:unauthenticated" ||
+            clean === "system:anonymous" ||
+            clean === "system:serviceaccounts" ||
+            clean.startsWith("system:serviceaccounts:")))
+      );
+    };
+    let entries = 0;
+    for (const table of ["owners", "users", "groups"]) {
+      const map = policy[table];
+      if (map === undefined) continue;
+      if (!map || typeof map !== "object" || Array.isArray(map)) return false;
+      for (const [principal, customers] of Object.entries(map)) {
+        if (broadPrincipal(table, principal) || !Array.isArray(customers)) return false;
+        for (const value of customers) {
+          const clean = String(value).trim();
+          entries += 1;
+          if (!clean || clean.includes("*") || placeholder(clean)) return false;
+        }
+      }
+    }
+    return entries > 0;
   } catch {
     return false;
   }
@@ -482,7 +528,9 @@ function writeEvidence(status) {
         head: run("git", ["rev-parse", "--short", "HEAD"]).stdout.trim(),
         status,
         namespace,
+        clusterIdentity: currentClusterIdentity(),
         overlay,
+        overlayPath,
         requireCluster,
         requireSecret,
         skipApplied,
@@ -804,6 +852,14 @@ function loadReleaseImagesEvidence() {
       "release image promotion evidence is PASS, current-head, non-stale-source, namespace-scoped, and contains promoted image digests",
       `${releaseImagesEvidencePath} must be PASS for namespace ${namespace}, current head ${head || "unknown"}, releaseTag v0.1.4, include promotedImages, sourceEvidenceHead must match current head, and staleEvidenceAllowed must not be true`
     );
+    if (requireCluster && evidence.clusterIdentity) {
+      expect(
+        "cluster:release-images-evidence-cluster-identity",
+        clusterIdentityMatches(evidence.clusterIdentity, currentClusterIdentity()),
+        "release image promotion evidence was generated for the current cluster identity",
+        `${releaseImagesEvidencePath} cluster identity must match current context/server/namespace UID/infrastructure`
+      );
+    }
     return valid ? evidence : null;
   } catch (error) {
     fail("cluster:release-images-evidence", `could not parse ${releaseImagesEvidencePath}: ${error.message}`);

@@ -25,8 +25,10 @@ const ownerIdentityConfig = getOwnerIdentityConfig();
 const ownerIdentityCache = new Map();
 const maxRequestBytes = Number(process.env.CAS_MAX_REQUEST_BYTES ?? 25 * 1024 * 1024);
 const ownerHmacSecret = String(process.env.CAS_KNOWLEDGE_OWNER_HMAC_SECRET ?? "").trim();
-const customerAccessPolicy = loadCustomerAccessPolicy(process.env);
 const requireCustomerAccess = String(process.env.CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS ?? "false").toLowerCase() === "true";
+const customerAccessConfig = loadCustomerAccessPolicy(process.env);
+const customerAccessPolicy = customerAccessConfig.policy;
+const customerAccessPolicyError = customerAccessConfig.error;
 
 function loadTlsOptions() {
   if (!tlsCertFile || !tlsKeyFile) return undefined;
@@ -92,30 +94,71 @@ function publicKnowledgeRoute(pathname) {
 
 function loadCustomerAccessPolicy(env = process.env) {
   const file = String(env.CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE ?? "").trim();
-  const raw = String(env.CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON ?? "").trim() || (file && existsSync(file) ? readFileSync(file, "utf8") : "");
-  if (!raw) return null;
+  const inline = String(env.CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON ?? "").trim();
+  if (file && !existsSync(file)) return { policy: null, error: `customer access file is missing: ${file}` };
+  const raw = inline || (file ? readFileSync(file, "utf8") : "");
+  if (!raw) return { policy: null, error: "" };
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { policy: null, error: "customer access policy must be a JSON object" };
+    const error = validateCustomerAccessPolicy(parsed);
+    return error ? { policy: null, error } : { policy: parsed, error: "" };
   } catch {
-    return null;
+    return { policy: null, error: "customer access policy is not valid JSON" };
   }
+}
+
+function valueLooksPlaceholder(value) {
+  return /^(changeme|change-me|todo|placeholder|example|sample|dummy|default|customer|tenant|none|null|x+|\*+)$/i.test(String(value ?? "").trim());
+}
+
+function broadCustomerPrincipal(table, principal) {
+  const clean = String(principal ?? "").trim().toLowerCase();
+  return (
+    !clean ||
+    clean.includes("*") ||
+    valueLooksPlaceholder(clean) ||
+    (table === "groups" &&
+      (clean === "system:authenticated" ||
+        clean === "system:authenticated:oauth" ||
+        clean === "system:unauthenticated" ||
+        clean === "system:anonymous" ||
+        clean === "system:serviceaccounts" ||
+        clean.startsWith("system:serviceaccounts:")))
+  );
+}
+
+function validateCustomerAccessPolicy(policy) {
+  if (Object.hasOwn(policy, "default")) return "customer access policy must not use default grants";
+  const allowedTopLevelKeys = new Set(["owners", "users", "groups"]);
+  const unknownTopLevelKeys = Object.keys(policy).filter((key) => !allowedTopLevelKeys.has(key));
+  if (unknownTopLevelKeys.length) return `customer access policy contains unsupported keys: ${unknownTopLevelKeys.join(", ")}`;
+  let entries = 0;
+  for (const table of ["owners", "users", "groups"]) {
+    const map = policy[table];
+    if (map === undefined) continue;
+    if (!map || typeof map !== "object" || Array.isArray(map)) return `customer access policy ${table} must be an object`;
+    for (const [principal, customers] of Object.entries(map)) {
+      if (broadCustomerPrincipal(table, principal)) return `customer access policy ${table} principal is too broad or placeholder: ${principal}`;
+      if (!Array.isArray(customers)) return `customer access policy ${table}.${principal} must be an array of explicit customer IDs`;
+      for (const customerId of customers) {
+        const cleanCustomer = String(customerId ?? "").trim();
+        entries += 1;
+        if (!cleanCustomer || cleanCustomer.includes("*") || valueLooksPlaceholder(cleanCustomer)) {
+          return `customer access policy ${table}.${principal} contains an invalid customer ID`;
+        }
+      }
+    }
+  }
+  return entries > 0 ? "" : "customer access policy must contain at least one explicit owner, user, or group mapping";
 }
 
 function normalizeCustomerList(value) {
   if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
-  if (typeof value === "string") {
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
   return [];
 }
 
 function customerPatternMatches(pattern, customerId) {
-  if (pattern === "*") return true;
-  if (pattern.endsWith("*")) return customerId.startsWith(pattern.slice(0, -1));
   return pattern === customerId;
 }
 
@@ -131,24 +174,42 @@ function customerIdsFromRequest(url, body) {
   };
   const queryCustomer = url.searchParams.get("customer_id") || url.searchParams.get("customerId");
   add(queryCustomer);
-  if (!body || body.length === 0) return ids.length ? ids : ["default"];
+  if (!body || body.length === 0) return ids;
   const parsed = parseJsonBuffer(body);
   add(parsed.customer_id ?? parsed.customerId);
   for (const key of ["source_metadata", "sourceMetadata", "metadata"]) {
     if (parsed[key] && typeof parsed[key] === "object") add(parsed[key].customer_id ?? parsed[key].customerId);
   }
-  return ids.length ? ids : ["default"];
+  return ids;
 }
 
 function customerAccessAllowed(ownerResult, customerId) {
-  if (!customerAccessPolicy) return !requireCustomerAccess;
+  if (!requireCustomerAccess) return true;
+  if (!customerAccessPolicy || customerAccessPolicyError) return false;
   const owner = String(ownerResult?.owner ?? "");
   const username = String(ownerResult?.username ?? "");
   const groups = Array.isArray(ownerResult?.groups) ? ownerResult.groups.map((group) => String(group)) : [];
-  if (customerListAllows(customerAccessPolicy.default, customerId)) return true;
   if (owner && customerListAllows(customerAccessPolicy.owners?.[owner], customerId)) return true;
   if (username && customerListAllows(customerAccessPolicy.users?.[username], customerId)) return true;
   return groups.some((group) => customerListAllows(customerAccessPolicy.groups?.[group], customerId));
+}
+
+function sendCustomerAccessPolicyFailure(response) {
+  sendJson(response, 503, {
+    code: "knowledge-customer-policy-invalid",
+    status: "error",
+    service: "cas-knowledge-facade",
+    reason: customerAccessPolicyError || "customer access policy is required"
+  });
+}
+
+function sendCustomerRequiredFailure(response) {
+  sendJson(response, 400, {
+    code: "knowledge-customer-required",
+    status: "error",
+    service: "cas-knowledge-facade",
+    reason: "customer_id is required for private knowledge requests"
+  });
 }
 
 function sendCustomerAccessFailure(response, ownerResult, customerId) {
@@ -308,12 +369,20 @@ async function proxyKnowledgeRequest(request, response, url) {
       return;
     }
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await readBody(request);
+    if (customerAccessPolicyError || (requireCustomerAccess && !customerAccessPolicy)) {
+      sendCustomerAccessPolicyFailure(response);
+      return;
+    }
     const customerIds = customerIdsFromRequest(url, body);
     if (customerIds.length > 1) {
       sendCustomerMismatchFailure(response, customerIds);
       return;
     }
-    const customerId = customerIds[0];
+    if (requireCustomerAccess && customerIds.length === 0) {
+      sendCustomerRequiredFailure(response);
+      return;
+    }
+    const customerId = customerIds[0] ?? "default";
     if (!customerAccessAllowed(ownerResult, customerId)) {
       sendCustomerAccessFailure(response, ownerResult, customerId);
       return;

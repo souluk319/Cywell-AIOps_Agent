@@ -1,6 +1,27 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - Live Cutover Gate Hardening
+## Latest Update - Generated Site Overlay and Strict ACL Closure
+
+Implemented after the latest parallel review pass:
+
+- Added `render:pbs:live-prereqs` and `verify:pbs:live-prereqs`.
+- The renderer outputs reviewed live Secret/ConfigMap manifests plus `test-results/pbs-live-prereqs/pbs-live-site`, a generated overlay that replaces `cas-knowledge-live-config` while composing the tracked `pbs-live` overlay.
+- Strict live preflight accepts `--overlay-path` / `CAS_PBS_PREFLIGHT_OVERLAY_PATH`, so release gates can validate the generated site overlay instead of the tracked wildcard placeholder.
+- Gateway ACL parsing is now strict: arrays only, no `default`, no wildcard/string ACL values, no placeholder customer IDs, and no broad system groups such as `system:authenticated`.
+- Private Gateway knowledge requests now fail closed when an invalid ACL is configured, even if `CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS=false`; live ACL mode also returns `400` when `customer_id` is missing.
+- Added a non-applied PBS runtime Service/label contract sample at `deliverables/active/v0.1.4/pbs-runtime-service-contract.sample.yaml`.
+- Topology dashboard visual design remains owned by the Cywell console implementation; no external design package is required for v0.1.4.
+- CRC deployment/release evidence now carries full git HEAD, clean/dirty source status, and cluster identity, so release tags cannot be promoted from stale, dirty, or wrong-cluster runtime evidence.
+
+Proof captured in this pass:
+
+- `node --check` passed for changed Gateway, preflight, renderer, and verifier scripts.
+- `npm run verify:pbs:live-prereqs`: PASS, 7 checks.
+- `npm run verify:knowledge-engine`: PASS, 85 checks.
+- `npm run verify:deploy:manifests`: PASS, 269 checks.
+- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `44 PASS / 7 FAIL`; failures remain external PBS namespace/service, required live Secrets, and legacy CRC dev Secret cleanup. The rendered wildcard ACL blocker is closed, and release evidence cluster identity matches the current cluster.
+
+## Previous Update - Live Cutover Gate Hardening
 
 Implemented after the third parallel review pass:
 
@@ -509,6 +530,19 @@ Historical verified results at this step:
 ## Current Boundary
 
 This is now a verified v0.1.4 Cywell knowledge integration surface with live CRC deployment, topology visualization, and a tested PBS HTTP shadow/live provider boundary.
+
+## Current Update - Live Prerequisite Renderer
+
+Implemented in this pass:
+
+- Added `render:pbs:live-prereqs` to render reviewed `cas-pbs-auth`, `cas-knowledge-postgres-live`, and `cas-knowledge-live-config` manifests under ignored `test-results/pbs-live-prereqs/`.
+- Added `verify:pbs:live-prereqs` and wired it into `npm run verify`.
+- The renderer rejects placeholder/short PBS token material, wildcard/default customer ACLs, placeholder customer/principal values, non-service Postgres URLs, and Postgres URL values that do not match the individual Secret fields.
+- The renderer writes only a redacted summary and evidence file with hashes and git head metadata.
+
+Topology design note:
+
+- No separate user-provided topology dashboard design file is required for v0.1.4. The Cywell console plugin owns the visual system and continues to render PBS-rich topology semantics with KPI strip, graph canvas, node index, inspector, relation grid, signal leaders, and node-to-RAG actions under browser-backed DOM verification.
 
 It is not yet a production PBS live deployment. The PBS shadow/live deployment overlays are present and render-verified, but the next implementation slice still needs a real PBS runtime around:
 

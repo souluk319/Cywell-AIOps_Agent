@@ -12,6 +12,10 @@ const appRuntimeImages = [
   { imageStream: "cas-knowledge-engine", podPrefix: "cas-knowledge-engine-", container: "knowledge-engine" }
 ];
 const verifiedImages = {};
+const gitFullHead = run("git", ["rev-parse", "HEAD"]).stdout;
+const gitShortHead = run("git", ["rev-parse", "--short", "HEAD"]).stdout;
+const gitBranch = run("git", ["branch", "--show-current"]).stdout;
+const gitTreeStatus = run("git", ["status", "--porcelain", "--untracked-files=no"]).stdout ? "dirty" : "clean";
 
 function run(command, args, timeoutMs = 30000) {
   const result = spawnSync(command, args, {
@@ -73,6 +77,18 @@ const crcKnowledgeSmokeSubject = crcSelfSubjectUserInfo.uid
 const crcKnowledgeSmokeOwner = crcKnowledgeSmokeSubject
   ? `k8s-user-${createHash("sha256").update(crcKnowledgeSmokeSubject).digest("hex").slice(0, 32)}`
   : "";
+
+function readClusterIdentity() {
+  return {
+    context: run("oc", ["config", "current-context"], 10000).stdout,
+    server: run("oc", ["whoami", "--show-server"], 10000).stdout,
+    namespace,
+    namespaceUid: run("oc", ["get", "namespace", namespace, "-o", "jsonpath={.metadata.uid}"], 10000).stdout,
+    infrastructureName: run("oc", ["get", "infrastructure", "cluster", "-o", "jsonpath={.status.infrastructureName}"], 10000).stdout
+  };
+}
+
+const clusterIdentity = readClusterIdentity();
 
 function record(status, id, detail, extra = {}) {
   checks.push({ status, id, detail, ...extra });
@@ -175,6 +191,9 @@ function verifyAppRuntimeImage({ imageStream, container }, pod, imageStreamTagBy
     imageID: containerStatus?.imageID ?? "",
     runtimeDigest,
     digest: imageStreamDigest,
+    sourceHead: pod?.metadata?.annotations?.["cywell.io/source-head"] ?? "",
+    sourceShortHead: pod?.metadata?.annotations?.["cywell.io/source-short-head"] ?? "",
+    sourceTreeStatus: pod?.metadata?.annotations?.["cywell.io/source-tree-status"] ?? "",
     verified: matched
   };
   expect(
@@ -183,6 +202,20 @@ function verifyAppRuntimeImage({ imageStream, container }, pod, imageStreamTagBy
     `${imageStream}:dev ImageStreamTag digest matches the ready runtime pod imageID`,
     `${imageStream}:dev ImageStreamTag digest does not match the ready runtime pod imageID`,
     verifiedImages[imageStream]
+  );
+}
+
+function sourceAnnotationsMatch(deployment, pod) {
+  const deploymentAnnotations = deployment?.spec?.template?.metadata?.annotations ?? {};
+  const podAnnotations = pod?.metadata?.annotations ?? {};
+  return (
+    gitTreeStatus === "clean" &&
+    deploymentAnnotations["cywell.io/source-head"] === gitFullHead &&
+    deploymentAnnotations["cywell.io/source-short-head"] === gitShortHead &&
+    deploymentAnnotations["cywell.io/source-tree-status"] === "clean" &&
+    podAnnotations["cywell.io/source-head"] === gitFullHead &&
+    podAnnotations["cywell.io/source-short-head"] === gitShortHead &&
+    podAnnotations["cywell.io/source-tree-status"] === "clean"
   );
 }
 
@@ -649,6 +682,17 @@ const postgresPod = pods?.items?.find((pod) => pod.metadata?.name?.startsWith("c
 
 for (const image of appRuntimeImages) {
   const pod = pods?.items?.find((item) => item.metadata?.name?.startsWith(image.podPrefix) && podReady(item));
+  expect(
+    `runtime:source-annotation:${image.imageStream}`,
+    sourceAnnotationsMatch(deploymentByName.get(image.imageStream), pod),
+    `${image.imageStream} ready pod and Deployment template are stamped with the current clean git HEAD`,
+    `${image.imageStream} ready pod/template source annotations must match current clean git HEAD`,
+    {
+      current: { branch: gitBranch, head: gitFullHead, shortHead: gitShortHead, treeStatus: gitTreeStatus },
+      deployment: deploymentByName.get(image.imageStream)?.spec?.template?.metadata?.annotations ?? {},
+      pod: pod?.metadata?.annotations ?? {}
+    }
+  );
   verifyAppRuntimeImage(image, pod, imageStreamTagByName);
 }
 verifyPostgresRuntimeImage(postgresPod);
@@ -1002,8 +1046,11 @@ writeFileSync(
   JSON.stringify(
     {
       checkedAt,
-      branch: run("git", ["branch", "--show-current"]).stdout,
-      head: run("git", ["rev-parse", "--short", "HEAD"]).stdout,
+      branch: gitBranch,
+      head: gitShortHead,
+      fullHead: gitFullHead,
+      treeStatus: gitTreeStatus,
+      clusterIdentity,
       namespace,
       verifiedImages,
       status: finalStatus,

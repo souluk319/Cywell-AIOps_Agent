@@ -26,6 +26,8 @@ These values must come from the target environment. Do not commit any secret val
 - PBS runtime pods labeled:
   - `app.kubernetes.io/name=playbookstudio`
   - `app.kubernetes.io/component=runtime`
+- PBS runtime Service/label contract sample:
+  - `deliverables/active/v0.1.4/pbs-runtime-service-contract.sample.yaml`
 - Live PBS API base URL for smoke tests:
   - `CAS_PBS_BASE_URL=https://playbookstudio-runtime.playbookstudio.svc.cluster.local:8765`
 - Local cutover smoke PBS auth material:
@@ -33,8 +35,8 @@ These values must come from the target environment. Do not commit any secret val
 - PBS bearer token material for:
   - `cas-pbs-auth/bearer-token`
 - Gateway customer workspace ACL JSON for `cas-knowledge-live-config/customer-access-json`.
-  - Default render grants `cywell-knowledge-admins` access to all customers as an admin placeholder.
-  - Production cutover must replace or approve this with the target mapping of OpenShift users/groups/namespaces to customer IDs.
+  - Production cutover must use a concrete mapping of OpenShift users/groups to customer IDs.
+  - Wildcard, default, prefix, or suffix customer grants are rejected.
 - Live Postgres credentials for:
   - `cas-knowledge-postgres-live/database`
   - `cas-knowledge-postgres-live/username`
@@ -51,50 +53,49 @@ These values must come from the target environment. Do not commit any secret val
   - otherwise use a fresh PVC or perform a planned DB migration
 - Cluster-specific Gateway egress to Kubernetes API for SelfSubjectReview/OpenShift evidence. Standard NetworkPolicy cannot allow `kubernetes.default.svc` by Service name.
 
-## Secret Creation Template
+## Live Prerequisite Manifest Renderer
 
-Render these in the target cluster with real values supplied from a secret manager or operator-approved handoff, review the diff, then apply after approval. Do not use one-shot `oc create secret` for live cutover because it is not idempotent and cannot be reviewed.
-
-```powershell
-oc create secret generic cas-pbs-auth `
-  -n cywell-ai-sentinel `
-  --from-literal=bearer-token="$env:CAS_PBS_BEARER_TOKEN" `
-  --dry-run=client -o yaml > .\test-results\cas-pbs-auth.secret.yaml
-
-oc create secret generic cas-knowledge-postgres-live `
-  -n cywell-ai-sentinel `
-  --from-literal=database="$env:CAS_KNOWLEDGE_POSTGRES_DB" `
-  --from-literal=username="$env:CAS_KNOWLEDGE_POSTGRES_USER" `
-  --from-literal=password="$env:CAS_KNOWLEDGE_POSTGRES_PASSWORD" `
-  --from-literal=database-url="$env:CAS_KNOWLEDGE_POSTGRES_DATABASE_URL" `
-  --dry-run=client -o yaml > .\test-results\cas-knowledge-postgres-live.secret.yaml
-
-oc diff -f .\test-results\cas-pbs-auth.secret.yaml
-oc diff -f .\test-results\cas-knowledge-postgres-live.secret.yaml
-
-oc apply -f .\test-results\cas-pbs-auth.secret.yaml
-oc apply -f .\test-results\cas-knowledge-postgres-live.secret.yaml
-```
-
-If those Secrets already exist, compare keys and rotation plan before applying the reviewed Secret manifests.
-
-## Customer ACL Template
-
-Review and replace the live ConfigMap customer ACL before applying `pbs-live`. This value is not secret, but it controls customer data authorization and must be reviewed like release configuration.
+Render these with real values supplied from a secret manager or operator-approved handoff, review the diff, then apply after approval. Do not use one-shot `oc create secret` or `oc create configmap` for live cutover because those paths are easy to mistype and do not run the same input validation.
 
 ```powershell
-$customerAccessJson = '{"groups":{"cywell-knowledge-admins":["customer-a","customer-b"],"customer-a-ops":["customer-a"],"customer-b-ops":["customer-b"]}}'
+$env:CAS_PBS_LIVE_NAMESPACE="cywell-ai-sentinel"
+$env:CAS_PBS_BEARER_TOKEN_FILE="C:\secure-handoff\pbs-live-token.txt"
+$env:CAS_KNOWLEDGE_SERVICE_OWNER="cas-pbs-live"
+$env:CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE="C:\secure-handoff\customer-access.json"
+$env:CAS_KNOWLEDGE_POSTGRES_DB="cas_knowledge_live"
+$env:CAS_KNOWLEDGE_POSTGRES_USER="cas_knowledge_live"
+$env:CAS_KNOWLEDGE_POSTGRES_PASSWORD="<from-secret-manager>"
+$env:CAS_KNOWLEDGE_POSTGRES_DATABASE_URL="postgresql://cas_knowledge_live:<url-encoded-password>@cas-knowledge-postgres.cywell-ai-sentinel.svc.cluster.local:5432/cas_knowledge_live"
 
-oc create configmap cas-knowledge-live-config `
-  -n cywell-ai-sentinel `
-  --from-literal=service-owner="$env:CAS_KNOWLEDGE_SERVICE_OWNER" `
-  --from-literal=customer-access-json="$customerAccessJson" `
-  --dry-run=client -o yaml > .\test-results\cas-knowledge-live-config.configmap.yaml
+npm run render:pbs:live-prereqs
 
-oc diff -f .\test-results\cas-knowledge-live-config.configmap.yaml
+oc diff -f .\test-results\pbs-live-prereqs\cas-pbs-auth.secret.yaml
+oc diff -f .\test-results\pbs-live-prereqs\cas-knowledge-postgres-live.secret.yaml
+oc diff -f .\test-results\pbs-live-prereqs\cas-knowledge-live-config.configmap.yaml
+oc diff -k .\test-results\pbs-live-prereqs\pbs-live-site
+
+oc apply -f .\test-results\pbs-live-prereqs\cas-pbs-auth.secret.yaml
+oc apply -f .\test-results\pbs-live-prereqs\cas-knowledge-postgres-live.secret.yaml
+oc apply -f .\test-results\pbs-live-prereqs\cas-knowledge-live-config.configmap.yaml
 ```
 
-Do not proceed if the reviewed policy contains `*` or prefix/suffix wildcard entries. The strict live preflight requires concrete customer IDs in every ACL entry.
+If those Secrets or the ConfigMap already exist, compare keys and rotation plan before applying the reviewed manifests. The renderer also writes a site overlay to `test-results/pbs-live-prereqs/pbs-live-site`; use that overlay for preflight and live apply so the rendered `pbs-live` ConfigMap replacement is the same one you reviewed. The renderer writes a redacted summary to `test-results/pbs-live-prereqs/pbs-live-prereqs.summary.json`; verify hashes and metadata there, not raw Secret values.
+
+Customer ACL example:
+
+```json
+{
+  "groups": {
+    "customer-a-ops": ["customer-a"],
+    "customer-b-ops": ["customer-b"]
+  },
+  "users": {
+    "alice@example.com": ["customer-a"]
+  }
+}
+```
+
+Do not proceed if the reviewed policy contains `default`, `*`, prefix/suffix wildcard entries, or placeholder customer IDs. The renderer and strict live preflight both require concrete customer IDs in every ACL entry.
 
 ## Pre-Apply Gates
 
@@ -102,22 +103,24 @@ Run these before applying live manifests:
 
 ```powershell
 npm run verify
+npm run verify:pbs:live-prereqs
 npm run verify:deploy:manifests
 npm run release:crc:v0.1.4
-npm run verify:pbs:preflight:live:preapply
+npm run verify:pbs:preflight:live:site:preapply
 ```
 
 Required result:
 
 - `verify` passes.
+- `verify:pbs:live-prereqs` passes and writes `test-results/cas-pbs-live-prereqs-render.json`.
 - `verify:deploy:manifests` passes.
 - `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags. If `v0.1.4` tags already exist and must intentionally move, rerun as `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` and capture the old/new image evidence.
-- `verify:pbs:preflight:live:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
-- `verify:pbs:preflight:live:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
-- `verify:pbs:preflight:live:preapply` confirms release-image evidence is current-head and sourced from non-stale CRC deployment evidence.
-- `verify:pbs:preflight:live:preapply` confirms the Gateway Kubernetes API NetworkPolicy allows the API IP and port in the same egress rule.
-- `verify:pbs:preflight:live:preapply` confirms `playbookstudio-runtime` has ready Endpoints on port `8765` once the PBS namespace/service exists.
-- `verify:pbs:preflight:live:preapply` confirms `cas-pbs-auth` and `cas-knowledge-postgres-live` contain usable non-placeholder values; the Postgres `database-url` credentials/database must match the individual Secret keys.
+- `verify:pbs:preflight:live:site:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
+- `verify:pbs:preflight:live:site:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
+- `verify:pbs:preflight:live:site:preapply` confirms release-image evidence is current-head and sourced from non-stale CRC deployment evidence.
+- `verify:pbs:preflight:live:site:preapply` confirms the Gateway Kubernetes API NetworkPolicy allows the API IP and port in the same egress rule.
+- `verify:pbs:preflight:live:site:preapply` confirms `playbookstudio-runtime` has ready Endpoints on port `8765` once the PBS namespace/service exists.
+- `verify:pbs:preflight:live:site:preapply` confirms `cas-pbs-auth` and `cas-knowledge-postgres-live` contain usable non-placeholder values; the Postgres `database-url` credentials/database must match the individual Secret keys.
 
 Stop immediately if any gate fails.
 
@@ -145,7 +148,7 @@ Required result:
 Only proceed after shadow read smoke is accepted.
 
 ```powershell
-oc apply -k deploy/kustomize/overlays/pbs-live
+oc apply -k .\test-results\pbs-live-prereqs\pbs-live-site
 npm run verify:release:pbs-live
 ```
 
@@ -173,7 +176,7 @@ Required result:
 
 Rollback or stop the cutover if any of these occur:
 
-- `verify:pbs:preflight:live` fails.
+- `verify:pbs:preflight:live:site` fails.
 - `verify:pbs:cutover:cluster` fails.
 - PBS health reports DB/vector/corpus readiness false.
 - RAG answers lose uploaded document citations.
@@ -190,7 +193,7 @@ Save command output or JSON artifacts for the release record:
 - `git rev-parse HEAD`
 - `npm run verify`
 - `npm run verify:pbs:preflight:shadow:cluster` if shadow mode is applied
-- `npm run verify:pbs:preflight:live`
+- `npm run verify:pbs:preflight:live:site`
 - `npm run verify:release:pbs-live`
 - `oc get deploy,statefulset,svc,networkpolicy,secret -n cywell-ai-sentinel`
 - `oc get svc,pods -n playbookstudio --show-labels`
@@ -198,13 +201,14 @@ Save command output or JSON artifacts for the release record:
 - `test-results/cas-pbs-preflight-pbs-live-applied-cluster-required-secrets.json`
 - `test-results/cas-pbs-live-smoke-cluster-cutover.json`
 - `test-results/cas-release-images.json`
+- `test-results/cas-pbs-live-prereqs-render.json`
 
 ## Completion Definition
 
 Production live cutover is complete only when the live overlay is applied in the target cluster and both strict gates pass:
 
 ```powershell
-npm run verify:pbs:preflight:live
+npm run verify:pbs:preflight:live:site
 npm run verify:release:pbs-live
 ```
 

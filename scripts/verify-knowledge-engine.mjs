@@ -573,6 +573,7 @@ expect("knowledge:selftest", selftest.status === 0, "knowledge engine self-test 
 const enginePort = await getFreePort();
 const unsignedEnginePort = await getFreePort();
 const gatewayPort = await getFreePort();
+const invalidAclGatewayPort = await getFreePort();
 const verifiedGatewayPort = await getFreePort();
 const fakeIdentityPort = await getFreePort();
 const boundaryEnginePort = await getFreePort();
@@ -590,6 +591,7 @@ const staleIndexLivePort = await getFreePort();
 const engineBase = `http://127.0.0.1:${enginePort}`;
 const unsignedEngineBase = `http://127.0.0.1:${unsignedEnginePort}`;
 const gatewayBase = `http://127.0.0.1:${gatewayPort}`;
+const invalidAclGatewayBase = `http://127.0.0.1:${invalidAclGatewayPort}`;
 const verifiedGatewayBase = `http://127.0.0.1:${verifiedGatewayPort}`;
 const boundaryGatewayBase = `http://127.0.0.1:${boundaryGatewayPort}`;
 const unsignedBoundaryGatewayBase = `http://127.0.0.1:${unsignedBoundaryGatewayPort}`;
@@ -1057,6 +1059,19 @@ try {
     "gateway rejects verified owners when the requested customer workspace is not in their ACL",
     JSON.stringify(forbiddenCustomerRag.body)
   );
+  const missingCustomerRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      question: "router latency evidence without customer"
+    })
+  });
+  expect(
+    "knowledge:customer-acl-requires-explicit-customer",
+    missingCustomerRag.response.status === 400 && missingCustomerRag.body.code === "knowledge-customer-required",
+    "gateway requires explicit customer_id when customer workspace ACL is enabled",
+    JSON.stringify(missingCustomerRag.body)
+  );
   const noOwnerRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
     method: "POST",
     body: JSON.stringify({
@@ -1094,6 +1109,39 @@ try {
       spoofedOpenShiftUser.body.code === "knowledge-owner-unverified",
     "gateway never trusts client-supplied x-remote-user or x-openshift-user for knowledge owner scope",
     JSON.stringify({ remote: spoofedRemoteUser.body, openshift: spoofedOpenShiftUser.body })
+  );
+  const invalidAclGatewayEnv = {
+    ...process.env,
+    HOST: "127.0.0.1",
+    PORT: String(invalidAclGatewayPort),
+    CAS_BRAIN_PROVIDER: "mock",
+    CAS_EVIDENCE_PROVIDER: "none",
+    CAS_KNOWLEDGE_OWNER_IDENTITY_MODE: "token-hash",
+    CAS_KNOWLEDGE_ENGINE_URL: engineBase,
+    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret,
+    CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS: "false",
+    CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({
+      owners: {
+        [tokenOwner("verify-owner-a")]: "verify-*"
+      }
+    })
+  };
+  spawnChild("node", ["apps/gateway/src/server.mjs"], invalidAclGatewayEnv);
+  await waitForJson(`${invalidAclGatewayBase}/api/knowledge/healthz`, ({ response, body }) => response.status === 200 && body.service === "cas-knowledge-engine");
+  const invalidAclRag = await fetchJson(`${invalidAclGatewayBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      question: "invalid ACL config must not fail open"
+    })
+  });
+  expect(
+    "knowledge:customer-acl-invalid-config-fails-closed",
+    invalidAclRag.response.status === 503 && invalidAclRag.body.code === "knowledge-customer-policy-invalid",
+    "gateway rejects invalid configured customer ACLs before proxying even when the ACL enforcement flag is false",
+    JSON.stringify(invalidAclRag.body)
   );
   const authHeadersA = { authorization: "Bearer verify-token-a" };
   const authHeadersB = { authorization: "Bearer verify-token-b" };

@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 
 const project = "cywell-ai-sentinel";
 const contextDir = resolve("test-results/cas-build-context");
+const sourceCheckedAt = new Date().toISOString();
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -38,6 +39,27 @@ function tryRun(command, args, options = {}) {
     stdout: result.stdout?.trim() ?? "",
     stderr: result.stderr?.trim() ?? result.error?.message ?? ""
   };
+}
+
+function git(args) {
+  return run("git", args, { timeoutMs: 30000 });
+}
+
+function trackedTreeStatus() {
+  const result = tryRun("git", ["status", "--porcelain", "--untracked-files=no"], { timeoutMs: 30000 });
+  if (!result.ok) return "unknown";
+  return result.stdout ? "dirty" : "clean";
+}
+
+const sourceGit = {
+  branch: git(["branch", "--show-current"]),
+  head: git(["rev-parse", "HEAD"]),
+  shortHead: git(["rev-parse", "--short", "HEAD"]),
+  treeStatus: trackedTreeStatus()
+};
+
+if (sourceGit.treeStatus !== "clean" && String(process.env.CAS_ALLOW_DIRTY_CRC_DEPLOY ?? "").toLowerCase() !== "true") {
+  throw new Error("Refusing CRC deploy from a dirty tracked git tree; commit/stash tracked changes or set CAS_ALLOW_DIRTY_CRC_DEPLOY=true intentionally");
 }
 
 function sleep(ms) {
@@ -76,6 +98,32 @@ function startBinaryBuild(buildName) {
   console.log(`Following OpenShift build: ${build}`);
   run("oc", ["logs", "-n", project, `build/${build}`, "-f"], { stdio: "inherit", timeoutMs: 1800000 });
   waitForBuildComplete(build);
+}
+
+function annotateDeploymentSource(name) {
+  const annotations = {
+    "cywell.io/source-branch": sourceGit.branch,
+    "cywell.io/source-head": sourceGit.head,
+    "cywell.io/source-short-head": sourceGit.shortHead,
+    "cywell.io/source-tree-status": sourceGit.treeStatus,
+    "cywell.io/source-checked-at": sourceCheckedAt
+  };
+  run(
+    "oc",
+    [
+      "patch",
+      `deploy/${name}`,
+      "-n",
+      project,
+      "--type=merge",
+      "-p",
+      JSON.stringify({
+        metadata: { annotations },
+        spec: { template: { metadata: { annotations } } }
+      })
+    ],
+    { stdio: "inherit" }
+  );
 }
 
 async function copyBuildContext() {
@@ -257,6 +305,9 @@ run(
 );
 
 console.log("Restarting CAS deployments to pull the latest dev tags");
+for (const deployment of ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine"]) {
+  annotateDeploymentSource(deployment);
+}
 run("oc", ["rollout", "restart", "deploy/cas-gateway", "-n", project], { stdio: "inherit" });
 run("oc", ["rollout", "restart", "deploy/cas-console-plugin", "-n", project], { stdio: "inherit" });
 run("oc", ["rollout", "restart", "deploy/cas-knowledge-engine", "-n", project], { stdio: "inherit" });

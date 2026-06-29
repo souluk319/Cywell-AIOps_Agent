@@ -32,6 +32,7 @@ const files = [
   "scripts/verify-crc-deployment.mjs",
   "scripts/verify-pbs-live-smoke.mjs",
   "scripts/verify-pbs-preflight.mjs",
+  "scripts/render-pbs-live-prereqs.mjs",
   "apps/gateway/src/server.mjs",
   "apps/knowledge-engine/src/cas_knowledge_engine/engine.py",
   "apps/knowledge-engine/src/cas_knowledge_engine/pbs_client.py",
@@ -704,12 +705,17 @@ for (const file of files) {
         "gateway:customer-access-acl",
         text.includes("CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON") &&
           text.includes("CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS") &&
+          text.includes("validateCustomerAccessPolicy") &&
+          text.includes("knowledge-customer-policy-invalid") &&
+          text.includes("knowledge-customer-required") &&
+          text.includes("system:authenticated") &&
+          text.includes("customer access policy must not use default grants") &&
           text.includes("knowledge-customer-forbidden") &&
           text.includes("knowledge-customer-mismatch") &&
           text.includes("source_metadata") &&
           text.includes("customerAccessAllowed"),
-        "gateway enforces configured customer workspace ACL before proxying private knowledge requests",
-        "gateway must enforce configured customer workspace ACL before proxying private knowledge requests"
+        "gateway enforces strict configured customer workspace ACL before proxying private knowledge requests",
+        "gateway must enforce configured customer workspace ACL, reject invalid policies, require explicit customer_id, and block broad principals before proxying private knowledge requests"
       );
     }
     if (file.includes("cas_knowledge_engine/storage.py")) {
@@ -1074,6 +1080,16 @@ for (const file of files) {
           text.includes("deploy/kustomize/overlays/crc/gateway-crc-api-egress.yaml"),
         "CRC deploy script applies CRC-only Lightspeed ingress and Kubernetes API egress policies outside base"
       );
+      expect(
+        "crc-deploy:source-annotations",
+        text.includes("cywell.io/source-head") &&
+          text.includes("cywell.io/source-tree-status") &&
+          text.includes("CAS_ALLOW_DIRTY_CRC_DEPLOY") &&
+          text.includes("annotateDeploymentSource") &&
+          text.includes("git([\"rev-parse\", \"HEAD\"])"),
+        "CRC deploy script stamps workload pod templates with current clean git source annotations",
+        "CRC deploy script must stamp workload pod templates with git source annotations and refuse dirty tracked trees by default"
+      );
     }
     if (file === "package.json") {
       if (
@@ -1099,6 +1115,17 @@ for (const file of files) {
         pass("package:pbs-preflight-script", "package.json exposes verify:pbs:preflight");
       } else {
         fail("package:pbs-preflight-script", "package.json must expose verify:pbs:preflight");
+      }
+      if (
+        text.includes('"render:pbs:live-prereqs"') &&
+        text.includes("render-pbs-live-prereqs.mjs") &&
+        text.includes('"verify:pbs:live-prereqs"') &&
+        text.includes("--self-test") &&
+        text.includes("verify:pbs:live-prereqs && npm run verify:deploy:manifests")
+      ) {
+        pass("package:pbs-live-prereqs-renderer", "package.json exposes PBS live prerequisite renderer and includes its self-test in verify");
+      } else {
+        fail("package:pbs-live-prereqs-renderer", "package.json must expose render/verify scripts for PBS live prerequisites and include the self-test in verify");
       }
       if (text.includes('"verify:pbs:preflight:shadow"') && text.includes("--overlay=pbs-shadow")) {
         pass("package:pbs-preflight-shadow-script", "package.json exposes explicit PBS shadow preflight");
@@ -1132,27 +1159,82 @@ for (const file of files) {
       }
       if (
         text.includes('"verify:pbs:cutover:cluster"') &&
-        text.includes("verify:pbs:preflight:live") &&
+        text.includes("verify:pbs:preflight:live:site") &&
         text.includes("--cutover --cluster")
       ) {
         pass("package:pbs-cutover-cluster-script", "package.json exposes in-cluster PBS cutover smoke");
       } else {
-        fail("package:pbs-cutover-cluster-script", "package.json must run strict preflight before in-cluster PBS cutover smoke");
+        fail("package:pbs-cutover-cluster-script", "package.json must run strict generated-site preflight before in-cluster PBS cutover smoke");
       }
       if (
         text.includes('"verify:release:pbs-live"') &&
-        text.includes("verify:pbs:preflight:live") &&
+        text.includes("verify:pbs:preflight:live:site") &&
         text.includes("--cutover --cluster")
       ) {
         pass("package:pbs-live-release-script", "package.json exposes non-skipping PBS live release gate");
       } else {
-        fail("package:pbs-live-release-script", "package.json must expose non-skipping PBS live release gate");
+        fail("package:pbs-live-release-script", "package.json must expose non-skipping PBS live release gate through the generated live site overlay");
+      }
+      if (
+        text.includes('"verify:pbs:preflight:live:site:preapply"') &&
+        text.includes("--overlay-path=test-results/pbs-live-prereqs/pbs-live-site") &&
+        text.includes('"verify:pbs:preflight:live:site"')
+      ) {
+        pass("package:pbs-live-site-preflight-script", "package.json exposes strict PBS live preflight against generated site overlay");
+      } else {
+        fail("package:pbs-live-site-preflight-script", "package.json must expose strict PBS live preflight scripts for the generated site overlay");
       }
       if (text.includes('"release:crc:v0.1.4"') && text.includes("promote-crc-release-images.mjs")) {
         pass("package:release-crc-script", "package.json exposes CRC release image promotion");
       } else {
         fail("package:release-crc-script", "package.json must expose CRC release image promotion");
       }
+    }
+    if (file.includes("render-pbs-live-prereqs")) {
+      expect(
+        "pbs-live-prereqs:outputs",
+        text.includes("cas-pbs-auth.secret.yaml") &&
+          text.includes("cas-knowledge-postgres-live.secret.yaml") &&
+          text.includes("cas-knowledge-live-config.configmap.yaml") &&
+          text.includes("pbs-live-site") &&
+          text.includes("behavior: replace"),
+        "PBS live prerequisite renderer writes reviewed Secret manifests and a pbs-live site overlay with ConfigMap replacement",
+        "PBS live prerequisite renderer must render cas-pbs-auth, cas-knowledge-postgres-live, cas-knowledge-live-config, and generated pbs-live-site manifests"
+      );
+      expect(
+        "pbs-live-prereqs:validation-contract",
+        text.includes("tokenLooksUsable") &&
+          text.includes("customerAccessPolicyIsConcrete") &&
+          text.includes("databaseUrlMatchesSecret") &&
+          text.includes("containsWildcard") &&
+          text.includes("broadPrincipal") &&
+          text.includes("Object.hasOwn(policy ?? {}, \"default\")") &&
+          text.includes("CAS_KNOWLEDGE_POSTGRES_DATABASE_URL must target cas-knowledge-postgres Service DNS"),
+        "PBS live prerequisite renderer rejects weak tokens, wildcard/default/broad-principal ACLs, and mismatched Postgres URLs",
+        "PBS live prerequisite renderer must validate token shape, concrete customer ACL, broad principals, and matching service-scoped Postgres URL"
+      );
+      expect(
+        "pbs-live-prereqs:redacted-evidence",
+        text.includes("redactedSummary") &&
+          text.includes("sha256(inputs.token)") &&
+          text.includes("passwordSha256") &&
+          text.includes("cas-pbs-live-prereqs-render.json") &&
+          text.includes("runGit([\"rev-parse\", \"--short\", \"HEAD\"])"),
+        "PBS live prerequisite renderer records redacted evidence with git head",
+        "PBS live prerequisite renderer must write redacted evidence with git head and no raw Secret material"
+      );
+      expect(
+        "pbs-live-prereqs:self-test",
+        text.includes("--self-test") &&
+          text.includes("site-overlay-render") &&
+          text.includes("wildcard-acl-rejected") &&
+          text.includes("string-wildcard-acl-rejected") &&
+          text.includes("broad-group-acl-rejected") &&
+          text.includes("db-url-mismatch-rejected") &&
+          text.includes("redacted-summary"),
+        "PBS live prerequisite renderer has self-tests for rendering, redaction, ACL rejection, and DB URL mismatch",
+        "PBS live prerequisite renderer must self-test render/redaction/ACL/DB URL validation"
+      );
     }
     if (file.includes("promote-crc-release-images")) {
       expect(
@@ -1184,7 +1266,13 @@ for (const file of files) {
           text.includes("cas-crc-deployment.json") &&
           text.includes("CAS_RELEASE_ALLOW_STALE_EVIDENCE") &&
           text.includes("CAS_RELEASE_EVIDENCE_MAX_AGE_HOURS") &&
+          text.includes("currentGitFullHead") &&
+          text.includes("currentClusterIdentity") &&
+          text.includes("clusterIdentityMatches") &&
           text.includes("sourceEvidenceHead") &&
+          text.includes("sourceEvidenceFullHead") &&
+          text.includes("sourceEvidenceTreeStatus") &&
+          text.includes("sourceClusterIdentity") &&
           text.includes("sourceEvidenceCheckedAt") &&
           text.includes("staleEvidenceAllowed") &&
           text.includes("verifiedImages") &&
@@ -1196,7 +1284,7 @@ for (const file of files) {
           text.includes("normalizedExpected") &&
           text.includes("actualDigest === normalizedExpected") &&
           text.includes("differs from verified CRC deployment digest"),
-        "CRC release promotion refuses stale evidence, unverified app sources, or release evidence that is not tied to verified CRC deployment digests"
+        "CRC release promotion refuses stale evidence, dirty-source evidence, unverified app sources, or release evidence that is not tied to verified CRC deployment digests"
       );
     }
     if (file.includes("verify-crc-deployment")) {
@@ -1209,6 +1297,18 @@ for (const file of files) {
           text.includes("dockerImageReference") &&
           text.includes("imageID"),
         "CRC deployment verifier records digest evidence for app ImageStreamTags and running Postgres imageID"
+      );
+      expect(
+        "crc-deployment:source-annotation-evidence",
+        text.includes("runtime:source-annotation:${image.imageStream}") &&
+          text.includes("sourceAnnotationsMatch") &&
+          text.includes("cywell.io/source-head") &&
+          text.includes("cywell.io/source-tree-status") &&
+          text.includes("fullHead") &&
+          text.includes("treeStatus") &&
+          text.includes("clusterIdentity"),
+        "CRC deployment verifier requires ready pods and Deployment templates to match current clean git source annotations and records cluster identity",
+        "CRC deployment verifier must bind evidence to current clean git source annotations and cluster identity"
       );
     }
     if (file.includes("verify-pbs-live-smoke")) {
@@ -1273,6 +1373,10 @@ for (const file of files) {
         text.includes("CAS_PBS_REQUIRE_CORPUS_READY") &&
         text.includes("cas-knowledge-postgres-live") &&
         text.includes("validOverlays") &&
+        text.includes("overlayPathArg") &&
+        text.includes("CAS_PBS_PREFLIGHT_OVERLAY_PATH") &&
+        text.includes("currentClusterIdentity") &&
+        text.includes("cluster:release-images-evidence-cluster-identity") &&
         text.includes("evidenceSuffix") &&
         text.includes("service-token-transport") &&
         text.includes("appliedPbsEgressScoped") &&
@@ -1293,10 +1397,10 @@ for (const file of files) {
         text.includes("cluster:applied-pbs-config-values") &&
         text.includes("cluster:applied-live-customer-acl") &&
         text.includes("preflight:live-customer-acl-concrete") &&
-        text.includes("policy?.default") &&
-        text.includes("policy?.owners") &&
-        text.includes("defaultEntries.length === 0") &&
-        text.includes('!clean.includes("*")') &&
+        text.includes('Object.hasOwn(policy, "default")') &&
+        text.includes("system:authenticated") &&
+        text.includes("!Array.isArray(customers)") &&
+        text.includes("placeholder(clean)") &&
         text.includes("sourceEvidenceHead") &&
         text.includes("staleEvidenceAllowed") &&
         text.includes("non-stale-source") &&
