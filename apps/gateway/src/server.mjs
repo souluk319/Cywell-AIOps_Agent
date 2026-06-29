@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -23,6 +24,7 @@ const knowledgeConfig = getKnowledgeConfig();
 const ownerIdentityConfig = getOwnerIdentityConfig();
 const ownerIdentityCache = new Map();
 const maxRequestBytes = Number(process.env.CAS_MAX_REQUEST_BYTES ?? 25 * 1024 * 1024);
+const ownerHmacSecret = String(process.env.CAS_KNOWLEDGE_OWNER_HMAC_SECRET ?? "").trim();
 
 function loadTlsOptions() {
   if (!tlsCertFile || !tlsKeyFile) return undefined;
@@ -84,6 +86,15 @@ function routeMissing(response) {
 
 function publicKnowledgeRoute(pathname) {
   return pathname === "/api/knowledge/healthz" || pathname === "/api/knowledge/capabilities";
+}
+
+function signedOwnerHeaders(scopedOwner) {
+  if (!scopedOwner) return {};
+  const headers = { "x-forwarded-user": scopedOwner };
+  if (ownerHmacSecret) {
+    headers["x-cas-owner-signature"] = createHmac("sha256", ownerHmacSecret).update(scopedOwner).digest("hex");
+  }
+  return headers;
 }
 
 async function resolveOwnerForKnowledge(request) {
@@ -202,7 +213,7 @@ async function proxyKnowledgeRequest(request, response, url) {
     }
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await readBody(request);
     const scopedOwner = ownerResult.owner ?? "";
-    const ownerHeaders = scopedOwner ? { "x-forwarded-user": scopedOwner } : {};
+    const ownerHeaders = signedOwnerHeaders(scopedOwner);
     const upstream = await fetch(targetUrl, {
       method: request.method,
       headers: {
@@ -247,11 +258,7 @@ const requestHandler = async (request, response) => {
       sendJson(response, 200, {
         status: "ok",
         service: "cas-gateway",
-        product: PRODUCT.officialName,
-        mode: brainConfig.provider === "openshift-lightspeed" ? "lightspeed_read_only" : "mock_read_only",
-        brain_provider: brainConfig.provider,
-        evidence_provider: evidenceConfig.provider,
-        knowledge_owner_identity_mode: ownerIdentityConfig.mode
+        product: PRODUCT.officialName
       });
       return;
     }

@@ -28,22 +28,6 @@ roleRef:
   name: system:openshift:scc:anyuid
 ---
 apiVersion: v1
-kind: Secret
-metadata:
-  name: cas-knowledge-postgres
-  namespace: cywell-ai-sentinel
-  labels:
-    app.kubernetes.io/name: cywell-ai-sentinel
-    app.kubernetes.io/component: knowledge-postgres
-    app.kubernetes.io/part-of: cywell-ai-sentinel
-type: Opaque
-stringData:
-  database: cas_knowledge
-  username: cas_knowledge
-  password: cas_knowledge_dev
-  database-url: postgresql://cas_knowledge:cas_knowledge_dev@cas-knowledge-postgres.cywell-ai-sentinel.svc.cluster.local:5432/cas_knowledge
----
-apiVersion: v1
 kind: Service
 metadata:
   name: cas-knowledge-postgres

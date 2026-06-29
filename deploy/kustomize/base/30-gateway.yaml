@@ -59,6 +59,11 @@ spec:
               value: http://cas-knowledge-engine.cywell-ai-sentinel.svc.cluster.local:8080
             - name: CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS
               value: "30000"
+            - name: CAS_KNOWLEDGE_OWNER_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cas-knowledge-internal-auth
+                  key: owner-hmac-secret
             - name: CAS_MAX_REQUEST_BYTES
               value: "26214400"
           ports:

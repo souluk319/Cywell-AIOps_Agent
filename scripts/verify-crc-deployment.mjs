@@ -435,6 +435,10 @@ const gatewayEnv = deploymentByName.get("cas-gateway")?.spec?.template?.spec?.co
 const gatewayEnvByName = new Map(gatewayEnv.map((item) => [item.name, item.value]));
 const knowledgeEnv = deploymentByName.get("cas-knowledge-engine")?.spec?.template?.spec?.containers?.[0]?.env ?? [];
 const knowledgeEnvByName = new Map(knowledgeEnv.map((item) => [item.name, item.value ?? item.valueFrom?.secretKeyRef?.name]));
+const envSecretRef = (env, name, secretName, key) => {
+  const item = env.find((entry) => entry.name === name);
+  return item?.valueFrom?.secretKeyRef?.name === secretName && item?.valueFrom?.secretKeyRef?.key === key;
+};
 expect(
   "runtime:gateway-brain-env",
   gatewayEnvByName.get("CAS_BRAIN_PROVIDER") === "openshift-lightspeed" &&
@@ -460,6 +464,12 @@ expect(
   gatewayEnvByName.get("CAS_KNOWLEDGE_ENGINE_URL")?.includes("cas-knowledge-engine"),
   "cas-gateway is configured to proxy CAS knowledge engine",
   "cas-gateway knowledge engine env is missing"
+);
+expect(
+  "runtime:gateway-owner-hmac-env",
+  envSecretRef(gatewayEnv, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "cas-knowledge-internal-auth", "owner-hmac-secret"),
+  "cas-gateway signs owner headers with the internal auth Secret",
+  "cas-gateway owner HMAC Secret ref is missing"
 );
 expect(
   "runtime:gateway-request-limit-env",
@@ -491,6 +501,12 @@ expect(
   knowledgeEnvByName.get("CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER") === "true",
   "cas-knowledge-engine requires trusted owner header",
   "cas-knowledge-engine trusted owner header requirement is missing"
+);
+expect(
+  "runtime:knowledge-owner-hmac-env",
+  envSecretRef(knowledgeEnv, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "cas-knowledge-internal-auth", "owner-hmac-secret"),
+  "cas-knowledge-engine verifies signed owner headers with the internal auth Secret",
+  "cas-knowledge-engine owner HMAC Secret ref is missing"
 );
 expect(
   "runtime:knowledge-request-limit-env",

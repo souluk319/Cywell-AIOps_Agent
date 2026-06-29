@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -95,6 +95,10 @@ function spawnChild(command, args, env) {
 
 function pbsOwnerHash(owner) {
   return createHash("sha256").update(`header:X-User:${owner}`).digest("hex").slice(0, 32);
+}
+
+function ownerSignature(secret, owner) {
+  return createHmac("sha256", secret).update(owner).digest("hex");
 }
 
 function graphIntegrity(body) {
@@ -448,6 +452,7 @@ const degradedLiveBase = `http://127.0.0.1:${degradedLivePort}`;
 const staleIndexLiveBase = `http://127.0.0.1:${staleIndexLivePort}`;
 
 const dataDir = await mkdtemp(resolve(tmpdir(), "cas-knowledge-"));
+const ownerHmacSecret = "verify-owner-hmac-secret";
 let fakeIdentity;
 let boundaryEngine;
 try {
@@ -460,7 +465,8 @@ try {
     CAS_KNOWLEDGE_PROVIDER: "pbs-compatible-local",
     CAS_KNOWLEDGE_OWNER_MODE: "trusted-header",
     CAS_KNOWLEDGE_SINGLE_OWNER: "verify-single-owner",
-    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true"
+    CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER: "true",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
   };
   spawnChild(python.command, [...python.argsPrefix, "-m", "cas_knowledge_engine.app"], engineEnv);
   const engineHealth = await waitForJson(`${engineBase}/api/knowledge/healthz`, ({ response, body }) => {
@@ -475,9 +481,14 @@ try {
   expect("knowledge:http-health", engineHealth.body.service === "cas-knowledge-engine", "knowledge engine HTTP health works");
   expect(
     "knowledge:engine-cors-owner-header-contract",
-    engineHealth.response.headers.get("access-control-allow-headers") === "authorization,content-type,x-forwarded-user",
+    engineHealth.response.headers.get("access-control-allow-headers") === "authorization,content-type,x-forwarded-user,x-cas-owner-signature",
     "knowledge engine CORS only advertises the gateway-derived owner header"
   );
+  const directUnsignedOwner = await fetchJson(`${engineBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: { "x-forwarded-user": "unsigned-owner" },
+    body: JSON.stringify({ customer_id: "verify", question: "unsigned owner" })
+  });
   const directRemoteOwner = await fetchJson(`${engineBase}/api/knowledge/rag/query`, {
     method: "POST",
     headers: { "x-remote-user": "legacy-remote-owner" },
@@ -490,12 +501,14 @@ try {
   });
   expect(
     "knowledge:engine-legacy-owner-headers-rejected",
-    directRemoteOwner.response.status === 403 &&
+    directUnsignedOwner.response.status === 403 &&
+      directUnsignedOwner.body.code === "owner-required" &&
+      directRemoteOwner.response.status === 403 &&
       directRemoteOwner.body.code === "owner-required" &&
       directOpenShiftOwner.response.status === 403 &&
       directOpenShiftOwner.body.code === "owner-required",
-    "knowledge engine only trusts x-forwarded-user in trusted-header mode",
-    JSON.stringify({ remote: directRemoteOwner.body, openshift: directOpenShiftOwner.body })
+    "knowledge engine only trusts signed x-forwarded-user in trusted-header mode",
+    JSON.stringify({ unsigned: directUnsignedOwner.body, remote: directRemoteOwner.body, openshift: directOpenShiftOwner.body })
   );
 
   const gatewayEnv = {
@@ -506,7 +519,8 @@ try {
     CAS_EVIDENCE_PROVIDER: "none",
     CAS_KNOWLEDGE_OWNER_IDENTITY_MODE: "token-hash",
     CAS_KNOWLEDGE_ENGINE_URL: engineBase,
-    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000"
+    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
   };
   spawnChild("node", ["apps/gateway/src/server.mjs"], gatewayEnv);
   const ownerHeaders = { authorization: "Bearer verify-owner-a" };
@@ -775,7 +789,8 @@ try {
     CAS_KNOWLEDGE_OWNER_IDENTITY_MODE: "openshift-selfsubjectreview",
     CAS_KNOWLEDGE_OWNER_IDENTITY_CACHE_TTL_MS: "0",
     CAS_KNOWLEDGE_ENGINE_URL: engineBase,
-    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000"
+    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
   };
   spawnChild("node", ["apps/gateway/src/server.mjs"], verifiedGatewayEnv);
   const verifiedGatewayHealth = await waitForJson(`${verifiedGatewayBase}/api/knowledge/healthz`, ({ response, body }) => {
@@ -866,7 +881,8 @@ try {
     CAS_EVIDENCE_PROVIDER: "none",
     CAS_KNOWLEDGE_OWNER_IDENTITY_MODE: "token-hash",
     CAS_KNOWLEDGE_ENGINE_URL: boundaryEngine.url,
-    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000"
+    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
   };
   spawnChild("node", ["apps/gateway/src/server.mjs"], boundaryGatewayEnv);
   const boundaryHealth = await waitForJson(`${boundaryGatewayBase}/api/knowledge/healthz`, ({ response, body }) => {
@@ -897,7 +913,19 @@ try {
     CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "500"
   };
   spawnChild("node", ["apps/gateway/src/server.mjs"], publicFailureGatewayEnv);
-  await waitForJson(`${publicFailureGatewayBase}/healthz`, ({ response, body }) => response.status === 200 && body.service === "cas-gateway");
+  const publicGatewayHealth = await waitForJson(
+    `${publicFailureGatewayBase}/healthz`,
+    ({ response, body }) => response.status === 200 && body.service === "cas-gateway"
+  );
+  expect(
+    "knowledge:gateway-public-healthz-sanitized",
+    publicGatewayHealth.body.brain_provider === undefined &&
+      publicGatewayHealth.body.evidence_provider === undefined &&
+      publicGatewayHealth.body.knowledge_owner_identity_mode === undefined &&
+      publicGatewayHealth.body.mode === undefined,
+    "gateway public healthz omits provider and owner identity internals",
+    JSON.stringify(publicGatewayHealth.body)
+  );
   const publicCapabilitiesFailure = await fetchJson(`${publicFailureGatewayBase}/api/knowledge/capabilities`);
   expect(
     "knowledge:gateway-public-capabilities-error-sanitized",
@@ -929,8 +957,9 @@ try {
       boundaryPrivateRecord?.headers?.authorization === undefined &&
       boundaryPrivateRecord?.headers?.["x-remote-user"] === undefined &&
       boundaryPrivateRecord?.headers?.["x-openshift-user"] === undefined &&
-      boundaryPrivateRecord?.headers?.["x-forwarded-user"] === expectedBoundaryOwner,
-    "gateway strips user bearer/spoofed owner headers before the internal Knowledge Engine hop and injects only its derived owner",
+      boundaryPrivateRecord?.headers?.["x-forwarded-user"] === expectedBoundaryOwner &&
+      boundaryPrivateRecord?.headers?.["x-cas-owner-signature"] === ownerSignature(ownerHmacSecret, expectedBoundaryOwner),
+    "gateway strips user bearer/spoofed owner headers before the internal Knowledge Engine hop and injects only its signed derived owner",
     JSON.stringify(boundaryPrivateRecord?.headers ?? {})
   );
 
@@ -968,7 +997,8 @@ try {
     CAS_KNOWLEDGE_OWNER_IDENTITY_TIMEOUT_MS: "500",
     CAS_KNOWLEDGE_OWNER_IDENTITY_CACHE_TTL_MS: "0",
     CAS_KNOWLEDGE_ENGINE_URL: boundaryEngine.url,
-    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000"
+    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000",
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: ownerHmacSecret
   };
   spawnChild("node", ["apps/gateway/src/server.mjs"], verifierFailureGatewayEnv);
   await waitForJson(`${verifierFailureGatewayBase}/api/knowledge/healthz`, ({ response, body }) => {

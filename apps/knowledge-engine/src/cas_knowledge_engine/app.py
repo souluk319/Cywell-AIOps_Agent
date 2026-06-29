@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,8 +32,17 @@ def resolve_owner_id(headers: Any) -> str | None:
     if owner_mode != "trusted-header":
         return None
     value = headers.get("x-forwarded-user")
-    if value:
-        return str(value).strip()
+    if not value:
+        return None
+    owner_id = str(value).strip()
+    secret = os.environ.get("CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "").strip()
+    if secret:
+        signature = str(headers.get("x-cas-owner-signature") or "").strip()
+        expected = hmac.new(secret.encode("utf-8"), owner_id.encode("utf-8"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return None
+    if owner_id:
+        return owner_id
     return None
 
 
@@ -60,7 +71,7 @@ class KnowledgeRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "authorization,content-type,x-forwarded-user")
+        self.send_header("Access-Control-Allow-Headers", "authorization,content-type,x-forwarded-user,x-cas-owner-signature")
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))

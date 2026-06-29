@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { cp, mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -90,7 +91,7 @@ async function copyBuildContext() {
 
   const filter = (source) => {
     const normalized = source.replace(/\\/g, "/");
-    return !normalized.includes("/dist") && !normalized.includes("/node_modules");
+    return !normalized.includes("/dist") && !normalized.includes("/node_modules") && !normalized.includes("/__pycache__") && !normalized.endsWith(".pyc");
   };
 
   await cp(resolve("apps/gateway"), resolve(contextDir, "apps/gateway"), { recursive: true, filter });
@@ -138,11 +139,64 @@ function ensureCasReplacesLightspeed() {
   console.log(`Console plugins: ${plugins.join(",")}`);
 }
 
+function ensureDevPostgresSecret() {
+  const existing = tryRun("oc", ["get", "secret", "cas-knowledge-postgres", "-n", project, "-o", "name"], { timeoutMs: 30000 });
+  if (existing.ok && existing.stdout) {
+    console.log("CAS dev Postgres Secret already exists; preserving current local CRC credentials");
+    return;
+  }
+  const database = "cas_knowledge";
+  const username = "cas_knowledge";
+  const password = randomBytes(24).toString("hex");
+  const databaseUrl = `postgresql://${username}:${password}@cas-knowledge-postgres.cywell-ai-sentinel.svc.cluster.local:5432/${database}`;
+  console.log("Creating local CRC-only CAS dev Postgres Secret");
+  run(
+    "oc",
+    [
+      "create",
+      "secret",
+      "generic",
+      "cas-knowledge-postgres",
+      "-n",
+      project,
+      `--from-literal=database=${database}`,
+      `--from-literal=username=${username}`,
+      `--from-literal=password=${password}`,
+      `--from-literal=database-url=${databaseUrl}`
+    ],
+    { stdio: "inherit" }
+  );
+}
+
+function ensureInternalAuthSecret() {
+  const existing = tryRun("oc", ["get", "secret", "cas-knowledge-internal-auth", "-n", project, "-o", "name"], { timeoutMs: 30000 });
+  if (existing.ok && existing.stdout) {
+    console.log("CAS internal owner-auth Secret already exists; preserving current local CRC signing key");
+    return;
+  }
+  console.log("Creating local CRC-only CAS internal owner-auth Secret");
+  run(
+    "oc",
+    [
+      "create",
+      "secret",
+      "generic",
+      "cas-knowledge-internal-auth",
+      "-n",
+      project,
+      `--from-literal=owner-hmac-secret=${randomBytes(32).toString("hex")}`
+    ],
+    { stdio: "inherit" }
+  );
+}
+
 console.log("Preparing minimal CAS build context");
 await copyBuildContext();
 
 console.log("Ensuring CAS namespace exists before CRC binary builds");
 run("oc", ["apply", "-f", "deploy/kustomize/base/00-namespace.yaml"], { stdio: "inherit" });
+ensureDevPostgresSecret();
+ensureInternalAuthSecret();
 
 console.log("Applying CRC BuildConfigs");
 run("oc", ["apply", "-f", "deploy/kustomize/overlays/crc/buildconfigs.yaml"], { stdio: "inherit" });

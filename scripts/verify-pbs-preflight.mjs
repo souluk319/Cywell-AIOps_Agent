@@ -103,6 +103,16 @@ function envCount(deployment, envName) {
   return (deployment.match(new RegExp(`^\\s*- name:\\s*${escapeRegExp(envName)}\\s*$`, "gm")) ?? []).length;
 }
 
+function decodeSecretValue(secret, key) {
+  const encoded = secret?.data?.[key];
+  if (!encoded) return "";
+  try {
+    return Buffer.from(String(encoded), "base64").toString("utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
 function envFromConfig(deployment, envName, configName, key) {
   const block = envBlock(deployment, envName);
   return block.includes("configMapKeyRef:") && block.includes(`name: ${configName}`) && block.includes(`key: ${key}`);
@@ -407,9 +417,11 @@ if (authSecret) {
   warn("cluster:pbs-auth-secret-optional", "cas-pbs-auth Secret is absent in the current cluster; live cutover must create it or run preflight with --require-secret");
 }
 if (overlay === "pbs-live") {
+  let liveDatabaseUrl = "";
   const liveDbSecret = getJson("cluster:knowledge-postgres-live-secret", ["get", "secret", "-n", namespace, "cas-knowledge-postgres-live"]);
   if (liveDbSecret) {
     const missingKeys = ["database", "username", "password", "database-url"].filter((key) => !liveDbSecret.data?.[key]);
+    liveDatabaseUrl = decodeSecretValue(liveDbSecret, "database-url");
     expect(
       "cluster:knowledge-postgres-live-secret-keys",
       missingKeys.length === 0,
@@ -532,6 +544,37 @@ if (overlay === "pbs-live") {
           "applied knowledge Postgres accepts live credentials and has CAS pgvector schema ready",
           dbProbe.stderr || dbProbe.stdout
         );
+        if (liveDatabaseUrl) {
+          const dbUrlProbe = run(
+            "oc",
+            [
+              "exec",
+              "-n",
+              namespace,
+              readyPostgresPod.metadata.name,
+              "--",
+              "env",
+              `DATABASE_URL=${liveDatabaseUrl}`,
+              "sh",
+              "-ec",
+              [
+                "psql -v ON_ERROR_STOP=1 \"$DATABASE_URL\" -tAc \"",
+                "SELECT 'engine_url_identity=' || CASE WHEN current_database() <> '' AND current_user <> '' THEN 't' ELSE 'f' END; ",
+                "SELECT 'engine_url_vector_ext=' || CASE WHEN EXISTS (SELECT 1 FROM pg_extension WHERE extname='vector') THEN 't' ELSE 'f' END;",
+                "\""
+              ].join(" ")
+            ],
+            { timeoutMs: 30000 }
+          );
+          expect(
+            "cluster:applied-engine-database-url-tcp",
+            dbUrlProbe.ok &&
+              dbUrlProbe.stdout.includes("engine_url_identity=t") &&
+              dbUrlProbe.stdout.includes("engine_url_vector_ext=t"),
+            "Knowledge Engine live DATABASE_URL reaches Postgres over TCP with live credentials",
+            dbUrlProbe.stderr || dbUrlProbe.stdout
+          );
+        }
       } else {
         fail("cluster:applied-postgres-runtime", "no Ready knowledge Postgres pod found for live database runtime probe");
       }

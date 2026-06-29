@@ -29,7 +29,7 @@ deliverables/active/v0.1.4/phase-3-6-runtime-and-topology-execution-log.md
 deliverables/active/v0.1.4/verification-summary-2026-06-29.md
 ```
 
-공통 챗봇 UX 기준:
+공통 챗봇 UX 기준은 로컬 foundation 자료가 있는 경우에만 참고한다. 현재 브랜치에서 추적되는 릴리스 산출물은 위 v0.1.4 문서와 이 인덱스다.
 
 ```text
 deliverables/active/foundation/CHAT_UI_BASELINE.md

@@ -4,15 +4,37 @@
 
 This summary captures the current v0.1.4 branch verification state for the Cywell PBS/customer-data/RAG/LLM Wiki/topology integration.
 
-## Passing Gates
+## Passing Verification Gates
 
 | Command | Result | Notes |
 | --- | --- | --- |
 | `npm run verify` | PASS | Full local gate including contracts, gateway, knowledge engine, brain, OpenShift evidence, console build, browser topology DOM, console integration, CRC connection preview, and manifest verification |
-| `npm run verify:knowledge-engine` | PASS, 61 checks | Includes Gateway owner verification, internal bearer/header stripping, public capabilities error sanitization, PBS shadow/live adapter contracts, topology provenance |
+| `npm run verify:knowledge-engine` | PASS, 62 checks | Includes Gateway owner verification, internal bearer/header stripping, public health/capabilities sanitization, PBS shadow/live adapter contracts, topology provenance |
 | `npm run verify:console:topology-dom` | PASS, 19 checks | Browser-required smoke with 1024px and 390px overflow/overlap checks and dense 28-node fixture |
 | `npm run verify:console:integration` | PASS, 63 checks | Includes static app `innerHTML` rejection and built plugin route/bundle checks |
-| `npm run deploy:crc` | PASS | Rebuilt and deployed `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev` to CRC |
+| `npm run verify:deploy:manifests` | PASS, 204 checks | Includes base/shadow/live render checks, HMAC Secret refs, no tracked dev DB Secret, and direct console script build prerequisites |
+
+Current hardening additions after the initial summary:
+
+- Tracked base manifests no longer contain a literal dev Postgres password or database URL.
+- `deploy:crc` creates local-only random dev Postgres and internal owner-HMAC Secrets when missing.
+- Gateway signs derived owner headers; Knowledge Engine rejects unsigned owner headers when HMAC is configured.
+- Public Gateway `/healthz` and `/api/aiops/healthz` omit provider and owner identity internals.
+- PBS live preflight checks the live `DATABASE_URL` over TCP through the Postgres service.
+
+Clean checkout reproduction:
+
+```text
+C:\Users\soulu\AppData\Local\Temp\cywell-v014-clean-20260629100550
+npm ci: PASS
+npm run verify: PASS
+```
+
+## Last-Known CRC Deployment Evidence
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `npm run deploy:crc` | PASS | Mutating deploy action; rebuilt and deployed `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev` to CRC, created/preserved local Secrets, and reran CRC deployment verification |
 
 Local JSON evidence was written under ignored `test-results/`:
 
@@ -31,8 +53,15 @@ test-results/cas-pbs-preflight.json
 | `npm run verify:pbs:cutover` | FAIL expected | `CAS_PBS_BASE_URL` is not configured in the local shell |
 | `npm run verify:pbs:cutover:cluster` | FAIL expected | Current CRC has no `playbookstudio` namespace/service, no `cas-pbs-auth`, no `cas-knowledge-postgres-live`, still runs base `:dev` images/provider, has legacy `cas-knowledge-postgres` dev Secret, and has not applied `cas-knowledge-engine-pbs-egress` |
 
+Diagnostic non-ready states:
+
+| Command | Result | Meaning |
+| --- | --- | --- |
+| `npm run verify:pbs:preflight` | exit 0 with WARNs possible | Render/config diagnostics only unless strict flags and live prerequisites are present |
+| `npm run verify:pbs:live` | exit 0 SKIP possible | Skips when `CAS_PBS_BASE_URL` is unset; not release readiness |
+
 ## Release Boundary
 
-CRC v0.1.4 dev deployment is verified. Production PBS live cutover is not complete until the external PBS runtime, live Secrets, release image tags, live overlay, PBS egress policy, and runtime/corpus readiness are present.
+CRC v0.1.4 dev deployment is verified. Production PBS live cutover is not complete until the external PBS runtime, live Secrets, release image tags, live overlay, PBS egress policy, live DB credential rotation/fresh PVC decision, and runtime/corpus readiness are present.
 
 Non-CRC live clusters also need cluster-specific Kubernetes API egress for Gateway SelfSubjectReview/OpenShift evidence. Standard Kubernetes NetworkPolicy cannot allow `kubernetes.default.svc` by Service name.

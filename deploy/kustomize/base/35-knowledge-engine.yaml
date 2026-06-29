@@ -56,6 +56,11 @@ spec:
               value: cas-crc-dev
             - name: CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER
               value: "true"
+            - name: CAS_KNOWLEDGE_OWNER_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cas-knowledge-internal-auth
+                  key: owner-hmac-secret
             - name: CAS_KNOWLEDGE_MAX_REQUEST_BYTES
               value: "26214400"
             - name: DATABASE_URL

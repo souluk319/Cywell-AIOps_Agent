@@ -1,5 +1,29 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
+## Latest Update - Internal Owner Signing, Secret Hygiene, and CRC Redeploy
+
+Implemented after the post-commit parallel audit pass:
+
+- Removed the literal dev Postgres Secret from tracked base manifests.
+- `deploy:crc` now creates local CRC-only `cas-knowledge-postgres` credentials when the Secret is absent and preserves existing local credentials when present.
+- Added `cas-knowledge-internal-auth/owner-hmac-secret` as the shared internal owner-signing Secret for Gateway and Knowledge Engine.
+- Gateway signs its derived owner header with `x-cas-owner-signature`.
+- Knowledge Engine trusted-header mode now rejects unsigned or incorrectly signed `x-forwarded-user` values when `CAS_KNOWLEDGE_OWNER_HMAC_SECRET` is configured.
+- Public Gateway `/healthz` and `/api/aiops/healthz` now omit brain provider, evidence provider, owner identity mode, and runtime mode internals.
+- PBS live preflight now checks the live `DATABASE_URL` Secret over TCP through the Postgres service, not only local pod credentials.
+- Console direct verification scripts now build ignored `dist/` assets automatically when invoked directly; the aggregate verify path uses the built variants after the single console build.
+- CRC build context filtering now excludes Python bytecode and `__pycache__`.
+
+Current proof:
+
+- Clean clone from `v0.1.4` commit `c335977`: `npm ci` PASS and `npm run verify` PASS.
+- Current working tree verification after hardening: `npm run verify` PASS.
+- `npm run verify:knowledge-engine`: PASS, 62 checks.
+- `npm run verify:deploy:manifests`: PASS, 204 checks.
+- `npm run deploy:crc`: PASS, rebuilt and redeployed `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev`; CRC deployment verification passed, including HMAC Secret refs and topology dashboard bundle.
+- `npm run verify:pbs:cutover`: expected FAIL because local `CAS_PBS_BASE_URL` is not configured.
+- `npm run verify:pbs:cutover:cluster`: expected FAIL because the CRC cluster has no `playbookstudio` namespace/service, no `cas-pbs-auth`, no `cas-knowledge-postgres-live`, and still runs the base dev overlay.
+
 ## Implemented
 
 - Added storage boundary for the knowledge engine:
@@ -15,7 +39,7 @@
 - Added PostgreSQL/pgvector runtime:
   - `cas-knowledge-postgres` StatefulSet
   - `pgvector/pgvector:pg16`
-  - `DATABASE_URL` secret wiring
+  - `DATABASE_URL` external Secret wiring
   - knowledge engine `psycopg[binary]`
   - `vector(768)` readiness table
 - Added PBS-compatible ingest contract metadata:
@@ -41,7 +65,7 @@
   - shadow mode uses an optional `cas-pbs-auth/bearer-token` Secret reference
   - live mode uses a required `cas-pbs-auth/bearer-token` Secret reference
   - live mode deletes inherited dev knowledge env before re-adding `cas-knowledge-live-config/service-owner` and `cas-knowledge-postgres-live/database-url`
-  - live mode deletes the generated dev `cas-knowledge-postgres` Secret from rendered manifests
+  - base/live manifests do not render literal dev Postgres Secret material
   - live mode uses `v0.1.4` release image tags instead of mutable `:dev` image tags
   - knowledge-engine egress restricted to DNS, Postgres, and labeled PBS runtime pods on namespace `playbookstudio`, port `8765`
   - live mode requires `CAS_PBS_REQUIRE_RUNTIME_READY=true`, `CAS_PBS_REQUIRE_CORPUS_READY=true`, and `CAS_PBS_REQUIRED_READY_SCOPES=official_docs,study_docs`
@@ -177,7 +201,7 @@ Rejected ponytail simplifications for this scope:
 - Removing the Topology dashboard was rejected because the requested feature needs a usable visual dashboard, not raw JSON output.
 - Collapsing all Cywell knowledge routes into one route was rejected because the user explicitly asked for Cywell menu sub-features.
 
-## Latest Update - Topology/Lineage Hardening
+## Historical Update - Topology/Lineage Hardening
 
 Implemented after the second parallel review pass:
 
@@ -226,7 +250,7 @@ Implemented after the second parallel review pass:
   - `npm run verify:pbs:preflight:live`: expected `FAIL` in current CRC because `playbookstudio`, `cas-pbs-auth`, `cas-knowledge-postgres-live`, live image/env state, and PBS egress policy are not applied
   - `npm run verify:pbs:cutover`: expected `FAIL` until `CAS_PBS_BASE_URL` is configured
 
-## Latest Update - Topology UX, Owner Header, and Public Error Hardening
+## Historical Update - Topology UX, Owner Header, and Public Error Hardening
 
 Implemented after the parallel release/security/frontend review pass:
 
@@ -250,7 +274,7 @@ Implemented after the parallel release/security/frontend review pass:
   - Checks 1024px and 390px viewports for horizontal overflow and node overlap.
   - Checks route/filter/node accessibility state.
 
-Latest verified results:
+Historical verified results at this step:
 
 - `npm run verify`: `PASS`
 - `npm run verify:knowledge-engine`: `PASS`, 61 checks
@@ -264,7 +288,7 @@ Live cutover note:
 
 - Standard Kubernetes NetworkPolicy cannot allow `kubernetes.default.svc` by Service name. Any non-CRC PBS live cluster must provide/verify cluster-specific Kubernetes API egress for Gateway SelfSubjectReview/OpenShift evidence before applying strict live cutover.
 
-## Latest Update - Cutover and Isolation Hardening
+## Historical Update - Cutover and Isolation Hardening
 
 Implemented after the security-focused parallel review pass:
 
@@ -280,7 +304,7 @@ Implemented after the security-focused parallel review pass:
 - Removed broad Gateway egress peers from the base NetworkPolicy and added a base Knowledge Engine egress policy limited to DNS and CAS Postgres.
 - Extended manifest/runtime verifiers to reject broad namespace, pod, and internet egress in Gateway and Knowledge Engine policies.
 
-Latest hardening verification:
+Historical hardening verification at this step:
 
 - `npm run verify:knowledge-engine`: `PASS`, 49 checks
 - `npm run verify:deploy:manifests`: `PASS`, 170 checks
@@ -290,7 +314,7 @@ Latest hardening verification:
 - `npm run verify:pbs:cutover`: expected `FAIL` when `CAS_PBS_BASE_URL` is unset
 - `npm run verify:pbs:cutover:cluster`: expected `FAIL` in the current CRC before mutation because strict live preflight correctly detects that the real `playbookstudio`, `cas-pbs-auth`, `cas-knowledge-postgres-live`, live release image state, and PBS egress policy are not present
 
-## Latest Update - Verified Identity and Gate Hardening
+## Historical Update - Verified Identity and Gate Hardening
 
 Implemented after the follow-up parallel review pass:
 
@@ -313,7 +337,7 @@ Implemented after the follow-up parallel review pass:
   - `verify:crc:deployment` now checks all NetworkPolicies selecting gateway/knowledge-engine pods, not only the named expected policies
   - any stale broad policy selecting those pods fails the runtime gate
 
-Latest verified results:
+Historical verified results at this step:
 
 - `npm run deploy:crc`: `PASS`
 - `npm run verify:crc:deployment`: `PASS`
@@ -342,7 +366,7 @@ It is not yet a production PBS live deployment. The PBS shadow/live deployment o
 - real PBS `/api/uploads/ingest`, `/api/uploads/url-ingest`, `/api/chat`, `/api/wiki-loop/run`, and `/api/wiki-vault` smoke data
 - streaming endpoints if required by the Cywell UI
 
-## Latest Update - Review Closure, Clean CRC Deploy, and Public Health Boundary
+## Historical Update - Review Closure, Clean CRC Deploy, and Public Health Boundary
 
 Implemented after the second parallel review pass:
 
@@ -371,7 +395,7 @@ Implemented after the second parallel review pass:
   - Postgres egress is explicit default deny.
 - Updated package metadata to `0.1.4` and made active v0.1.4 deliverables branch-contained.
 
-Latest verified results:
+Historical verified results at this step:
 
 - `npm run verify:knowledge-engine`: `PASS`, 57 checks
 - `npm run verify:deploy:manifests`: `PASS`, 201 checks

@@ -21,7 +21,6 @@ const files = [
   "deploy/kustomize/overlays/pbs-shadow/pbs-egress-networkpolicy.yaml",
   "deploy/kustomize/overlays/pbs-live/kustomization.yaml",
   "deploy/kustomize/overlays/pbs-live/delete-dev-knowledge-env-patch.yaml",
-  "deploy/kustomize/overlays/pbs-live/delete-dev-postgres-secret.yaml",
   "deploy/kustomize/overlays/pbs-live/knowledge-engine-pbs-live-patch.yaml",
   "deploy/kustomize/overlays/pbs-live/knowledge-postgres-live-secretrefs-patch.yaml",
   "package.json",
@@ -327,11 +326,21 @@ function runRenderedChecks() {
       envValue(baseGatewayDeployment, "CAS_KNOWLEDGE_OWNER_IDENTITY_TIMEOUT_MS") === "3000",
     "base gateway verifies knowledge owners through OpenShift SelfSubjectReview"
   );
+  expect(
+    "render:base:gateway-owner-hmac-secret",
+    envFromRequiredSecret(baseGatewayDeployment, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "cas-knowledge-internal-auth", "owner-hmac-secret"),
+    "base gateway signs owner headers with internal Secret material"
+  );
   expect("render:base:knowledge-deployment", Boolean(baseDeployment), "base renders cas-knowledge-engine Deployment");
   expect(
     "render:base:provider-local",
     envValue(baseDeployment, "CAS_KNOWLEDGE_PROVIDER") === "pbs-compatible-local",
     "base knowledge engine provider remains pbs-compatible-local"
+  );
+  expect(
+    "render:base:knowledge-owner-hmac-secret",
+    envFromRequiredSecret(baseDeployment, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "cas-knowledge-internal-auth", "owner-hmac-secret"),
+    "base knowledge engine verifies signed owner headers with internal Secret material"
   );
   expect(
     "render:base:no-pbs-overlay",
@@ -486,7 +495,7 @@ function runRenderedChecks() {
     "render:pbs-live:no-dev-defaults",
     !/cas-crc-dev|cas_knowledge_dev|postgresql:\/\/cas_knowledge:cas_knowledge_dev/.test(live) &&
       !renderedDoc(live, "Secret", "cas-knowledge-postgres"),
-    "PBS live render contains no CRC owner, dev DB password, or generated dev Postgres Secret"
+    "PBS live render contains no CRC owner, dev DB password, or dev Postgres Secret"
   );
   expect(
     "render:pbs-live:no-dev-images",
@@ -677,12 +686,12 @@ for (const file of files) {
         text.includes("newTag: v0.1.4") &&
         text.includes("cas-knowledge-live-config") &&
         text.includes("delete-dev-knowledge-env-patch.yaml") &&
-        text.includes("delete-dev-postgres-secret.yaml") &&
+        !text.includes("delete-dev-postgres-secret.yaml") &&
         text.includes("knowledge-postgres-live-secretrefs-patch.yaml")
       ) {
         pass("pbs-live:kustomization", "PBS live overlay builds on PBS shadow overlay with release images and live config");
       } else {
-        fail("pbs-live:kustomization", "PBS live overlay must build on PBS shadow overlay and remove dev defaults");
+        fail("pbs-live:kustomization", "PBS live overlay must build on PBS shadow overlay without stale dev Secret delete patches");
       }
     }
     if (file.includes("delete-dev-knowledge-env-patch")) {
@@ -690,13 +699,6 @@ for (const file of files) {
         pass("pbs-live:delete-dev-knowledge-env", "PBS live deletes dev knowledge-engine owner and database env before re-adding live refs");
       } else {
         fail("pbs-live:delete-dev-knowledge-env", "PBS live must delete inherited dev knowledge-engine env");
-      }
-    }
-    if (file.includes("delete-dev-postgres-secret")) {
-      if (text.includes("kind: Secret") && text.includes("name: cas-knowledge-postgres") && text.includes("$patch: delete")) {
-        pass("pbs-live:delete-dev-postgres-secret", "PBS live deletes generated dev Postgres Secret from render");
-      } else {
-        fail("pbs-live:delete-dev-postgres-secret", "PBS live must delete generated dev Postgres Secret");
       }
     }
     if (file.includes("knowledge-engine-pbs-live-patch")) {
@@ -792,12 +794,39 @@ for (const file of files) {
         text.includes("tryRun") && text.includes("No v0.1.3 OLM operator found"),
         "CRC deploy script does not require a pre-existing v0.1.3 operator on clean clusters"
       );
+      expect(
+        "crc-deploy:local-secret-generation",
+        text.includes("cas-knowledge-postgres") &&
+          text.includes("cas-knowledge-internal-auth") &&
+          text.includes("randomBytes") &&
+          text.includes("owner-hmac-secret"),
+        "CRC deploy script creates local-only random Postgres and owner-HMAC Secrets when missing"
+      );
+      expect(
+        "crc-deploy:no-python-bytecode-context",
+        text.includes("__pycache__") && text.includes(".pyc"),
+        "CRC deploy build context excludes generated Python bytecode"
+      );
     }
     if (file === "package.json") {
-      if (text.includes('"verify:console:topology-dom"') && text.includes("verify-console-topology-dom.mjs --require-browser")) {
-        pass("package:topology-dom-required", "package.json requires browser-backed topology DOM verification");
+      if (
+        text.includes('"verify:console:topology-dom"') &&
+        text.includes("verify:console-plugin") &&
+        text.includes('"verify:console:topology-dom:built"') &&
+        text.includes("verify-console-topology-dom.mjs --require-browser")
+      ) {
+        pass("package:topology-dom-required", "package.json requires browser-backed topology DOM verification and builds ignored dist when invoked directly");
       } else {
-        fail("package:topology-dom-required", "package.json must require browser-backed topology DOM verification");
+        fail("package:topology-dom-required", "package.json must require browser-backed topology DOM verification with a direct-script build prerequisite");
+      }
+      if (
+        text.includes('"verify:console:integration"') &&
+        text.includes("verify:console-plugin") &&
+        text.includes('"verify:console:integration:built"')
+      ) {
+        pass("package:console-integration-build-prereq", "package.json builds ignored dist before direct console integration verification");
+      } else {
+        fail("package:console-integration-build-prereq", "package.json must build ignored dist before direct console integration verification");
       }
       if (text.includes('"verify:pbs:preflight"') && text.includes("verify-pbs-preflight.mjs")) {
         pass("package:pbs-preflight-script", "package.json exposes verify:pbs:preflight");
@@ -977,10 +1006,16 @@ for (const file of files) {
       } else {
         fail("knowledge-postgres:pgvector-image", "knowledge Postgres pgvector image missing");
       }
-      if (text.includes("database-url") && text.includes("postgresql://cas_knowledge")) {
-        pass("knowledge-postgres:database-url-secret", "knowledge Postgres DATABASE_URL secret present");
+      if (
+        !renderedDoc(text, "Secret", "cas-knowledge-postgres") &&
+        text.includes("secretKeyRef") &&
+        text.includes("name: cas-knowledge-postgres") &&
+        text.includes("key: password") &&
+        !/cas_knowledge_dev|postgresql:\/\/cas_knowledge:cas_knowledge_dev/.test(text)
+      ) {
+        pass("knowledge-postgres:external-dev-secret-ref", "knowledge Postgres expects an external CRC dev Secret and no literal DB password is tracked");
       } else {
-        fail("knowledge-postgres:database-url-secret", "knowledge Postgres DATABASE_URL secret missing");
+        fail("knowledge-postgres:external-dev-secret-ref", "knowledge Postgres must reference external Secret keys without tracked dev credentials");
       }
       if (text.includes("system:openshift:scc:anyuid") && text.includes("cas-knowledge-db")) {
         pass("knowledge-postgres:anyuid", "knowledge Postgres anyuid SCC binding present for pgvector image");

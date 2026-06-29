@@ -173,7 +173,7 @@ Inside WSL, use:
 /mnt/c/Windows/System32/wsl.exe --shutdown
 ```
 
-## Latest Knowledge Engine Verification Update
+## Historical Knowledge Engine Verification Update
 
 Added after parallel review:
 
@@ -194,13 +194,13 @@ Added after parallel review:
   - topology edge
 - Postgres document/chunk/note/event rows under the Gateway-verified owner scope
 
-Latest results:
+Historical results at this step:
 
 - `npm run verify:knowledge-engine`: `PASS`, 49 checks
 - `npm run verify:crc:deployment`: `PASS`
 - `npm run verify`: `PASS`
 
-## Latest Gateway Boundary Verification Update
+## Historical Gateway Boundary Verification Update
 
 Added after the second parallel review pass:
 
@@ -215,13 +215,13 @@ Added after the second parallel review pass:
   - Gateway injects only the derived owner as `x-forwarded-user`
 - SelfSubjectReview local integration smoke verifies refreshed tokens for the same Kubernetes user map to the same owner while other users remain isolated.
 
-Latest results:
+Historical results at this step:
 
 - `npm run verify:knowledge-engine`: `PASS`, 57 checks
 - `npm run verify:crc:deployment`: `PASS`, 59 checks
 - `npm run verify`: `PASS`
 
-## Latest Knowledge Engine Hardening Update
+## Historical Knowledge Engine Hardening Update
 
 Added after the security-focused parallel review pass:
 
@@ -232,14 +232,14 @@ Added after the security-focused parallel review pass:
 - Strict live preflight now probes the actual Postgres readiness schema column `cas_knowledge_vector_readiness.embedding vector(768)`.
 - The base Knowledge Engine now has an explicit DNS/Postgres-only egress NetworkPolicy; PBS shadow/live overlays add the separate scoped PBS runtime egress policy.
 
-Latest hardening results:
+Historical hardening results at this step:
 
 - `npm run verify:knowledge-engine`: `PASS`, 50 checks
 - `npm run verify:deploy:manifests`: `PASS`, 174 checks
 - `npm run verify:crc:deployment`: `PASS`
 - `npm run verify`: `PASS`
 
-## Latest Identity and PBS Auth Hardening Update
+## Historical Identity and PBS Auth Hardening Update
 
 Added after the follow-up parallel review pass:
 
@@ -251,7 +251,7 @@ Added after the follow-up parallel review pass:
 - Required browser mode is now part of the topology DOM release gate.
 - Runtime NetworkPolicy verification now fails if any NetworkPolicy selecting gateway or knowledge-engine pods has broad peers.
 
-Latest identity/auth results:
+Historical identity/auth results at this step:
 
 - `npm run verify:gateway`: `PASS`, 15 checks
 - `npm run verify:knowledge-engine`: `PASS`, 50 checks
