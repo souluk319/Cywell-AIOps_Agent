@@ -1120,6 +1120,8 @@ for (const file of files) {
       expect(
         "crc-deploy:console-plugin-replacement",
         text.includes("ensureCasReplacesLightspeed") &&
+          text.includes("waitForConsolePluginReplacement") &&
+          text.includes("consoleOperatorPluginReplacementReady") &&
           text.includes('plugin !== "lightspeed-console-plugin"') &&
           text.includes('plugin !== "cywell-opslens"') &&
           text.includes("cywell-ai-sentinel") &&
@@ -1553,6 +1555,7 @@ for (const file of files) {
           text.includes("CAS_PBS_LIVE_PREREQS_ALLOW_REPO_OUTPUT") &&
           text.includes("refusing to write raw live Secret manifests inside the repository") &&
           text.includes("cas-pbs-live-prereqs-render.json") &&
+          text.includes("cas-pbs-live-prereqs-input-validation.json") &&
           text.includes("fullHead") &&
           text.includes("treeStatus") &&
           text.includes("outputFileSha256") &&
@@ -1561,8 +1564,8 @@ for (const file of files) {
           text.includes("real-render") &&
           text.includes("recordRenderEvidence") &&
           text.includes("cas-pbs-live-prereqs-self-test.json"),
-        "PBS live prerequisite renderer records real-render redacted evidence with git/source and output hashes",
-        "PBS live prerequisite renderer must write real-render redacted evidence with git source, output hashes, rendered overlay hash, and no raw Secret material while keeping self-test evidence separate"
+        "PBS live prerequisite renderer records real-render redacted evidence with git/source and output hashes while keeping input-validation evidence separate",
+        "PBS live prerequisite renderer must write real-render redacted evidence with git source, output hashes, rendered overlay hash, and no raw Secret material while keeping self-test and input-validation evidence separate"
       );
       expect(
         "pbs-live-prereqs:self-test",
@@ -2021,6 +2024,8 @@ for (const file of files) {
         text.includes("liveDatabaseUrlMatchesSecret") &&
         text.includes("cluster:knowledge-postgres-live-secret-content") &&
         text.includes("cluster:pbs-auth-secret-content") &&
+        text.includes("getJsonOptional(\"cluster:pbs-auth-secret\"") &&
+        text.includes("getJsonOptional(\"cluster:knowledge-postgres-live-secret\"") &&
         text.includes("cluster:internal-owner-auth-secret-content") &&
         text.includes("livePrereqSecretHashBinding") &&
         text.includes("cluster:live-prereq-secret-hash-binding") &&

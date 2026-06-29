@@ -1715,7 +1715,8 @@ if (runtimeService) {
   }
 }
 let pbsBearerToken = "";
-const authSecret = getJson("cluster:pbs-auth-secret", ["get", "secret", "-n", namespace, "cas-pbs-auth"]);
+const authSecretResult = getJsonOptional("cluster:pbs-auth-secret", ["get", "secret", "-n", namespace, "cas-pbs-auth"]);
+const authSecret = authSecretResult.value;
 if (authSecret) {
   const hasBearer = Boolean(authSecret.data?.["bearer-token"]);
   expect("cluster:pbs-auth-secret-key", hasBearer, "cas-pbs-auth Secret contains bearer-token key");
@@ -1727,9 +1728,9 @@ if (authSecret) {
     "cas-pbs-auth bearer-token decodes to usable non-placeholder service-token material",
     "cas-pbs-auth bearer-token must be non-empty, non-placeholder, whitespace-free, and at least 20 characters"
   );
-} else if (requireSecret) {
-  fail("cluster:pbs-auth-secret-required", "cas-pbs-auth Secret is required for this preflight run");
-} else {
+} else if (requireSecret && authSecretResult.missing) {
+  fail("cluster:pbs-auth-secret-required", `cas-pbs-auth Secret is required for this preflight run: ${authSecretResult.detail}`);
+} else if (!requireSecret && authSecretResult.missing) {
   warn("cluster:pbs-auth-secret-optional", "cas-pbs-auth Secret is absent in the current cluster; live cutover must create it or run preflight with --require-secret");
 }
 if (overlay === "pbs-live" && requireCluster && pbsRuntimeServicePresent) {
@@ -1805,7 +1806,8 @@ if (overlay === "pbs-live") {
       );
     }
   }
-  const liveDbSecret = getJson("cluster:knowledge-postgres-live-secret", ["get", "secret", "-n", namespace, "cas-knowledge-postgres-live"]);
+  const liveDbSecretResult = getJsonOptional("cluster:knowledge-postgres-live-secret", ["get", "secret", "-n", namespace, "cas-knowledge-postgres-live"]);
+  const liveDbSecret = liveDbSecretResult.value;
   if (liveDbSecret) {
     const missingKeys = ["database", "username", "password", "database-url"].filter((key) => !liveDbSecret.data?.[key]);
     liveDatabaseUrl = decodeSecretValue(liveDbSecret, "database-url");
@@ -1827,9 +1829,9 @@ if (overlay === "pbs-live") {
       "cas-knowledge-postgres-live Secret decodes to non-placeholder matching database, username, password, and service DATABASE_URL",
       "cas-knowledge-postgres-live Secret values must be non-placeholder and database-url username/password/database must match the individual keys"
     );
-  } else if (requireSecret) {
-    fail("cluster:knowledge-postgres-live-secret-required", "cas-knowledge-postgres-live Secret is required for live cutover");
-  } else {
+  } else if (requireSecret && liveDbSecretResult.missing) {
+    fail("cluster:knowledge-postgres-live-secret-required", `cas-knowledge-postgres-live Secret is required for live cutover: ${liveDbSecretResult.detail}`);
+  } else if (!requireSecret && liveDbSecretResult.missing) {
     warn("cluster:knowledge-postgres-live-secret-optional", "cas-knowledge-postgres-live Secret is absent; live cutover must create it or run preflight with --require-secret");
   }
   if (requireSecret) {

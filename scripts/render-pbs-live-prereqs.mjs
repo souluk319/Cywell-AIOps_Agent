@@ -10,6 +10,8 @@ const outDirArg = process.argv.find((arg) => arg.startsWith("--out-dir="))?.spli
 const namespace = process.env.CAS_PBS_LIVE_NAMESPACE || "cywell-ai-sentinel";
 const defaultOutDir = join("test-results", "pbs-live-prereqs");
 const defaultTemplateDir = join("test-results", "pbs-live-prereqs-input-template");
+const livePrereqRenderEvidencePath = "test-results/cas-pbs-live-prereqs-render.json";
+const inputValidationEvidencePath = "test-results/cas-pbs-live-prereqs-input-validation.json";
 const checkedAt = new Date().toISOString();
 const postgresEnvNames = {
   database: "CAS_KNOWLEDGE_POSTGRES_DB",
@@ -516,7 +518,7 @@ function gitEvidence() {
   };
 }
 
-function recordEvidence(status, checks, extra = {}, evidencePath = "test-results/cas-pbs-live-prereqs-render.json") {
+function recordEvidence(status, checks, extra = {}, evidencePath = livePrereqRenderEvidencePath) {
   const git = gitEvidence();
   const summary = {
     total: checks.length,
@@ -545,7 +547,7 @@ function recordEvidence(status, checks, extra = {}, evidencePath = "test-results
   );
 }
 
-function recordInputValidationEvidence(inputs, errors, outputDir, evidencePath = "test-results/cas-pbs-live-prereqs-render.json") {
+function recordInputValidationEvidence(inputs, errors, outputDir, evidencePath = inputValidationEvidencePath) {
   const checks = errors.map((error, index) => ({
     status: "FAIL",
     id: `pbs-live-prereqs:input-validation:${index + 1}`,

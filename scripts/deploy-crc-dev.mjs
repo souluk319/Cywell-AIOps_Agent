@@ -41,6 +41,10 @@ function tryRun(command, args, options = {}) {
   };
 }
 
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function git(args) {
   return run("git", args, { timeoutMs: 30000 });
 }
@@ -60,10 +64,6 @@ const sourceGit = {
 
 if (sourceGit.treeStatus !== "clean" && String(process.env.CAS_ALLOW_DIRTY_CRC_DEPLOY ?? "").toLowerCase() !== "true") {
   throw new Error("Refusing CRC deploy from a dirty tracked git tree; commit/stash tracked changes or set CAS_ALLOW_DIRTY_CRC_DEPLOY=true intentionally");
-}
-
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function waitForBuildComplete(build) {
@@ -184,7 +184,30 @@ function ensureCasReplacesLightspeed() {
     }
   });
   run("oc", ["patch", "console.operator.openshift.io", "cluster", "--type=merge", "-p", payload], { stdio: "inherit" });
+  waitForConsolePluginReplacement();
   console.log(`Console plugins: ${plugins.join(",")}`);
+}
+
+function consoleOperatorPluginReplacementReady() {
+  const raw = run("oc", ["get", "console.operator.openshift.io", "cluster", "-o", "json"]);
+  const parsed = JSON.parse(raw);
+  const enabledPlugins = Array.isArray(parsed?.spec?.plugins) ? parsed.spec.plugins : [];
+  const capabilities = Array.isArray(parsed?.spec?.customization?.capabilities) ? parsed.spec.customization.capabilities : [];
+  const lightspeedButton = capabilities.find((capability) => capability.name === "LightspeedButton");
+  return (
+    enabledPlugins.includes("cywell-ai-sentinel") &&
+    !enabledPlugins.includes("lightspeed-console-plugin") &&
+    !enabledPlugins.includes("cywell-opslens") &&
+    lightspeedButton?.visibility?.state === "Disabled"
+  );
+}
+
+function waitForConsolePluginReplacement() {
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    if (consoleOperatorPluginReplacementReady()) return;
+    sleep(5000);
+  }
+  throw new Error("console.operator.openshift.io/cluster did not persist Cywell launcher replacement within 60s");
 }
 
 function ensureDevPostgresSecret() {

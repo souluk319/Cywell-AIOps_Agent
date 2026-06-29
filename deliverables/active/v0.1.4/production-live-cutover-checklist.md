@@ -112,6 +112,9 @@ oc apply -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-pbs-auth.secret.yaml"
 oc apply -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-knowledge-internal-auth.secret.yaml"
 oc apply -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-knowledge-postgres-live.secret.yaml"
 oc apply -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-knowledge-live-config.configmap.yaml"
+
+# Required before applying pbs-live workloads: prevent fallback to CRC/dev DB credentials.
+oc delete secret cas-knowledge-postgres -n cywell-ai-sentinel --ignore-not-found=true
 ```
 
 Strict live preflight compares the live cluster Secret values back to the redacted hashes in `test-results/cas-pbs-live-prereqs-render.json` and `$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\pbs-live-prereqs.summary.json`. If an operator changes `cas-pbs-auth`, `cas-knowledge-internal-auth`, or `cas-knowledge-postgres-live` outside this renderer, `cluster:live-prereq-secret-hash-binding` must fail until the approved renderer is rerun and the changed manifests are reviewed.
