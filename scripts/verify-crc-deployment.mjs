@@ -754,6 +754,7 @@ if (gatewayPod) {
     "const https=require('https');",
     `const smokeToken=${JSON.stringify(crcKnowledgeSmokeToken)};`,
     "const customerId='crc-smoke';",
+    "const altCustomerId='crc-smoke-alt';",
     "const lineageToken=`crc-lineage-${Date.now()}`;",
     "const fileName=`crc-runbook-${lineageToken}.txt`; ",
     "function req(path,method='GET',body,auth=true,extraHeaders={}){return new Promise((resolve,reject)=>{const payload=body?JSON.stringify(body):undefined;const headers={'content-type':'application/json','content-length':payload?Buffer.byteLength(payload):0,...extraHeaders};if(auth)headers.authorization=`Bearer ${smokeToken}`;const r=https.request(`https://127.0.0.1:9443${path}`,{method,rejectUnauthorized:false,headers},res=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>resolve({status:res.statusCode,body:JSON.parse(b)}));});r.on('error',reject);if(payload)r.write(payload);r.end();});}",
@@ -761,8 +762,10 @@ if (gatewayPod) {
     "const noOwner=await req('/api/knowledge/rag/query','POST',{customer_id:customerId,question:'router latency evidence'},false);",
     "const spoofRemote=await req('/api/knowledge/rag/query','POST',{customer_id:customerId,question:'router latency evidence'},false,{'x-remote-user':'spoofed-crc-user'});",
     "const spoofOpenShift=await req('/api/knowledge/rag/query','POST',{customer_id:customerId,question:'router latency evidence'},false,{'x-openshift-user':'spoofed-crc-user'});",
-    "const upload=await req('/api/knowledge/uploads/ingest','POST',{customer_id:customerId,file_name:fileName,filename:fileName,content:`${lineageToken} OpenShift router latency links to route shards, HAProxy logs, certificates, and namespace events.`,source_scope:'user_upload',visibility:'private_user',source_kind:'upload',source_metadata:{customer_id:customerId,verifier:'crc',lineage_token:lineageToken},force_reingest:false,index:true});",
+    "const upload=await req('/api/knowledge/uploads/ingest','POST',{customer_id:customerId,file_name:fileName,filename:fileName,content:`${lineageToken} OpenShift router latency links to [[Router Latency]], route shards, HAProxy logs, certificates, namespace events, #ingress, and https://example.com/crc-runbook.`,source_scope:'user_upload',visibility:'private_user',source_kind:'upload',source_metadata:{customer_id:customerId,verifier:'crc',lineage_token:lineageToken},force_reingest:false,index:true});",
     "const uploadedDocumentId=upload.body.document?.id;",
+    "const altUpload=await req('/api/knowledge/uploads/ingest','POST',{customer_id:altCustomerId,file_name:`alt-${fileName}`,filename:`alt-${fileName}`,content:`${lineageToken} alternate customer links to [[Router Latency]] and #ingress for graph scope isolation.`,source_scope:'user_upload',visibility:'private_user',source_kind:'upload',source_metadata:{customer_id:altCustomerId,verifier:'crc',lineage_token:lineageToken},force_reingest:false,index:true});",
+    "const altUploadedDocumentId=altUpload.body.document?.id;",
     "const uploadWikiNote=Array.isArray(upload.body.wiki?.notes)?upload.body.wiki.notes.find(n=>n.document_id===uploadedDocumentId):null;",
     "const base64=Buffer.from('Base64 customer uploads remain searchable after gateway proxying.','utf8').toString('base64');",
     "const encoded=await req('/api/knowledge/uploads/ingest','POST',{customer_id:customerId,filename:`crc-base64-${lineageToken}.txt`,content_base64:base64,mime_type:'text/plain'});",
@@ -781,15 +784,16 @@ if (gatewayPod) {
     "const docNode=nodes.find(n=>n.id===uploadedDocumentId&&['document','upload_document'].includes(String(n.type||'')));",
     "const noteNode=nodes.find(n=>n.type==='wiki-note'&&(n.id===wikiNote?.id||n.document_id===uploadedDocumentId||n.source_document_id===uploadedDocumentId));",
     "const topologyLineageOk=Boolean(docNode&&noteNode)&&edges.some(e=>e.source===noteNode.id&&e.target===docNode.id&&e.type==='summarizes');",
-    "console.log(JSON.stringify({customerId,lineageToken,fileName,uploadedDocumentId,noOwnerStatus:noOwner.status,spoofRemoteStatus:spoofRemote.status,spoofOpenShiftStatus:spoofOpenShift.status,upload:upload.body.status,encoded:encoded.body.status,url:url.body.status,encodedParser:encoded.body.document?.metadata?.parser,pbsFileName:upload.body.document?.metadata?.pbs_payload?.file_name,pbsIndex:upload.body.document?.metadata?.pbs_payload?.index,urlWiki:url.body.document?.metadata?.pbs_payload?.auto_compile_wiki,uploadWikiRevision:uploadWikiNote?.revision,uploadWikiPreviousRevision:uploadWikiNote?.previous_revision,ragCitations:ragCitations.length,ragLineageOk,wikiNotes:wiki.body.notes_upserted||0,wikiNoteRevision:wikiNote?.revision,wikiNotePreviousRevision:wikiNote?.previous_revision,nodes:topology.body.counts?.nodes||0,edges:topology.body.counts?.edges||0,graphOk,typeOk,topologyLineageOk,topologyNoteRevision:noteNode?.revision}));",
+    "console.log(JSON.stringify({customerId,altCustomerId,lineageToken,fileName,uploadedDocumentId,altUploadedDocumentId,noOwnerStatus:noOwner.status,spoofRemoteStatus:spoofRemote.status,spoofOpenShiftStatus:spoofOpenShift.status,upload:upload.body.status,altUpload:altUpload.body.status,encoded:encoded.body.status,url:url.body.status,encodedParser:encoded.body.document?.metadata?.parser,pbsFileName:upload.body.document?.metadata?.pbs_payload?.file_name,pbsIndex:upload.body.document?.metadata?.pbs_payload?.index,urlWiki:url.body.document?.metadata?.pbs_payload?.auto_compile_wiki,uploadWikiRevision:uploadWikiNote?.revision,uploadWikiPreviousRevision:uploadWikiNote?.previous_revision,ragCitations:ragCitations.length,ragLineageOk,wikiNotes:wiki.body.notes_upserted||0,wikiNoteRevision:wikiNote?.revision,wikiNotePreviousRevision:wikiNote?.previous_revision,nodes:topology.body.counts?.nodes||0,edges:topology.body.counts?.edges||0,graphOk,typeOk,topologyLineageOk,topologyNoteRevision:noteNode?.revision}));",
     "})().catch(e=>{console.error(e.message);process.exit(1);});"
   ].join("");
   const knowledgeSmoke = execNode(gatewayPod.metadata.name, knowledgeSmokeCode, 30000);
   const knowledgeSmokeBody = parseLastJsonLine(knowledgeSmoke.stdout);
   expect(
     "runtime:knowledge-smoke-through-gateway",
-    knowledgeSmoke.ok &&
+      knowledgeSmoke.ok &&
       knowledgeSmokeBody?.upload === "indexed" &&
+      knowledgeSmokeBody?.altUpload === "indexed" &&
       knowledgeSmokeBody?.encoded === "indexed" &&
       knowledgeSmokeBody?.url === "indexed" &&
       knowledgeSmokeBody?.noOwnerStatus === 401 &&
@@ -845,18 +849,24 @@ if (gatewayPod) {
     const pbsCompatPersisted = execPod(postgresPod.metadata.name, [
       "sh",
       "-ec",
-      `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT (SELECT COUNT(*) FROM document_sources WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND metadata->>'customer_id'='crc-smoke' AND metadata->>'owner_id'='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM parsed_documents WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}') || ',' || (SELECT COUNT(*) FROM document_chunks WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND metadata->>'customer_id'='crc-smoke' AND metadata->>'owner_id'='${crcKnowledgeSmokeOwner}') || ',' || (SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid='chunk_embeddings'::regclass AND attname='embedding')"`
+      `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT (SELECT COUNT(*) FROM document_sources WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND metadata->>'customer_id'='crc-smoke' AND metadata->>'owner_id'='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM parsed_documents WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}') || ',' || (SELECT COUNT(*) FROM document_chunks WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND metadata->>'customer_id'='crc-smoke' AND metadata->>'owner_id'='${crcKnowledgeSmokeOwner}') || ',' || (SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid='chunk_embeddings'::regclass AND attname='embedding') || ',' || (SELECT COUNT(*) FROM chunk_embeddings ce JOIN document_chunks dc ON ce.chunk_id=dc.id WHERE dc.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND ce.model='cas-local-hash-v1') || ',' || (SELECT COUNT(*) FROM document_chunks dc LEFT JOIN chunk_embeddings ce ON ce.chunk_id=dc.id AND ce.model='cas-local-hash-v1' WHERE dc.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND ce.chunk_id IS NULL) || ',' || (SELECT COUNT(DISTINCT ge.id) FROM graph_entities ge JOIN graph_entity_mentions gm ON gm.entity_id=ge.id JOIN document_sources ds ON gm.document_source_id=ds.id WHERE ds.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND ge.customer_id='crc-smoke' AND gm.owner_user_id='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM graph_entity_mentions gm JOIN document_sources ds ON gm.document_source_id=ds.id WHERE ds.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND gm.customer_id='crc-smoke' AND gm.owner_user_id='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM graph_entity_relations gr JOIN document_sources ds ON gr.document_source_id=ds.id WHERE ds.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND gr.customer_id='crc-smoke' AND gr.owner_user_id='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(DISTINCT customer_id) FROM graph_entities WHERE entity_key='wikilink:router latency' AND owner_user_id='${crcKnowledgeSmokeOwner}' AND customer_id IN ('crc-smoke','crc-smoke-alt'))"`
     ]);
     const pbsCompatParts = pbsCompatPersisted.stdout.trim().split(",");
     expect(
       "runtime:knowledge-pbs-compat-shadow-persisted",
       pbsCompatPersisted.ok &&
-        pbsCompatParts.length === 4 &&
+        pbsCompatParts.length === 10 &&
         Number(pbsCompatParts[0]) === 1 &&
         Number(pbsCompatParts[1]) === 1 &&
         Number(pbsCompatParts[2]) >= 1 &&
-        pbsCompatParts[3] === "vector(768)",
-      "knowledge smoke also writes PBS-compatible document source, parsed document, and chunk shadow rows",
+        pbsCompatParts[3] === "vector(768)" &&
+        Number(pbsCompatParts[4]) === Number(pbsCompatParts[2]) &&
+        Number(pbsCompatParts[5]) === 0 &&
+        Number(pbsCompatParts[6]) >= 2 &&
+        Number(pbsCompatParts[7]) >= 2 &&
+        Number(pbsCompatParts[8]) >= 1 &&
+        Number(pbsCompatParts[9]) >= 2,
+      "knowledge smoke also writes PBS-compatible document source, parsed document, chunk, embedding, and customer-scoped graph shadow rows",
       pbsCompatPersisted.stderr || pbsCompatPersisted.stdout
     );
     const persistedSmoke = execPod(postgresPod.metadata.name, [

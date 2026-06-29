@@ -5,34 +5,28 @@
 Implemented after the backend/frontend/release parallel review pass:
 
 - Local Postgres now creates a PBS-compatible schema subset for tenants, workspaces, document sources, parsed documents, chunks, chunk embeddings, graph entities, mentions, and relations.
-- Local CAS ingest writes PBS-compatible `document_sources`, `parsed_documents`, and `document_chunks` shadow rows in the same transaction as CAS document/chunk persistence.
-- The Knowledge Engine health path reports PBS-compatible schema readiness, shadow row counts, embedding table dimension, and missing embedding parity without fabricating vectors.
+- Local CAS ingest writes PBS-compatible `document_sources`, `parsed_documents`, `document_chunks`, deterministic local `chunk_embeddings`, and customer-scoped graph entity/mention/relation shadow rows in the same transaction as CAS document/chunk persistence.
+- The Knowledge Engine health path reports PBS-compatible schema readiness, shadow row counts, graph row counts, embedding table dimension, and missing embedding parity. These local hash embeddings are a CRC compatibility guard, not PBS production model parity.
 - PBS Wiki Vault topology normalization now preserves PBS summary aliases, relation counts, wikilinks, tags, entity/concept nodes, degree/weight, source/viewer metadata, selected context/uploads, and vault relation signals.
 - The Cywell topology dashboard now renders PBS-rich topology semantics as KPI signals, distinct node tones, type filters, Signal leaders, inspector metadata, relation lines, and node-to-RAG actions.
 - CRC deployment verification now records verified runtime image digest evidence for app `:dev` ImageStreamTags and the running Postgres imageID.
 - CRC release promotion now refuses to move `v0.1.4` tags unless each release source digest matches the PASS CRC deployment evidence in `test-results/cas-crc-deployment.json`.
+- Strict live preflight now rejects wildcard customer ACL placeholders, verifies applied ConfigMap values, checks applied workload pod digests against promoted release evidence, and evaluates the union of applied knowledge-engine egress NetworkPolicies.
 
 Current proof:
 
 - `python -m py_compile apps/knowledge-engine/src/cas_knowledge_engine/engine.py apps/knowledge-engine/src/cas_knowledge_engine/storage.py`: PASS.
 - `node --check` passed for changed verification and release scripts.
-- `npm run verify:knowledge-engine`: PASS, 76 checks.
+- `npm run verify:knowledge-engine`: PASS, 78 checks.
 - `npm run verify:console:topology-dom`: PASS, 31 browser-backed checks.
 - `npm run verify:console:integration`: PASS, 71 checks.
 - `npm run verify:deploy:manifests`: PASS, 257 checks.
 - `npm run verify`: PASS.
 - `npm run deploy:crc`: PASS, 68 runtime checks.
 - `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4`: PASS, 21 release checks.
-- `npm run verify:pbs:preflight:live:preapply`: expected FAIL, `37 PASS / 7 FAIL`; failures remain external live prerequisites in the current CRC cluster.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL, `42 PASS / 8 FAIL`; failures remain external live prerequisites plus replacement of the rendered wildcard customer ACL placeholder.
 
-Latest CRC `v0.1.4` release image references:
-
-```text
-cas-gateway@sha256:2b9ad1fadb5f465e0ea730667fd1e71b39512877f3610e7a7b2c1ab6e9b92689
-cas-console-plugin@sha256:7b0331eff2f7dbf91bce1f977f08f88e86f7c81e5f115e669d3cbd0830028c68
-cas-knowledge-engine@sha256:b986a6da1a2e41c95239a6ca73677a34e030e456c24fcb2ec63c9f95e5ebefa8
-cas-knowledge-postgres@sha256:9073dff8ba54ee8cefcfec5bc2a1269fc9f3aeecbd431eb892549d9b83dc1325
-```
+Latest CRC `v0.1.4` release image references are intentionally not duplicated in this tracked document. The source of truth is ignored evidence under `test-results/cas-release-images.json`, specifically `branch`, `head`, `status`, and `promotedImages`.
 
 ## Previous Update - Customer ACL and Live Gate Tightening
 
@@ -56,16 +50,9 @@ Current proof:
 - `npm run verify`: PASS.
 - `npm run deploy:crc`: PASS, 68 runtime checks.
 - `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4`: PASS, 21 release checks.
-- `npm run verify:pbs:preflight:live:preapply`: expected FAIL, `37 PASS / 7 FAIL`; failures remain external live prerequisites in the current CRC cluster.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL, `42 PASS / 8 FAIL`; failures remain external live prerequisites plus replacement of the rendered wildcard customer ACL placeholder.
 
-Latest CRC `v0.1.4` release image references:
-
-```text
-cas-gateway@sha256:2b9ad1fadb5f465e0ea730667fd1e71b39512877f3610e7a7b2c1ab6e9b92689
-cas-console-plugin@sha256:7b0331eff2f7dbf91bce1f977f08f88e86f7c81e5f115e669d3cbd0830028c68
-cas-knowledge-engine@sha256:b986a6da1a2e41c95239a6ca73677a34e030e456c24fcb2ec63c9f95e5ebefa8
-cas-knowledge-postgres@sha256:9073dff8ba54ee8cefcfec5bc2a1269fc9f3aeecbd431eb892549d9b83dc1325
-```
+Latest CRC `v0.1.4` release image references are intentionally not duplicated in this tracked document. The source of truth is ignored evidence under `test-results/cas-release-images.json`, specifically `branch`, `head`, `status`, and `promotedImages`.
 
 ## Latest Update - Internal Owner Signing, Secret Hygiene, and CRC Redeploy
 
@@ -239,9 +226,9 @@ Latest PBS preflight evidence:
 - `test-results/cas-pbs-preflight-pbs-shadow-diagnostic-local-optional-secrets.json`
 - `test-results/cas-pbs-preflight-pbs-live-preapply-cluster-required-secrets.json`
 - shadow diagnostic status: `PASS/WARN` in the local CRC environment because the real `playbookstudio` namespace/service and optional `cas-pbs-auth` Secret are absent
-- live preapply status: expected `FAIL`, `37 PASS / 7 FAIL`
+- live preapply status: expected `FAIL`, `42 PASS / 8 FAIL`
 - rendered live overlay checks pass for provider, ConfigMap env refs, required token Secret ref, live Postgres Secret refs, no literal Secret material, no dev defaults, HTTPS PBS service-token transport, PBS base URL shape, timeout/response bounds, labeled PBS egress, knowledge ingress, runtime readiness gate, corpus readiness gate, and disabled shadow writes
-- WARNs are expected in local CRC until the real `playbookstudio` namespace/service, required `cas-pbs-auth` Secret, required `cas-knowledge-postgres-live` Secret, and cleanup of legacy `cas-knowledge-postgres` Secret are handled
+- WARNs/failures are expected in local CRC until the real `playbookstudio` namespace/service, required `cas-pbs-auth` Secret, required `cas-knowledge-postgres-live` Secret, concrete live customer ACL mapping, and cleanup of legacy `cas-knowledge-postgres` Secret are handled
 
 ## Parallel Review Findings
 

@@ -684,10 +684,22 @@ for (const file of files) {
           text.includes("graph_entities") &&
           text.includes("graph_entity_mentions") &&
           text.includes("graph_entity_relations") &&
+          text.includes("LOCAL_EMBEDDING_MODEL") &&
+          text.includes("cas-local-hash-v1") &&
+          text.includes("embedding_model") &&
           text.includes("embedding vector(768)") &&
           text.includes("_save_pbs_compat_rows") &&
-          text.includes("cas://knowledge/"),
-        "knowledge Postgres store creates PBS-compatible document, chunk, embedding, and graph schema with local ingest shadow rows"
+          text.includes("cas://knowledge/") &&
+          text.includes("local_embedding_literal") &&
+          text.includes("INSERT INTO chunk_embeddings") &&
+          text.includes("graph_signals") &&
+          text.includes("customer_id") &&
+          text.includes("idx_graph_entities_key_customer_scope") &&
+          text.includes("INSERT INTO graph_entity_mentions") &&
+          text.includes("INSERT INTO graph_entity_relations") &&
+          text.includes("co_occurs") &&
+          text.includes("mention_count"),
+        "knowledge Postgres store creates PBS-compatible document, chunk, local embedding, and customer-scoped graph shadow rows"
       );
     }
     if (file.includes("cas_knowledge_engine/pbs_client.py")) {
@@ -1223,7 +1235,14 @@ for (const file of files) {
         text.includes("appliedKnowledgeIngressScoped") &&
         text.includes("appliedKnowledgeIngressUnionScoped") &&
         text.includes("cluster:applied-knowledge-ingress-union-scoped") &&
+        text.includes("appliedKnowledgeEgressUnionScoped") &&
+        text.includes("cluster:applied-knowledge-egress-union-scoped") &&
         text.includes("liveDatabaseUrlUsesService") &&
+        text.includes("statefulSetReady") &&
+        text.includes("readyPodsUsePromotedDigest") &&
+        text.includes("cluster:applied-pbs-config-values") &&
+        text.includes("cluster:applied-live-customer-acl") &&
+        text.includes("preflight:live-customer-acl-concrete") &&
         text.includes("image.dockerImageReference") &&
         text.includes("digestPinnedImageReference") &&
         text.includes("CAS_RELEASE_IMAGES_EVIDENCE") &&
@@ -1236,6 +1255,8 @@ for (const file of files) {
         text.includes("cluster:gateway-kubernetes-api-egress") &&
         text.includes("cluster:release-image:") &&
         text.includes("preflight:live-postgres-image-pinned") &&
+        text.includes("updatedReplicas") &&
+        text.includes("unavailableReplicas") &&
         text.includes("pinnedProductionImage") &&
         text.includes("skipApplied") &&
         text.includes("pbs-live")

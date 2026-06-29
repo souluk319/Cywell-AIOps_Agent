@@ -146,7 +146,7 @@ Status: implemented for the v0.1.4 smoke path.
   - `vector(768)` readiness column
   - smoke upload persisted in owner scope
 
-Important: this is still not full PBS corpus/index parity. The CRC/local Postgres path now creates PBS-compatible `document_sources`, `parsed_documents`, `document_chunks`, `chunk_embeddings`, and graph tables, and CAS ingest writes document source, parsed document, and chunk shadow rows. It still does not fabricate embeddings or prove PBS indexer/model parity against a production PBS database.
+Important: this is still not full PBS corpus/index parity. The CRC/local Postgres path now creates PBS-compatible `document_sources`, `parsed_documents`, `document_chunks`, `chunk_embeddings`, and graph tables. CAS ingest writes document source, parsed document, chunk, deterministic local hash embedding, and customer-scoped graph entity/mention/relation shadow rows. These rows prove schema, lineage, and customer isolation compatibility in CRC; they do not prove PBS production embedding model/indexer parity.
 
 ### Phase 3 - Customer Data Ingest
 
@@ -288,7 +288,7 @@ Delivered:
 - v0.1.3 operator paused during dev deployment
 - UserToken verified through Gateway SelfSubjectReview for trusted-header owner mode
 - verifier checks operator pause, runtime pods, pgvector readiness, live console bundle, upload/RAG/wiki/topology smoke, Lightspeed flow, and rendered PBS shadow/live overlay shape
-- verifier checks local PBS-compatible Postgres schema creation and verifies smoke uploads write PBS-compatible document source, parsed document, and chunk shadow rows
+- verifier checks local PBS-compatible Postgres schema creation and verifies smoke uploads write PBS-compatible document source, parsed document, chunk, local embedding, and customer-scoped graph shadow rows
 - verifier records app `:dev` ImageStreamTag digests and running Postgres imageID digest as release-source evidence
 - CRC verifier checks the live `cas-knowledge-engine-ingress` policy and confirms non-gateway direct access is blocked from the console-plugin pod
 - optional `npm run verify:pbs:live` smoke script for a real PBS target; it skips cleanly when `CAS_PBS_BASE_URL` is not set

@@ -247,7 +247,7 @@ Added after the follow-up parallel review pass:
 - The Knowledge Engine internal hop receives only the Gateway-minted `x-forwarded-user`; raw bearer tokens and client-supplied owner headers are not forwarded.
 - Local smoke tests keep explicit `token-hash` mode only where no OpenShift API is available.
 - PBS shadow/live fake backend now enforces bearer auth and verifier asserts bearer auth on every PBS API request.
-- CRC runtime verifier proves current `oc whoami -t` resolves through SelfSubjectReview, then checks upload/RAG/wiki/topology persistence under the resulting verified owner.
+- CRC runtime verifier proves current `oc whoami -t` resolves through SelfSubjectReview, then checks upload/RAG/wiki/topology responses and persisted lineage rows under the resulting verified owner.
 - Required browser mode is now part of the topology DOM release gate.
 - Runtime NetworkPolicy verification now fails if any NetworkPolicy selecting gateway or knowledge-engine pods has broad peers.
 

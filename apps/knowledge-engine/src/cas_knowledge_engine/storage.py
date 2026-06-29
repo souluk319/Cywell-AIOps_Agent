@@ -3,11 +3,14 @@ from __future__ import annotations
 import importlib
 import hashlib
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any
 
 STORE_VERSION = "0.1.4"
+LOCAL_EMBEDDING_MODEL = "cas-local-hash-v1"
+LOCAL_EMBEDDING_DIMENSIONS = 768
 PBS_COMPAT_TABLES = [
     "tenants",
     "workspaces",
@@ -19,6 +22,37 @@ PBS_COMPAT_TABLES = [
     "graph_entity_mentions",
     "graph_entity_relations",
 ]
+TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣_./:-]{2,}")
+WIKI_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+HASHTAG_RE = re.compile(r"(?<![\w/])#([0-9A-Za-z가-힣][0-9A-Za-z가-힣_-]{1,63})")
+URL_SIGNAL_RE = re.compile(r"https?://[^\s)\]}>'\"]+")
+STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "this",
+    "that",
+    "are",
+    "was",
+    "were",
+    "have",
+    "has",
+    "into",
+    "api",
+    "http",
+    "https",
+    "그리고",
+    "또는",
+    "에서",
+    "으로",
+    "하는",
+    "있는",
+    "없는",
+    "고객",
+    "데이터",
+}
 
 
 def empty_store() -> dict[str, Any]:
@@ -37,6 +71,76 @@ def stable_uuid(prefix: str, value: str) -> str:
 
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def tokenize(text: str) -> list[str]:
+    tokens = [token.lower().strip("._:-/") for token in TOKEN_RE.findall(text)]
+    return [token for token in tokens if token and token not in STOPWORDS and len(token) > 1]
+
+
+def compact_list(values: list[str], limit: int = 12) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        clean = re.sub(r"\s+", " ", str(value or "")).strip().strip("#")
+        if not clean:
+            continue
+        key = clean.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(clean)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def top_terms(text: str, limit: int = 8) -> list[str]:
+    counts: dict[str, int] = {}
+    for token in tokenize(text):
+        counts[token] = counts.get(token, 0) + 1
+    return [term for term, _count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]]
+
+
+def graph_signals(text: str, fallback_terms: list[str] | None = None) -> list[dict[str, str]]:
+    body = str(text or "")
+    signals: list[dict[str, str]] = []
+    for kind, values in [
+        ("wikilink", WIKI_LINK_RE.findall(body)),
+        ("tag", HASHTAG_RE.findall(body)),
+        ("url", URL_SIGNAL_RE.findall(body)),
+        ("concept", [*(fallback_terms or []), *top_terms(body, 8)]),
+    ]:
+        for value in compact_list(values, limit=12 if kind != "url" else 4):
+            signals.append({"kind": kind, "name": value})
+    deduped: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for signal in signals:
+        key = f"{signal['kind']}:{signal['name'].lower()}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(signal)
+    return deduped[:16]
+
+
+def graph_entity_key(kind: str, name: str) -> str:
+    normalized = re.sub(r"\s+", " ", name).strip().lower()
+    return f"{kind}:{normalized}"
+
+
+def local_embedding_literal(text: str, dimensions: int = LOCAL_EMBEDDING_DIMENSIONS) -> str:
+    seed = sha256_text(text or "")
+    values: list[str] = []
+    counter = 0
+    while len(values) < dimensions:
+        digest = hashlib.sha256(f"{seed}:{counter}".encode("utf-8")).digest()
+        for byte in digest:
+            values.append(f"{((byte - 127.5) / 127.5):.6f}")
+            if len(values) >= dimensions:
+                break
+        counter += 1
+    return f"[{','.join(values)}]"
 
 
 class JsonKnowledgeStore:
@@ -265,6 +369,7 @@ class PostgresKnowledgeStore:
             """
             CREATE TABLE IF NOT EXISTS graph_entities (
                 id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                customer_id text NOT NULL DEFAULT '',
                 entity_kind text NOT NULL,
                 name text NOT NULL,
                 display_name text NOT NULL DEFAULT '',
@@ -279,10 +384,12 @@ class PostgresKnowledgeStore:
             )
             """
         )
+        cur.execute("ALTER TABLE graph_entities ADD COLUMN IF NOT EXISTS customer_id text NOT NULL DEFAULT ''")
+        cur.execute("DROP INDEX IF EXISTS idx_graph_entities_key_scope")
         cur.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_entities_key_scope
-            ON graph_entities(entity_key, source_scope, owner_user_id)
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_entities_key_customer_scope
+            ON graph_entities(customer_id, entity_key, source_scope, owner_user_id)
             """
         )
         cur.execute(
@@ -300,6 +407,7 @@ class PostgresKnowledgeStore:
                 extraction_method text NOT NULL DEFAULT 'rule',
                 extractor_version text NOT NULL DEFAULT 'cas-local-v1',
                 confidence real NOT NULL DEFAULT 1.0,
+                customer_id text NOT NULL DEFAULT '',
                 source_scope text NOT NULL DEFAULT 'user_upload',
                 owner_user_id text NOT NULL DEFAULT '',
                 visibility text NOT NULL DEFAULT 'workspace_shared',
@@ -324,6 +432,7 @@ class PostgresKnowledgeStore:
                 extraction_method text NOT NULL DEFAULT 'rule',
                 extractor_version text NOT NULL DEFAULT 'cas-local-v1',
                 confidence real NOT NULL DEFAULT 1.0,
+                customer_id text NOT NULL DEFAULT '',
                 source_scope text NOT NULL DEFAULT 'user_upload',
                 owner_user_id text NOT NULL DEFAULT '',
                 visibility text NOT NULL DEFAULT 'workspace_shared',
@@ -331,13 +440,18 @@ class PostgresKnowledgeStore:
             )
             """
         )
+        cur.execute("ALTER TABLE graph_entity_mentions ADD COLUMN IF NOT EXISTS customer_id text NOT NULL DEFAULT ''")
+        cur.execute("ALTER TABLE graph_entity_relations ADD COLUMN IF NOT EXISTS customer_id text NOT NULL DEFAULT ''")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_document_chunks_parsed_ordinal ON document_chunks(parsed_document_id, ordinal)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_model ON chunk_embeddings(model)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_text_hash ON chunk_embeddings(model, embedding_text_hash)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_graph_entities_kind ON graph_entities(entity_kind)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_graph_entities_customer ON graph_entities(customer_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_graph_entity_mentions_chunk ON graph_entity_mentions(chunk_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_graph_entity_mentions_customer ON graph_entity_mentions(customer_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_graph_entity_relations_subject ON graph_entity_relations(subject_entity_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_graph_entity_relations_object ON graph_entity_relations(object_entity_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_graph_entity_relations_customer ON graph_entity_relations(customer_id)")
 
     def load(self) -> dict[str, Any]:
         if not self.ensure_ready():
@@ -427,9 +541,13 @@ class PostgresKnowledgeStore:
             "schema_ready": False,
             "tables": [],
             "embedding_dimension": 0,
+            "embedding_model": LOCAL_EMBEDDING_MODEL,
             "document_sources": 0,
             "document_chunks": 0,
             "chunk_embeddings": 0,
+            "graph_entities": 0,
+            "graph_entity_mentions": 0,
+            "graph_entity_relations": 0,
             "missing_embedding_entries": 0,
             "embedding_index_parity": False,
         }
@@ -454,6 +572,42 @@ class PostgresKnowledgeStore:
         for chunk in store["chunks"]:
             chunks_by_document.setdefault(str(chunk.get("document_id") or ""), []).append(chunk)
 
+        def upsert_graph_entity(kind: str, name: str, *, source_scope: str, owner_id: str, customer_id: str, document_id: str) -> str:
+            entity_key = graph_entity_key(kind, name)
+            entity_uuid = stable_uuid("graph-entity", f"{owner_id}:{customer_id}:{source_scope}:{entity_key}")
+            metadata = {
+                "customer_id": customer_id,
+                "cas_document_id": document_id,
+                "extractor": "cas-local-rule",
+                "extractor_version": STORE_VERSION,
+            }
+            cur.execute(
+                """
+                INSERT INTO graph_entities(id, customer_id, entity_kind, name, display_name, entity_key, aliases, source_scope, owner_user_id, metadata)
+                VALUES (%s::uuid, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s::jsonb)
+                ON CONFLICT (customer_id, entity_key, source_scope, owner_user_id) DO UPDATE SET
+                    entity_kind = EXCLUDED.entity_kind,
+                    name = EXCLUDED.name,
+                    display_name = EXCLUDED.display_name,
+                    metadata = graph_entities.metadata || EXCLUDED.metadata,
+                    updated_at = now()
+                RETURNING id
+                """,
+                (
+                    entity_uuid,
+                    customer_id,
+                    kind,
+                    name,
+                    name,
+                    entity_key,
+                    json.dumps([], ensure_ascii=False),
+                    source_scope,
+                    owner_id,
+                    json.dumps(metadata, ensure_ascii=False),
+                ),
+            )
+            return str((cur.fetchone() or [entity_uuid])[0])
+
         for document in store["documents"]:
             document_id = str(document.get("id") or "")
             if not document_id:
@@ -461,8 +615,9 @@ class PostgresKnowledgeStore:
             document_chunks = sorted(chunks_by_document.get(document_id, []), key=lambda item: int(item.get("index") or 0))
             markdown = "\n\n".join(str(chunk.get("text") or "") for chunk in document_chunks).strip() or str(document.get("summary") or "")
             metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
-            source_scope = str(metadata.get("source_scope") or "user_upload")
-            visibility = str(metadata.get("visibility") or "private_user")
+            pbs_payload = metadata.get("pbs_payload") if isinstance(metadata.get("pbs_payload"), dict) else {}
+            source_scope = str(metadata.get("source_scope") or pbs_payload.get("source_scope") or "user_upload")
+            visibility = str(metadata.get("visibility") or pbs_payload.get("visibility") or "private_user")
             owner_id = str(document.get("owner_id") or "cas-local")
             customer_id = str(document.get("customer_id") or "default")
             source_uuid = stable_uuid("document-source", document_id)
@@ -525,6 +680,8 @@ class PostgresKnowledgeStore:
                     json.dumps(source_metadata, ensure_ascii=False),
                 ),
             )
+            cur.execute("DELETE FROM graph_entity_relations WHERE document_source_id = %s::uuid", (source_uuid,))
+            cur.execute("DELETE FROM graph_entity_mentions WHERE document_source_id = %s::uuid", (source_uuid,))
             for chunk in document_chunks:
                 chunk_id = str(chunk.get("id") or "")
                 if not chunk_id:
@@ -564,6 +721,147 @@ class PostgresKnowledgeStore:
                         json.dumps(chunk_metadata, ensure_ascii=False),
                     ),
                 )
+                embedding_text_hash = sha256_text(text)
+                embedding_payload_hash = sha256_text(json.dumps(chunk_metadata, ensure_ascii=False, sort_keys=True))
+                cur.execute(
+                    """
+                    INSERT INTO chunk_embeddings(chunk_id, model, embedding, embedding_text_hash, payload_hash)
+                    VALUES (%s::uuid, %s, %s::vector, %s, %s)
+                    ON CONFLICT (chunk_id, model) DO UPDATE SET
+                        embedding = EXCLUDED.embedding,
+                        embedding_text_hash = EXCLUDED.embedding_text_hash,
+                        payload_hash = EXCLUDED.payload_hash,
+                        updated_at = now()
+                    """,
+                    (
+                        chunk_uuid,
+                        LOCAL_EMBEDDING_MODEL,
+                        local_embedding_literal(text),
+                        embedding_text_hash,
+                        embedding_payload_hash,
+                    ),
+                )
+                chunk_signals = graph_signals(f"{document.get('title', '')} {text}", [str(term) for term in chunk.get("terms") or document.get("terms") or []])
+                entity_rows: list[tuple[str, str, str]] = []
+                for signal in chunk_signals:
+                    kind = signal["kind"]
+                    name = signal["name"]
+                    entity_key = graph_entity_key(kind, name)
+                    entity_id = upsert_graph_entity(kind, name, source_scope=source_scope, owner_id=owner_id, customer_id=customer_id, document_id=document_id)
+                    entity_rows.append((entity_id, entity_key, name))
+                    mention_uuid = stable_uuid("graph-mention", f"{chunk_uuid}:{entity_key}")
+                    cur.execute(
+                        """
+                        INSERT INTO graph_entity_mentions(
+                            id, entity_id, source_kind, chunk_id, source_ref, document_source_id, quote, quote_sha256,
+                            locator, extraction_method, extractor_version, confidence, customer_id, source_scope, owner_user_id, visibility
+                        )
+                        VALUES (%s::uuid, %s::uuid, %s, %s::uuid, %s, %s::uuid, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (id) DO UPDATE SET
+                            entity_id = EXCLUDED.entity_id,
+                            source_kind = EXCLUDED.source_kind,
+                            chunk_id = EXCLUDED.chunk_id,
+                            source_ref = EXCLUDED.source_ref,
+                            document_source_id = EXCLUDED.document_source_id,
+                            quote = EXCLUDED.quote,
+                            quote_sha256 = EXCLUDED.quote_sha256,
+                            locator = EXCLUDED.locator,
+                            customer_id = EXCLUDED.customer_id,
+                            source_scope = EXCLUDED.source_scope,
+                            owner_user_id = EXCLUDED.owner_user_id,
+                            visibility = EXCLUDED.visibility
+                        """,
+                        (
+                            mention_uuid,
+                            entity_id,
+                            "chunk",
+                            chunk_uuid,
+                            chunk_id,
+                            source_uuid,
+                            text[:260],
+                            sha256_text(text[:260]),
+                            json.dumps({"chunk_index": int(chunk.get("index") or 0), "cas_chunk_id": chunk_id, "cas_document_id": document_id}, ensure_ascii=False),
+                            "rule",
+                            "cas-local-v1",
+                            1.0,
+                            customer_id,
+                            source_scope,
+                            owner_id,
+                            visibility,
+                        ),
+                    )
+                relation_rows = entity_rows[:8]
+                for index, subject in enumerate(relation_rows):
+                    for target in relation_rows[index + 1 :]:
+                        relation_uuid = stable_uuid("graph-relation", f"{chunk_uuid}:{subject[1]}:co_occurs:{target[1]}")
+                        cur.execute(
+                            """
+                            INSERT INTO graph_entity_relations(
+                                id, subject_entity_id, object_entity_id, relation_type, source_kind, chunk_id, source_ref,
+                                document_source_id, quote, quote_sha256, locator, extraction_method, extractor_version,
+                                confidence, customer_id, source_scope, owner_user_id, visibility
+                            )
+                            VALUES (%s::uuid, %s::uuid, %s::uuid, %s, %s, %s::uuid, %s, %s::uuid, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (id) DO UPDATE SET
+                                subject_entity_id = EXCLUDED.subject_entity_id,
+                                object_entity_id = EXCLUDED.object_entity_id,
+                                relation_type = EXCLUDED.relation_type,
+                                source_kind = EXCLUDED.source_kind,
+                                chunk_id = EXCLUDED.chunk_id,
+                                source_ref = EXCLUDED.source_ref,
+                                document_source_id = EXCLUDED.document_source_id,
+                                quote = EXCLUDED.quote,
+                                quote_sha256 = EXCLUDED.quote_sha256,
+                                locator = EXCLUDED.locator,
+                                customer_id = EXCLUDED.customer_id,
+                                source_scope = EXCLUDED.source_scope,
+                                owner_user_id = EXCLUDED.owner_user_id,
+                                visibility = EXCLUDED.visibility
+                            """,
+                            (
+                                relation_uuid,
+                                subject[0],
+                                target[0],
+                                "co_occurs",
+                                "chunk",
+                                chunk_uuid,
+                                chunk_id,
+                                source_uuid,
+                                text[:260],
+                                sha256_text(text[:260]),
+                                json.dumps({"chunk_index": int(chunk.get("index") or 0), "cas_chunk_id": chunk_id, "cas_document_id": document_id}, ensure_ascii=False),
+                                "rule",
+                                "cas-local-v1",
+                                0.85,
+                                customer_id,
+                                source_scope,
+                                owner_id,
+                                visibility,
+                            ),
+                        )
+        cur.execute(
+            """
+            UPDATE graph_entities ge
+            SET mention_count = COALESCE(mentions.count, 0),
+                updated_at = now()
+            FROM (
+                SELECT entity_id, COUNT(*)::integer AS count
+                FROM graph_entity_mentions
+                GROUP BY entity_id
+            ) mentions
+            WHERE ge.id = mentions.entity_id
+            """
+        )
+        cur.execute(
+            """
+            UPDATE graph_entities ge
+            SET mention_count = 0,
+                updated_at = now()
+            WHERE NOT EXISTS (
+                SELECT 1 FROM graph_entity_mentions gm WHERE gm.entity_id = ge.id
+            )
+            """
+        )
 
     def _pbs_compat_health(self, cur: Any) -> dict[str, Any]:
         cur.execute(
@@ -588,24 +886,35 @@ class PostgresKnowledgeStore:
         document_sources = int((cur.fetchone() or [0])[0] or 0)
         cur.execute("SELECT COUNT(*) FROM document_chunks")
         document_chunks = int((cur.fetchone() or [0])[0] or 0)
-        cur.execute("SELECT COUNT(*) FROM chunk_embeddings")
+        cur.execute("SELECT COUNT(*) FROM chunk_embeddings WHERE model = %s", (LOCAL_EMBEDDING_MODEL,))
         chunk_embeddings = int((cur.fetchone() or [0])[0] or 0)
+        cur.execute("SELECT COUNT(*) FROM graph_entities WHERE mention_count > 0")
+        graph_entities = int((cur.fetchone() or [0])[0] or 0)
+        cur.execute("SELECT COUNT(*) FROM graph_entity_mentions")
+        graph_entity_mentions = int((cur.fetchone() or [0])[0] or 0)
+        cur.execute("SELECT COUNT(*) FROM graph_entity_relations")
+        graph_entity_relations = int((cur.fetchone() or [0])[0] or 0)
         cur.execute(
             """
             SELECT COUNT(*)
             FROM document_chunks c
-            LEFT JOIN chunk_embeddings ce ON ce.chunk_id = c.id
+            LEFT JOIN chunk_embeddings ce ON ce.chunk_id = c.id AND ce.model = %s
             WHERE length(btrim(COALESCE(c.embedding_text, ''))) > 0 AND ce.chunk_id IS NULL
-            """
+            """,
+            (LOCAL_EMBEDDING_MODEL,),
         )
         missing_embeddings = int((cur.fetchone() or [0])[0] or 0)
         return {
             "schema_ready": sorted(tables) == sorted(PBS_COMPAT_TABLES) and embedding_type == "vector(768)",
             "tables": tables,
             "embedding_dimension": 768 if embedding_type == "vector(768)" else 0,
+            "embedding_model": LOCAL_EMBEDDING_MODEL,
             "document_sources": document_sources,
             "document_chunks": document_chunks,
             "chunk_embeddings": chunk_embeddings,
+            "graph_entities": graph_entities,
+            "graph_entity_mentions": graph_entity_mentions,
+            "graph_entity_relations": graph_entity_relations,
             "missing_embedding_entries": missing_embeddings,
             "embedding_index_parity": document_chunks > 0 and chunk_embeddings == document_chunks and missing_embeddings == 0,
         }

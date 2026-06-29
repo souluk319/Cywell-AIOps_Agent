@@ -149,7 +149,28 @@ function envFromRequiredSecret(deployment, envName, secretName, key) {
 }
 
 function configValue(configMap, key) {
-  return configMap.match(new RegExp(`^\\s*${escapeRegExp(key)}:\\s*([^\\n]+)\\s*$`, "m"))?.[1]?.replace(/^"|"$/g, "") ?? "";
+  return cleanScalar(configMap.match(new RegExp(`^\\s*${escapeRegExp(key)}:\\s*([^\\n]+)\\s*$`, "m"))?.[1] ?? "");
+}
+
+function cleanScalar(value) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed.replace(/^['"]|['"]$/g, "");
+}
+
+function configMapDataValue(configMapJson, key) {
+  return cleanScalar(configMapJson?.data?.[key] ?? "");
+}
+
+function customerAccessPolicyIsConcrete(jsonText) {
+  try {
+    const policy = JSON.parse(jsonText);
+    const groups = policy?.groups && typeof policy.groups === "object" ? policy.groups : {};
+    const users = policy?.users && typeof policy.users === "object" ? policy.users : {};
+    const entries = [...Object.values(groups), ...Object.values(users)].flatMap((value) => (Array.isArray(value) ? value : []));
+    return entries.length > 0 && entries.every((value) => String(value).trim() && String(value).trim() !== "*");
+  } catch {
+    return false;
+  }
 }
 
 function noSecretMaterial(rendered) {
@@ -231,6 +252,12 @@ function ingressPolicyApplies(policy) {
   const types = policy?.spec?.policyTypes ?? [];
   if (types.length === 0) return true;
   return types.includes("Ingress");
+}
+
+function egressPolicyApplies(policy) {
+  const types = policy?.spec?.policyTypes ?? [];
+  if (types.length === 0) return (policy?.spec?.egress ?? []).length > 0;
+  return types.includes("Egress");
 }
 
 function ingressRuleAllowsOnlyGateway8080(rule = {}) {
@@ -318,6 +345,71 @@ function appliedPbsEgressScoped(policy) {
     }) &&
     !pbsRule.to[0].ipBlock;
   return Boolean(dnsOk && postgresOk && pbsOk && egress.every((rule) => (rule.to ?? []).every(peerHasNoBroadAccess)));
+}
+
+function egressRuleKind(rule = {}) {
+  const to = rule.to ?? [];
+  if (to.length !== 1 || !to.every(peerHasNoBroadAccess)) return "";
+  if (
+    portsEqual(rule.ports ?? [], [
+      { protocol: "TCP", port: 53 },
+      { protocol: "UDP", port: 53 },
+      { protocol: "TCP", port: 5353 },
+      { protocol: "UDP", port: 5353 }
+    ]) &&
+    selectorMatches(to[0].namespaceSelector, { "kubernetes.io/metadata.name": "openshift-dns" }) &&
+    !to[0].podSelector &&
+    !to[0].ipBlock
+  ) {
+    return "dns";
+  }
+  if (
+    portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 5432 }]) &&
+    selectorMatches(to[0].podSelector, {
+      "app.kubernetes.io/name": "cywell-ai-sentinel",
+      "app.kubernetes.io/component": "knowledge-postgres"
+    }) &&
+    !to[0].namespaceSelector &&
+    !to[0].ipBlock
+  ) {
+    return "postgres";
+  }
+  if (
+    portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 8765 }]) &&
+    selectorMatches(to[0].namespaceSelector, { "kubernetes.io/metadata.name": "playbookstudio" }) &&
+    selectorMatches(to[0].podSelector, {
+      "app.kubernetes.io/name": "playbookstudio",
+      "app.kubernetes.io/component": "runtime"
+    }) &&
+    !to[0].ipBlock
+  ) {
+    return "pbs-runtime";
+  }
+  return "";
+}
+
+function appliedKnowledgeEgressUnionScoped(policies = [], knowledgeLabels = {}) {
+  const selectedPolicies = policies.filter((policy) => egressPolicyApplies(policy) && selectorSelectsLabels(policy.spec?.podSelector ?? {}, knowledgeLabels));
+  const allowedKinds = new Set();
+  for (const policy of selectedPolicies) {
+    for (const rule of policy.spec?.egress ?? []) {
+      const kind = egressRuleKind(rule);
+      if (!kind) {
+        return {
+          ok: false,
+          reason: "knowledge-engine egress union contains a destination or port outside DNS/Postgres/PBS runtime",
+          policies: selectedPolicies.map((item) => item.metadata?.name).filter(Boolean)
+        };
+      }
+      allowedKinds.add(kind);
+    }
+  }
+  const missing = ["dns", "postgres", "pbs-runtime"].filter((kind) => !allowedKinds.has(kind));
+  return {
+    ok: selectedPolicies.length > 0 && missing.length === 0,
+    reason: missing.length ? `missing required egress kinds: ${missing.join(", ")}` : "",
+    policies: selectedPolicies.map((item) => item.metadata?.name).filter(Boolean)
+  };
 }
 
 function pbsRuntimeEgressScoped(policy) {
@@ -454,6 +546,31 @@ function imageDigest(image) {
   return String(image ?? "").match(/sha256:[a-f0-9]{32,}/i)?.[0]?.toLowerCase() ?? "";
 }
 
+function selectorArgFromLabels(labels = {}) {
+  return Object.entries(labels)
+    .filter(([_key, value]) => value !== undefined && value !== "")
+    .map(([key, value]) => `${key}=${value}`)
+    .join(",");
+}
+
+function workloadSelectorLabels(workload) {
+  return workload?.spec?.selector?.matchLabels ?? workload?.spec?.template?.metadata?.labels ?? {};
+}
+
+function podReady(pod) {
+  return (
+    pod?.status?.phase === "Running" &&
+    !pod?.metadata?.deletionTimestamp &&
+    (pod.status?.conditions ?? []).some((condition) => condition.type === "Ready" && condition.status === "True") &&
+    (pod.status?.containerStatuses ?? []).every((container) => container.ready && container.state?.running)
+  );
+}
+
+function podContainerDigest(pod, containerName) {
+  const status = (pod?.status?.containerStatuses ?? []).find((container) => container.name === containerName) ?? (pod?.status?.containerStatuses ?? [])[0];
+  return imageDigest(status?.imageID);
+}
+
 function currentGitHead() {
   const result = run("git", ["rev-parse", "--short", "HEAD"]);
   return result.ok ? result.stdout.trim() : "";
@@ -506,10 +623,50 @@ function liveDatabaseUrlUsesService(urlText) {
 }
 
 function deploymentReady(deploymentJson) {
+  const desired = Number(deploymentJson?.spec?.replicas ?? 1);
   return (
     Number(deploymentJson?.status?.observedGeneration ?? 0) >= Number(deploymentJson?.metadata?.generation ?? 0) &&
-    Number(deploymentJson?.status?.readyReplicas ?? 0) >= 1 &&
-    Number(deploymentJson?.status?.availableReplicas ?? 0) >= 1
+    Number(deploymentJson?.status?.updatedReplicas ?? 0) >= desired &&
+    Number(deploymentJson?.status?.readyReplicas ?? 0) >= desired &&
+    Number(deploymentJson?.status?.availableReplicas ?? 0) >= desired &&
+    Number(deploymentJson?.status?.unavailableReplicas ?? 0) === 0
+  );
+}
+
+function statefulSetReady(statefulSet) {
+  const desired = Number(statefulSet?.spec?.replicas ?? 1);
+  return (
+    Number(statefulSet?.status?.observedGeneration ?? 0) >= Number(statefulSet?.metadata?.generation ?? 0) &&
+    Number(statefulSet?.status?.readyReplicas ?? 0) >= desired &&
+    Number(statefulSet?.status?.currentReplicas ?? 0) >= desired &&
+    Number(statefulSet?.status?.updatedReplicas ?? 0) >= desired &&
+    (!statefulSet?.status?.currentRevision || statefulSet.status.currentRevision === statefulSet.status.updateRevision)
+  );
+}
+
+function releaseDigestFor(evidence, imageName) {
+  return imageDigest(evidence?.promotedImages?.[imageName]?.digest);
+}
+
+function readyPodsUsePromotedDigest(id, workload, containerName, imageName, releaseEvidence) {
+  const selector = selectorArgFromLabels(workloadSelectorLabels(workload));
+  if (!selector) {
+    fail(id, `${workload?.metadata?.name ?? imageName} must have matchLabels so ready pod release digests can be verified`);
+    return;
+  }
+  const pods = getJson(id, ["get", "pods", "-n", namespace, "-l", selector]);
+  if (!pods) return;
+  const expectedDigest = releaseDigestFor(releaseEvidence, imageName);
+  const readyPods = (pods.items ?? []).filter(podReady);
+  const podDigests = readyPods.map((pod) => ({
+    name: pod.metadata?.name,
+    digest: podContainerDigest(pod, containerName)
+  }));
+  expect(
+    id,
+    Boolean(expectedDigest) && readyPods.length > 0 && podDigests.every((item) => item.digest === expectedDigest),
+    `${workload?.metadata?.name ?? imageName} ready pods run the promoted ${imageName}:v0.1.4 digest`,
+    `${workload?.metadata?.name ?? imageName} ready pod digests must match promoted digest ${expectedDigest || "missing"}: ${JSON.stringify(podDigests)}`
   );
 }
 
@@ -610,6 +767,7 @@ expect(
 );
 if (overlay === "pbs-live") {
   const postgresImage = firstContainerImage(postgresStatefulSet);
+  const renderedCustomerAccess = configValue(liveConfigMap, "customer-access-json");
   expect(
     "preflight:live-runtime-ready-gate",
     envValue(deployment, "CAS_PBS_REQUIRE_RUNTIME_READY") === "true",
@@ -632,8 +790,14 @@ if (overlay === "pbs-live") {
       Boolean(liveConfigMap) &&
       envValue(gatewayDeployment, "CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS") === "true" &&
       envFromConfig(gatewayDeployment, "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON", "cas-knowledge-live-config", "customer-access-json") &&
-      configValue(liveConfigMap, "customer-access-json").includes("cywell-knowledge-admins"),
+      Boolean(renderedCustomerAccess),
     "pbs-live requires Gateway customer workspace ACL from live ConfigMap"
+  );
+  expect(
+    "preflight:live-customer-acl-concrete",
+    customerAccessPolicyIsConcrete(renderedCustomerAccess),
+    "pbs-live customer workspace ACL maps real users/groups to explicit customer workspaces",
+    "pbs-live customer workspace ACL must replace the wildcard placeholder before cutover"
   );
   expect(
     "preflight:live-database-secret-ref",
@@ -786,6 +950,31 @@ if (overlay === "pbs-live") {
       "app.kubernetes.io/name": "cywell-ai-sentinel",
       "app.kubernetes.io/component": "knowledge-engine"
     };
+    const appliedPbsConfig = getJson("cluster:applied-pbs-config", ["get", "configmap", "-n", namespace, "cas-pbs-config"]);
+    if (appliedPbsConfig) {
+      expect(
+        "cluster:applied-pbs-config-values",
+        configMapDataValue(appliedPbsConfig, "base-url") === pbsBaseUrl &&
+          configMapDataValue(appliedPbsConfig, "auth-mode") === pbsAuthMode &&
+          configMapDataValue(appliedPbsConfig, "timeout-ms") === configValue(configMap, "timeout-ms") &&
+          configMapDataValue(appliedPbsConfig, "max-response-bytes") === configValue(configMap, "max-response-bytes") &&
+          configMapDataValue(appliedPbsConfig, "tls-insecure") === "false",
+        "applied cas-pbs-config matches rendered PBS live transport settings",
+        `applied cas-pbs-config must match rendered live values and keep tls-insecure=false: ${JSON.stringify(appliedPbsConfig.data ?? {})}`
+      );
+    }
+    const appliedLiveConfig = getJson("cluster:applied-live-config", ["get", "configmap", "-n", namespace, "cas-knowledge-live-config"]);
+    if (appliedLiveConfig) {
+      const appliedCustomerAccess = configMapDataValue(appliedLiveConfig, "customer-access-json");
+      expect(
+        "cluster:applied-live-customer-acl",
+        configMapDataValue(appliedLiveConfig, "service-owner") === configValue(liveConfigMap, "service-owner") &&
+          appliedCustomerAccess === configValue(liveConfigMap, "customer-access-json") &&
+          customerAccessPolicyIsConcrete(appliedCustomerAccess),
+        "applied live customer ACL matches rendered config and contains explicit customer mappings",
+        "applied live customer ACL must match rendered config and must not use the wildcard placeholder"
+      );
+    }
     const appliedEngine = getJson("cluster:applied-knowledge-engine", ["get", "deployment", "-n", namespace, "cas-knowledge-engine"]);
     if (appliedEngine) {
       appliedKnowledgeLabels = { ...appliedKnowledgeLabels, ...(appliedEngine.spec?.template?.metadata?.labels ?? {}) };
@@ -820,6 +1009,13 @@ if (overlay === "pbs-live") {
           serviceOwnerRef
         })
       );
+      readyPodsUsePromotedDigest(
+        "cluster:applied-knowledge-engine-promoted-digest",
+        appliedEngine,
+        "knowledge-engine",
+        "cas-knowledge-engine",
+        releaseImagesEvidence
+      );
     }
     const appliedGateway = getJson("cluster:applied-gateway", ["get", "deployment", "-n", namespace, "cas-gateway"]);
     if (appliedGateway) {
@@ -841,21 +1037,45 @@ if (overlay === "pbs-live") {
           availableReplicas: appliedGateway.status?.availableReplicas
         })
       );
+      readyPodsUsePromotedDigest("cluster:applied-gateway-promoted-digest", appliedGateway, "gateway", "cas-gateway", releaseImagesEvidence);
+    }
+    const appliedConsole = getJson("cluster:applied-console-plugin", ["get", "deployment", "-n", namespace, "cas-console-plugin"]);
+    if (appliedConsole) {
+      const consoleContainer = workloadContainer(appliedConsole, "console-plugin");
+      expect(
+        "cluster:applied-console-plugin-contract",
+        deploymentReady(appliedConsole) && String(consoleContainer.image ?? "").endsWith(":v0.1.4"),
+        "applied cas-console-plugin is fully rolled out with v0.1.4 image",
+        JSON.stringify({
+          image: consoleContainer.image,
+          updatedReplicas: appliedConsole.status?.updatedReplicas,
+          readyReplicas: appliedConsole.status?.readyReplicas,
+          availableReplicas: appliedConsole.status?.availableReplicas
+        })
+      );
+      readyPodsUsePromotedDigest("cluster:applied-console-plugin-promoted-digest", appliedConsole, "console-plugin", "cas-console-plugin", releaseImagesEvidence);
     }
     const appliedPostgres = getJson("cluster:applied-knowledge-postgres", ["get", "statefulset", "-n", namespace, "cas-knowledge-postgres"]);
     if (appliedPostgres) {
+      const postgresContainer = workloadContainer(appliedPostgres, "postgres");
       expect(
         "cluster:applied-postgres-live-secret-refs",
-        Number(appliedPostgres.status?.readyReplicas ?? 0) >= 1 &&
+        statefulSetReady(appliedPostgres) &&
+          String(postgresContainer.image ?? "").endsWith(":v0.1.4") &&
           workloadEnvSecretRef(appliedPostgres, "POSTGRES_DB", "cas-knowledge-postgres-live", "database", "postgres") &&
           workloadEnvSecretRef(appliedPostgres, "POSTGRES_USER", "cas-knowledge-postgres-live", "username", "postgres") &&
           workloadEnvSecretRef(appliedPostgres, "POSTGRES_PASSWORD", "cas-knowledge-postgres-live", "password", "postgres"),
-        "applied knowledge Postgres StatefulSet is ready and references cas-knowledge-postgres-live credentials",
+        "applied knowledge Postgres StatefulSet is fully rolled out with v0.1.4 and references cas-knowledge-postgres-live credentials",
         JSON.stringify({
+          image: postgresContainer.image,
           readyReplicas: appliedPostgres.status?.readyReplicas,
-          currentReplicas: appliedPostgres.status?.currentReplicas
+          currentReplicas: appliedPostgres.status?.currentReplicas,
+          updatedReplicas: appliedPostgres.status?.updatedReplicas,
+          currentRevision: appliedPostgres.status?.currentRevision,
+          updateRevision: appliedPostgres.status?.updateRevision
         })
       );
+      readyPodsUsePromotedDigest("cluster:applied-postgres-promoted-digest", appliedPostgres, "postgres", "cas-knowledge-postgres", releaseImagesEvidence);
     }
     const postgresPods = getJson("cluster:applied-postgres-pods", [
       "get",
@@ -962,6 +1182,13 @@ if (overlay === "pbs-live") {
         union.ok,
         "applied knowledge-engine ingress union allows only gateway pods on TCP 8080",
         JSON.stringify(union)
+      );
+      const egressUnion = appliedKnowledgeEgressUnionScoped(appliedNetworkPolicies.items ?? [], appliedKnowledgeLabels);
+      expect(
+        "cluster:applied-knowledge-egress-union-scoped",
+        egressUnion.ok,
+        "applied knowledge-engine egress union allows only DNS, Postgres, and labeled PBS runtime pods",
+        JSON.stringify(egressUnion)
       );
     }
     const appliedPbsEgress = getJson("cluster:applied-pbs-egress-policy", [
