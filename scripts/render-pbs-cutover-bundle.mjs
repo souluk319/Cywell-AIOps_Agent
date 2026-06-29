@@ -52,6 +52,8 @@ const requiredLivePrereqOutputFileKeys = [
 ];
 const requiredPbsContractFiles = [
   "deploy/Dockerfile",
+  "deploy/openshift/core.yaml",
+  "deploy/openshift-cywell-v014/README.md",
   "deploy/openshift-cywell-v014/kustomization.yaml",
   "deploy/openshift-cywell-v014/runtime-service.yaml",
   "deploy/openshift-cywell-v014/runtime-contract-patch.yaml",

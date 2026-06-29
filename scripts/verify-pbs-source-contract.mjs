@@ -31,6 +31,8 @@ const evidencePath = requireCleanSource && requireExpectedHead ? pinnedEvidenceP
 const checks = [];
 const contractFiles = [
   "deploy/Dockerfile",
+  "deploy/openshift/core.yaml",
+  "deploy/openshift-cywell-v014/README.md",
   "deploy/openshift-cywell-v014/kustomization.yaml",
   "deploy/openshift-cywell-v014/runtime-service.yaml",
   "deploy/openshift-cywell-v014/runtime-contract-patch.yaml",
@@ -183,6 +185,8 @@ function hasAll(text, values) {
 
 function sourceContractChecks(root) {
   const dockerfile = readRequired(root, "deploy/Dockerfile");
+  const openshiftCore = readRequired(root, "deploy/openshift/core.yaml");
+  const overlayReadme = readRequired(root, "deploy/openshift-cywell-v014/README.md");
   const overlayKustomization = readRequired(root, "deploy/openshift-cywell-v014/kustomization.yaml");
   const overlayRuntimeService = readRequired(root, "deploy/openshift-cywell-v014/runtime-service.yaml");
   const overlayRuntimeContractPatch = readRequired(root, "deploy/openshift-cywell-v014/runtime-contract-patch.yaml");
@@ -239,6 +243,31 @@ function sourceContractChecks(root) {
     hasAll(compose, ["pgvector/pgvector:pg16", "DATABASE_URL", "db-migrate", "condition: service_completed_successfully"]),
     "PBS-Dev3 compose declares pgvector, DATABASE_URL, and db-migrate dependency",
     "PBS-Dev3 compose must keep the database/migration contract explicit for Cywell live cutover"
+  );
+  expect(
+    "pbs-source:openshift-core:no-qdrant",
+    !/QDRANT|qdrant/i.test(openshiftCore),
+    "PBS-Dev3 OpenShift core manifest does not carry an unused Qdrant runtime contract",
+    "PBS-Dev3 OpenShift core manifest must not carry an unused Qdrant runtime contract for Cywell live cutover"
+  );
+  expect(
+    "pbs-source:openshift-core:disabled-namespace-mode",
+    hasAll(openshiftCore, ["PBS_AUTO_CREATE_NAMESPACE: \"false\"", "PBS_NAMESPACE_MODE: disabled"]),
+    "PBS-Dev3 OpenShift core manifest disables runtime namespace auto-management",
+    "PBS-Dev3 OpenShift core manifest must keep namespace auto-management disabled for the Cywell-controlled runtime namespace"
+  );
+  expect(
+    "pbs-source:openshift-overlay:source-stamp-runbook",
+    hasAll(overlayReadme, [
+      "cywell.ai/pbs-source-head",
+      "PLAYBOOKSTUDIO_SOURCE_HEAD",
+      "PBS_SOURCE_HEAD",
+      "oc set env deployment/app",
+      "oc patch deployment/app",
+      "oc rollout status deployment/app"
+    ]),
+    "PBS-Dev3 Cywell overlay runbook stamps live pods with the approved PBS source SHA in annotations and env",
+    "PBS-Dev3 Cywell overlay runbook must stamp live pods with the approved PBS source SHA before Cywell live preflight"
   );
   expect(
     "pbs-source:openshift-overlay:runtime-service",
@@ -471,6 +500,33 @@ async function createSelfTestSource() {
     `FROM python:3.11-slim AS app
 EXPOSE 8765
 CMD ["python", "-m", "play_book_studio.cli", "ui", "--no-browser", "--host", "0.0.0.0", "--port", "8765"]
+`
+  );
+  await write(
+    "deploy/openshift/core.yaml",
+    `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: playbookstudio-config
+  namespace: pbs-ocpops
+data:
+  OCP_DEFAULT_NAMESPACE: pbs-ocpops
+  PBS_AUTO_CREATE_NAMESPACE: "false"
+  PBS_NAMESPACE_MODE: disabled
+`
+  );
+  await write(
+    "deploy/openshift-cywell-v014/README.md",
+    `# Cywell v0.1.4 Runtime Contract Overlay
+
+- runtime pod source stamp cywell.ai/pbs-source-head or PLAYBOOKSTUDIO_SOURCE_HEAD
+
+\`\`\`bash
+PBS_SOURCE_HEAD="<approved-full-pbs-git-sha>"
+oc set env deployment/app -n playbookstudio PLAYBOOKSTUDIO_SOURCE_HEAD="\${PBS_SOURCE_HEAD}"
+oc patch deployment/app -n playbookstudio --type=merge -p "{\\"spec\\":{\\"template\\":{\\"metadata\\":{\\"annotations\\":{\\"cywell.ai/pbs-source-head\\":\\"\${PBS_SOURCE_HEAD}\\"}}}}}"
+oc rollout status deployment/app -n playbookstudio --timeout=600s
+\`\`\`
 `
   );
   await write(

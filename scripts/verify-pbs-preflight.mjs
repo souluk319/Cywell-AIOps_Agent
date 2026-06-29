@@ -33,6 +33,8 @@ const strictApprovedPbsRemotePattern = /^(?:git@github\.com:|https:\/\/github\.c
 const approvedCywellRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/Cywell-AIOps_Agent(?:\.git)?$/i;
 const requiredPbsContractFiles = [
   "deploy/Dockerfile",
+  "deploy/openshift/core.yaml",
+  "deploy/openshift-cywell-v014/README.md",
   "deploy/openshift-cywell-v014/kustomization.yaml",
   "deploy/openshift-cywell-v014/runtime-service.yaml",
   "deploy/openshift-cywell-v014/runtime-contract-patch.yaml",

@@ -23,7 +23,7 @@ Implemented after the parallel console/cutover/evidence review pass:
 - Strict preflight parses rendered Kubernetes objects for the live generated-site overlay and checks the exact NetworkPolicy shape for PBS egress and Knowledge Engine ingress instead of relying on string presence.
 - Strict preflight now treats only real Kubernetes NotFound responses as proof that the legacy `cas-knowledge-postgres` Secret is absent; RBAC/API errors no longer pass the absence check.
 - The tracked pbs-live overlay now fails closed with `customer-access-json={}`; production mappings must come from `render:pbs:live-prereqs` generated site overlay.
-- The v0.1.4 PBS source baseline is now pinned through a clean clone at `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`, branch `kugnus/cywell-v0.1.4-source-contract`, commit `47c03c47cabf2fb1181fe44d9810c0feef086d6f`, pushed to approved remote `https://github.com/souluk319/PBS_DEV_Part3.git`.
+- The v0.1.4 PBS source baseline is now pinned through a clean clone at `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`, branch `kugnus/cywell-v0.1.4-source-contract`, commit `6604777abb9e6bd44a83c6a12f36e31ac396489e`, pushed to approved remote `https://github.com/souluk319/PBS_DEV_Part3.git`.
 - The PBS companion branch now adds `deploy/openshift-cywell-v014`, a real OpenShift overlay that renders namespace `playbookstudio`, Service `playbookstudio-runtime` on port `8765`, and runtime labels `app.kubernetes.io/name=playbookstudio` plus `app.kubernetes.io/component=runtime` without faking `/api/health`.
 
 Proof captured in this pass:
@@ -34,13 +34,13 @@ Proof captured in this pass:
 - `npm run verify:console:topology-dom:built`: PASS, 53 browser-backed checks.
 - `npm run verify:console:integration:built`: PASS, 113 checks.
 - `npm run verify:pbs:cutover-bundle`: PASS, 21 self-test checks.
-- `$env:CAS_PBS_SOURCE_HEAD="47c03c47cabf2fb1181fe44d9810c0feef086d6f"; $env:CAS_PBS_SOURCE_DIR="F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone"; npm run verify:release:source-pinning`: PASS, 57 checks; strict source pin evidence is now clean, full-SHA, approved-remote, and remote-ref-contained.
-- `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`. Source pinning is no longer the blocker for the current evidence set. Remaining local blockers are stale/dirty `cas-pbs-live-prereqs-render.json` from old head `7e12aad`, missing current real-render/hash-bound generated-site preapply evidence, and missing ready PBS runtime pod source stamps for `47c03c47cabf2fb1181fe44d9810c0feef086d6f`. External live preapply blockers are retained in the active blocker list even when local evidence is invalid.
+- `$env:CAS_PBS_SOURCE_HEAD="6604777abb9e6bd44a83c6a12f36e31ac396489e"; $env:CAS_PBS_SOURCE_DIR="F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone"; npm run verify:release:source-pinning`: PASS, 62 checks; strict source pin evidence is now PBS-clean, full-SHA, approved-remote, remote-ref-contained, and includes the exact PBS contract file hash set.
+- `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`. Source pinning is no longer the blocker for the current evidence set. Remaining local blockers are current-head clean `cas-pbs-live-prereqs-render.json` in `input-validation` FAIL mode because approved live Secret/ACL/Postgres inputs are not supplied, missing real-render/hash-bound generated-site preapply evidence, and missing ready PBS runtime pod source stamps for `6604777abb9e6bd44a83c6a12f36e31ac396489e`. External live preapply blockers are retained in the active blocker list even when local evidence is invalid.
 - `npm run verify:deploy:manifests`: PASS, 286 checks.
-- `npm run verify:pbs:source-contract:required`: PASS, 55 total checks: 55 PASS / 0 WARN against clean clone `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`; the checked PBS remote is `https://github.com/souluk319/PBS_DEV_Part3.git`.
+- `npm run verify:pbs:source-contract:required`: PASS, 60 total checks: 60 PASS / 0 WARN against clean clone `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`; the checked PBS remote is `https://github.com/souluk319/PBS_DEV_Part3.git`.
 - `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, 48 PASS / 7 FAIL. Current release image evidence and strict pinned PBS source evidence pass; remaining failures are the missing external `playbookstudio` namespace/service, missing `cas-pbs-auth`, missing `cas-knowledge-postgres-live`, legacy dev Secret cleanup, and ready PBS runtime source revision evidence once the Service exists.
 - `npm run render:pbs:live-prereqs`: blocked in the current shell until approved non-placeholder PBS bearer token, owner HMAC, service owner, concrete customer ACL JSON, and live Postgres DB credentials/URL are supplied.
-- `npm run verify:pbs:live-prereqs`: PASS, 12 self-test checks.
+- `npm run verify:pbs:live-prereqs`: PASS, 13 self-test checks.
 - `npm run verify`: PASS.
 
 ## Historical Update - Customer Corpus Workbench and Source-Lane Hardening
