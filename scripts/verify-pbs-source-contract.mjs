@@ -1,0 +1,310 @@
+#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+
+const args = new Set(process.argv.slice(2).filter((arg) => !arg.startsWith("--source-dir=")));
+const sourceDirArg = process.argv.find((arg) => arg.startsWith("--source-dir="))?.split("=")[1];
+const checkedAt = new Date().toISOString();
+const evidencePath = join("test-results", "cas-pbs-source-contract.json");
+const repoDefaultSourceDir = resolve(process.cwd(), "..", "PBS-Dev3");
+const sourceDir = resolve(sourceDirArg || process.env.CAS_PBS_SOURCE_DIR || repoDefaultSourceDir);
+const requireSource = args.has("--require-source");
+const selfTest = args.has("--self-test");
+const checks = [];
+
+function runGit(gitArgs) {
+  const result = spawnSync("git", gitArgs, {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 10000,
+    windowsHide: true
+  });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function record(status, id, detail) {
+  checks.push({ status, id, detail });
+  console.log(`[${status}] ${id}: ${detail}`);
+}
+
+function pass(id, detail) {
+  record("PASS", id, detail);
+}
+
+function warn(id, detail) {
+  record("WARN", id, detail);
+}
+
+function fail(id, detail) {
+  record("FAIL", id, detail);
+}
+
+function expect(id, condition, passDetail, failDetail = passDetail) {
+  if (condition) pass(id, passDetail);
+  else fail(id, failDetail);
+}
+
+function readRequired(root, relativePath) {
+  const path = join(root, relativePath);
+  if (!existsSync(path)) {
+    fail(`pbs-source:file:${relativePath}`, `${relativePath} is missing under ${root}`);
+    return "";
+  }
+  pass(`pbs-source:file:${relativePath}`, `${relativePath} exists`);
+  return readFileSync(path, "utf8");
+}
+
+function literal(text, value) {
+  return text.includes(value);
+}
+
+function hasAll(text, values) {
+  return values.every((value) => literal(text, value));
+}
+
+function sourceContractChecks(root) {
+  const dockerfile = readRequired(root, "deploy/Dockerfile");
+  const compose = readRequired(root, "docker-compose.yml");
+  const serverFactory = readRequired(root, "src/play_book_studio/http/server_handler_factory.py");
+  const uploadApi = readRequired(root, "src/play_book_studio/http/upload_api.py");
+  const urlIngestApi = readRequired(root, "src/play_book_studio/http/url_ingest_api.py");
+  const serverChat = readRequired(root, "src/play_book_studio/http/server_chat.py");
+  const wikiVault = readRequired(root, "src/play_book_studio/http/wiki_vault.py");
+  const wikiLoop = readRequired(root, "src/play_book_studio/wiki_loop.py");
+  const cywellRuntimeSample = readRequired(process.cwd(), "deliverables/active/v0.1.4/pbs-runtime-service-contract.sample.yaml");
+  const cywellPreflight = readRequired(process.cwd(), "scripts/verify-pbs-preflight.mjs");
+
+  expect(
+    "pbs-source:dockerfile:app-target",
+    /FROM\s+python:3\.11-slim\s+AS\s+app/i.test(dockerfile),
+    "PBS-Dev3 Dockerfile has an app runtime target",
+    "PBS-Dev3 Dockerfile must expose a stable app runtime target"
+  );
+  expect(
+    "pbs-source:dockerfile:runtime-port",
+    /EXPOSE\s+8765/.test(dockerfile),
+    "PBS-Dev3 app runtime exposes port 8765",
+    "PBS-Dev3 app runtime must expose port 8765 to match Cywell pbs-live egress"
+  );
+  expect(
+    "pbs-source:dockerfile:runtime-command",
+    hasAll(dockerfile, ['"play_book_studio.cli"', '"ui"', '"--host"', '"0.0.0.0"', '"--port"', '"8765"']),
+    "PBS-Dev3 app runtime command binds the UI/API server on 0.0.0.0:8765",
+    "PBS-Dev3 app runtime command must bind the API server on 0.0.0.0:8765"
+  );
+  expect(
+    "pbs-source:compose:app-port",
+    compose.includes("${APP_HTTP_PORT:-8765}:8765"),
+    "PBS-Dev3 compose app maps APP_HTTP_PORT to container port 8765",
+    "PBS-Dev3 compose app must map runtime port 8765"
+  );
+  expect(
+    "pbs-source:compose:health-endpoint",
+    hasAll(compose, ["http://127.0.0.1:8765/api/health", "healthcheck"]),
+    "PBS-Dev3 compose healthcheck uses /api/health on port 8765",
+    "PBS-Dev3 compose healthcheck must prove the same /api/health endpoint Cywell probes"
+  );
+  expect(
+    "pbs-source:compose:db-contract",
+    hasAll(compose, ["pgvector/pgvector:pg16", "DATABASE_URL", "db-migrate", "condition: service_completed_successfully"]),
+    "PBS-Dev3 compose declares pgvector, DATABASE_URL, and db-migrate dependency",
+    "PBS-Dev3 compose must keep the database/migration contract explicit for Cywell live cutover"
+  );
+  expect(
+    "pbs-source:route:health",
+    serverFactory.includes('request_path == "/api/health"'),
+    "PBS-Dev3 serves GET /api/health",
+    "PBS-Dev3 must serve GET /api/health"
+  );
+  expect(
+    "pbs-source:route:upload-ingest",
+    serverFactory.includes('parsed_request.path == "/api/uploads/ingest"') && uploadApi.includes("def handle_upload_ingest("),
+    "PBS-Dev3 serves POST /api/uploads/ingest through upload_api",
+    "PBS-Dev3 must serve POST /api/uploads/ingest through upload_api"
+  );
+  expect(
+    "pbs-source:route:url-ingest",
+    serverFactory.includes('parsed_request.path == "/api/uploads/url-ingest"') && urlIngestApi.includes("build_url_ingest_response"),
+    "PBS-Dev3 serves POST /api/uploads/url-ingest through url_ingest_api",
+    "PBS-Dev3 must serve POST /api/uploads/url-ingest through url_ingest_api"
+  );
+  expect(
+    "pbs-source:route:chat",
+    serverFactory.includes('parsed_request.path == "/api/chat"') && serverChat.includes("def handle_chat("),
+    "PBS-Dev3 serves POST /api/chat through server_chat",
+    "PBS-Dev3 must serve POST /api/chat through server_chat"
+  );
+  expect(
+    "pbs-source:route:wiki-vault",
+    serverFactory.includes('request_path == "/api/wiki-vault"') && wikiVault.includes("def handle_wiki_vault("),
+    "PBS-Dev3 serves GET /api/wiki-vault through wiki_vault",
+    "PBS-Dev3 must serve GET /api/wiki-vault through wiki_vault"
+  );
+  expect(
+    "pbs-source:route:wiki-vault-notes",
+    serverFactory.includes('parsed_request.path == "/api/wiki-vault/notes"') && wikiVault.includes("def handle_wiki_vault_note_save("),
+    "PBS-Dev3 serves POST /api/wiki-vault/notes through wiki_vault",
+    "PBS-Dev3 must serve POST /api/wiki-vault/notes through wiki_vault"
+  );
+  expect(
+    "pbs-source:route:wiki-loop-run",
+    serverFactory.includes('parsed_request.path == "/api/wiki-loop/run"') && wikiLoop.includes("def run_wiki_loop_once("),
+    "PBS-Dev3 serves POST /api/wiki-loop/run through wiki_loop",
+    "PBS-Dev3 must serve POST /api/wiki-loop/run through wiki_loop"
+  );
+  expect(
+    "pbs-source:route:wiki-loop-status",
+    serverFactory.includes('request_path == "/api/wiki-loop/status"') && wikiLoop.includes("def build_wiki_loop_status("),
+    "PBS-Dev3 serves GET /api/wiki-loop/status through wiki_loop",
+    "PBS-Dev3 must serve GET /api/wiki-loop/status through wiki_loop"
+  );
+  expect(
+    "pbs-source:owner-scope:upload-reports",
+    uploadApi.includes("owner_user_id") && uploadApi.includes("upload report is not visible to this session"),
+    "PBS-Dev3 upload reports expose owner-scoped visibility hooks used by Cywell PBS live calls",
+    "PBS-Dev3 upload report route must retain owner-scoped visibility checks"
+  );
+  expect(
+    "pbs-source:wiki-vault:topology-signals",
+    hasAll(wikiVault, ["selected_uploads", "graph", "nodes", "edges", "chunk_previews"]),
+    "PBS-Dev3 wiki vault exposes graph nodes/edges, selected uploads, and chunk previews",
+    "PBS-Dev3 wiki vault must expose topology graph signals that the Cywell dashboard normalizes"
+  );
+  expect(
+    "cywell-contract:runtime-sample",
+    hasAll(cywellRuntimeSample, [
+      "name: playbookstudio",
+      "name: playbookstudio-runtime",
+      "app.kubernetes.io/name: playbookstudio",
+      "app.kubernetes.io/component: runtime",
+      "port: 8765"
+    ]),
+    "Cywell runtime sample matches the PBS namespace/service/label/port contract",
+    "Cywell runtime sample must match the PBS namespace/service/label/port contract"
+  );
+  expect(
+    "cywell-contract:preflight-runtime",
+    hasAll(cywellPreflight, [
+      "playbookstudio-runtime",
+      "app.kubernetes.io/name",
+      "app.kubernetes.io/component",
+      "8765",
+      "cluster:pbs-runtime-service-endpoints"
+    ]),
+    "Cywell strict preflight checks the PBS service selector and ready endpoint contract",
+    "Cywell strict preflight must check PBS service selector and ready endpoint contract"
+  );
+}
+
+async function createSelfTestSource() {
+  const root = await mkdtemp(join(tmpdir(), "cywell-pbs-source-contract-"));
+  const write = async (relativePath, text) => {
+    const path = join(root, relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    await writeFile(path, text);
+  };
+  await write(
+    "deploy/Dockerfile",
+    `FROM python:3.11-slim AS app
+EXPOSE 8765
+CMD ["python", "-m", "play_book_studio.cli", "ui", "--no-browser", "--host", "0.0.0.0", "--port", "8765"]
+`
+  );
+  await write(
+    "docker-compose.yml",
+    `services:
+  postgres:
+    image: pgvector/pgvector:pg16
+  app:
+    environment:
+      DATABASE_URL: postgresql://playbookstudio:secret@postgres:5432/playbookstudio
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "\${APP_HTTP_PORT:-8765}:8765"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health', timeout=5)"]
+  db-migrate:
+    command: ["python", "-m", "play_book_studio.cli", "db-migrate"]
+`
+  );
+  await write(
+    "src/play_book_studio/http/server_handler_factory.py",
+    `if request_path == "/api/health": pass
+if request_path == "/api/wiki-vault": pass
+if request_path == "/api/wiki-loop/status": pass
+if parsed_request.path == "/api/chat": pass
+if parsed_request.path == "/api/uploads/ingest": pass
+if parsed_request.path == "/api/uploads/url-ingest": pass
+if parsed_request.path == "/api/wiki-vault/notes": pass
+if parsed_request.path == "/api/wiki-loop/run": pass
+`
+  );
+  await write("src/play_book_studio/http/upload_api.py", `def handle_upload_ingest(): pass\nowner_user_id = ""\nraise Exception("upload report is not visible to this session")\n`);
+  await write("src/play_book_studio/http/url_ingest_api.py", `def build_url_ingest_response(): pass\n`);
+  await write("src/play_book_studio/http/server_chat.py", `def handle_chat(): pass\n`);
+  await write("src/play_book_studio/http/wiki_vault.py", `def handle_wiki_vault(): pass\ndef handle_wiki_vault_note_save(): pass\nselected_uploads = []\ngraph = {"nodes": [], "edges": [], "chunk_previews": []}\n`);
+  await write("src/play_book_studio/wiki_loop.py", `def run_wiki_loop_once(): pass\ndef build_wiki_loop_status(): pass\n`);
+  return root;
+}
+
+async function runSelfTest() {
+  const root = await createSelfTestSource();
+  try {
+    const before = checks.length;
+    sourceContractChecks(root);
+    const selfFailures = checks.slice(before).filter((check) => check.status === "FAIL");
+    if (selfFailures.length === 0) pass("pbs-source:self-test", "synthetic PBS source contract fixture passes");
+    else fail("pbs-source:self-test", `synthetic PBS source contract fixture failed: ${selfFailures.map((check) => check.id).join(", ")}`);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+if (selfTest) {
+  await runSelfTest();
+}
+
+if (!existsSync(sourceDir)) {
+  const detail = `PBS source directory not found at ${sourceDir}; set CAS_PBS_SOURCE_DIR or pass --source-dir`;
+  if (requireSource) fail("pbs-source:source-dir", detail);
+  else warn("pbs-source:source-dir", detail);
+} else {
+  pass("pbs-source:source-dir", `using PBS source directory ${sourceDir}`);
+  sourceContractChecks(sourceDir);
+}
+
+mkdirSync(dirname(evidencePath), { recursive: true });
+const summary = {
+  total: checks.length,
+  passed: checks.filter((check) => check.status === "PASS").length,
+  warned: checks.filter((check) => check.status === "WARN").length,
+  failed: checks.filter((check) => check.status === "FAIL").length
+};
+const status = summary.failed ? "FAIL" : "PASS";
+writeFileSync(
+  evidencePath,
+  JSON.stringify(
+    {
+      status,
+      checkedAt,
+      branch: runGit(["branch", "--show-current"]),
+      head: runGit(["rev-parse", "--short", "HEAD"]),
+      sourceDir,
+      requireSource,
+      selfTest,
+      summary,
+      checks
+    },
+    null,
+    2
+  )
+);
+
+console.log(`PBS source contract verification final status: ${status}`);
+console.log(`Evidence: ${evidencePath}`);
+if (status !== "PASS") process.exit(1);

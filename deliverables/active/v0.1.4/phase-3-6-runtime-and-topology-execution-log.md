@@ -1,9 +1,15 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - Generated Site Overlay and Strict ACL Closure
+## Latest Update - PBS Source Contract, Owner-HMAC, and Scope Guard Closure
 
 Implemented after the latest parallel review pass:
 
+- Added `verify:pbs:source-contract` and `verify:pbs:source-contract:required` to check the real `F:\AI_Projects\PBS-Dev3` runtime/API contract before claiming PBS feature import coverage.
+- The source contract verifier checks the PBS app Docker/compose shape, port `8765`, `/api/health`, upload, URL ingest, chat/RAG, Wiki Vault, Wiki Loop, owner-scoped upload reports, selected uploads, graph, and chunk-preview API surface.
+- Live prerequisite rendering now creates the required `cas-knowledge-internal-auth/owner-hmac-secret` manifest, validates non-placeholder signing material, and records only redacted HMAC metadata.
+- Strict live preflight now validates the applied `cas-knowledge-internal-auth` Secret alongside `cas-pbs-auth` and `cas-knowledge-postgres-live`.
+- Gateway customer scope parsing now recursively detects customer/workspace/tenant aliases in query/body payloads, rejects mismatches, strips nested scope aliases before proxying, and keeps only the verified canonical top-level `customer_id`.
+- Knowledge Engine PBS response scope validation now covers customer, tenant, workspace, and customer-workspace aliases; the verifier blocks cross-scope RAG citation leakage before answers are exposed.
 - Added `render:pbs:live-prereqs` and `verify:pbs:live-prereqs`.
 - The renderer outputs reviewed live Secret/ConfigMap manifests plus `test-results/pbs-live-prereqs/pbs-live-site`, a generated overlay that replaces `cas-knowledge-live-config` while composing the tracked `pbs-live` overlay.
 - Strict live preflight accepts `--overlay-path` / `CAS_PBS_PREFLIGHT_OVERLAY_PATH`, so release gates can validate the generated site overlay instead of the tracked wildcard placeholder.
@@ -16,10 +22,11 @@ Implemented after the latest parallel review pass:
 Proof captured in this pass:
 
 - `node --check` passed for changed Gateway, preflight, renderer, and verifier scripts.
-- `npm run verify:pbs:live-prereqs`: PASS, 7 checks.
-- `npm run verify:knowledge-engine`: PASS, 85 checks.
-- `npm run verify:deploy:manifests`: PASS, 269 checks.
-- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `44 PASS / 7 FAIL`; failures remain external PBS namespace/service, required live Secrets, and legacy CRC dev Secret cleanup. The rendered wildcard ACL blocker is closed, and release evidence cluster identity matches the current cluster.
+- `npm run verify:pbs:source-contract:required`: PASS, 29 checks.
+- `npm run verify:pbs:live-prereqs`: PASS, 8 checks.
+- `npm run verify:knowledge-engine`: PASS, 87 checks.
+- `npm run verify:deploy:manifests`: PASS, 274 checks.
+- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `46 PASS / 7 FAIL`; failures remain external PBS namespace/service, required live Secrets, and legacy CRC dev Secret cleanup. The rendered wildcard ACL blocker is closed, owner-HMAC Secret checks pass in generated prereq evidence, and release evidence cluster identity matches the current cluster.
 
 ## Previous Update - Live Cutover Gate Hardening
 

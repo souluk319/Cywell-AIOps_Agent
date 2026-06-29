@@ -66,6 +66,11 @@ function tokenLooksUsable(value) {
   return clean.length >= 20 && !/\s/.test(clean) && !valueLooksPlaceholder(clean);
 }
 
+function hmacSecretLooksUsable(value) {
+  const clean = String(value ?? "").trim();
+  return clean.length >= 32 && !/\s/.test(clean) && !valueLooksPlaceholder(clean);
+}
+
 function parseCustomerAccessPolicy(text) {
   try {
     const policy = JSON.parse(text);
@@ -185,6 +190,7 @@ function deriveDatabaseUrl(env, values, targetNamespace) {
 function buildInputs(env = process.env) {
   const targetNamespace = env.CAS_PBS_LIVE_NAMESPACE || "cywell-ai-sentinel";
   const token = readEnvOrFile(env, "CAS_PBS_BEARER_TOKEN", "CAS_PBS_BEARER_TOKEN_FILE") || String(env.CAS_PBS_API_KEY ?? "").trim();
+  const ownerHmacSecret = readEnvOrFile(env, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "CAS_KNOWLEDGE_OWNER_HMAC_SECRET_FILE");
   const customerAccessText = readEnvOrFile(env, "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON", "CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE");
   const customerAccess = parseCustomerAccessPolicy(customerAccessText);
   const postgresValues = {
@@ -198,6 +204,7 @@ function buildInputs(env = process.env) {
     namespace: targetNamespace,
     serviceOwner: String(env.CAS_KNOWLEDGE_SERVICE_OWNER ?? "").trim(),
     token,
+    ownerHmacSecret,
     customerAccess,
     customerAccessText,
     postgresValues
@@ -207,6 +214,7 @@ function buildInputs(env = process.env) {
 function validateInputs(inputs) {
   const errors = [];
   if (!tokenLooksUsable(inputs.token)) errors.push("CAS_PBS_BEARER_TOKEN or CAS_PBS_BEARER_TOKEN_FILE must contain non-placeholder token material with at least 20 non-whitespace characters");
+  if (!hmacSecretLooksUsable(inputs.ownerHmacSecret)) errors.push("CAS_KNOWLEDGE_OWNER_HMAC_SECRET or CAS_KNOWLEDGE_OWNER_HMAC_SECRET_FILE must contain non-placeholder HMAC material with at least 32 non-whitespace characters");
   if (valueLooksPlaceholder(inputs.serviceOwner)) errors.push("CAS_KNOWLEDGE_SERVICE_OWNER must be set to a non-placeholder service owner");
   if (!inputs.customerAccess) errors.push("CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON or CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE must contain valid JSON object policy");
   else if (!customerAccessPolicyIsConcrete(inputs.customerAccess)) {
@@ -283,6 +291,10 @@ function redactedSummary(inputs, files) {
       bearerTokenSha256: sha256(inputs.token),
       bearerTokenLength: inputs.token.length
     },
+    casKnowledgeInternalAuth: {
+      ownerHmacSecretSha256: sha256(inputs.ownerHmacSecret),
+      ownerHmacSecretLength: inputs.ownerHmacSecret.length
+    },
     casKnowledgePostgresLive: {
       database: inputs.postgresValues.database,
       username: inputs.postgresValues.username,
@@ -304,6 +316,7 @@ function render(inputs, outDir, { write = true } = {}) {
   if (errors.length) return { ok: false, errors, files: {} };
   const files = {
     pbsAuthSecret: resolve(outDir, "cas-pbs-auth.secret.yaml"),
+    ownerAuthSecret: resolve(outDir, "cas-knowledge-internal-auth.secret.yaml"),
     postgresSecret: resolve(outDir, "cas-knowledge-postgres-live.secret.yaml"),
     liveConfig: resolve(outDir, "cas-knowledge-live-config.configmap.yaml"),
     customerAccessJson: resolve(outDir, "customer-access.json"),
@@ -317,6 +330,7 @@ function render(inputs, outDir, { write = true } = {}) {
     mkdirSync(outDir, { recursive: true });
     mkdirSync(files.siteOverlay, { recursive: true });
     const pbsAuthSecret = secretYaml("cas-pbs-auth", { "bearer-token": inputs.token }, inputs.namespace);
+    const ownerAuthSecret = secretYaml("cas-knowledge-internal-auth", { "owner-hmac-secret": inputs.ownerHmacSecret }, inputs.namespace);
     const postgresSecret = secretYaml(
         "cas-knowledge-postgres-live",
         {
@@ -328,6 +342,7 @@ function render(inputs, outDir, { write = true } = {}) {
         inputs.namespace
       );
     writeFileSync(files.pbsAuthSecret, pbsAuthSecret);
+    writeFileSync(files.ownerAuthSecret, ownerAuthSecret);
     writeFileSync(files.postgresSecret, postgresSecret);
     writeFileSync(
       files.liveConfig,
@@ -353,6 +368,7 @@ function sampleEnv() {
   return {
     CAS_PBS_LIVE_NAMESPACE: "cywell-ai-sentinel",
     CAS_PBS_BEARER_TOKEN: `live-token-${randomBytes(24).toString("hex")}`,
+    CAS_KNOWLEDGE_OWNER_HMAC_SECRET: randomBytes(32).toString("hex"),
     CAS_KNOWLEDGE_SERVICE_OWNER: "cas-pbs-live",
     CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({
       groups: {
@@ -402,6 +418,8 @@ function selfTest() {
       "pbs-live-prereqs:redacted-summary",
       "summary records hashes and metadata without raw Secret material"
     );
+    const badHmac = buildInputs({ ...sampleEnv(), CAS_KNOWLEDGE_OWNER_HMAC_SECRET: "change-me" });
+    record(validateInputs(badHmac).some((error) => error.includes("CAS_KNOWLEDGE_OWNER_HMAC_SECRET")) ? "PASS" : "FAIL", "pbs-live-prereqs:bad-owner-hmac-rejected", "placeholder owner HMAC secret is rejected");
     const siteRender = rendered.ok ? runCommand("oc", ["kustomize", rendered.files.siteOverlay], { timeoutMs: 90000 }) : { ok: false, stdout: "", stderr: "render failed" };
     record(
       siteRender.ok &&
@@ -446,6 +464,7 @@ if (args.has("--self-test")) {
     console.log(`Output directory: ${outDir}`);
     console.log("Review with:");
     console.log(`  oc diff -f ${result.files.pbsAuthSecret}`);
+    console.log(`  oc diff -f ${result.files.ownerAuthSecret}`);
     console.log(`  oc diff -f ${result.files.postgresSecret}`);
     console.log(`  oc diff -f ${result.files.liveConfig}`);
     console.log(`  oc diff -k ${result.files.siteOverlay}`);

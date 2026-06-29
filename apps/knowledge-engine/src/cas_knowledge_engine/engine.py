@@ -472,7 +472,16 @@ class KnowledgeEngine:
             self._pbs_scope_value(self.pbs.owner_id(owner_id)),
         }
         owner_keys = {"owner_id", "ownerId", "owner_user_id", "ownerUserId", "user_id", "userId", "created_by", "createdBy"}
-        customer_keys = {"customer_id", "customerId"}
+        customer_keys = {
+            "customer_id",
+            "customerId",
+            "customer_workspace_id",
+            "customerWorkspaceId",
+            "tenant_id",
+            "tenantId",
+            "workspace_id",
+            "workspaceId",
+        }
         mismatches: list[dict[str, str]] = []
 
         def walk(candidate: Any, current_path: str) -> None:

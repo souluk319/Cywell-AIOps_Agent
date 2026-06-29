@@ -134,6 +134,7 @@ Status: implemented for the v0.1.4 smoke path.
   - `/api/wiki-vault/notes`
 - Shadow writes are disabled by default unless `CAS_PBS_SHADOW_WRITES=true`, to avoid duplicate PBS-side write effects.
 - PBS runtime inspection confirmed the backend API surface runs on port `8765` with `GET /api/health`; the public web/nginx surface normally runs on port `8080` and proxies `/api/*`.
+- `verify:pbs:source-contract:required` now verifies the actual `F:\AI_Projects\PBS-Dev3` checkout for the Docker/compose runtime contract, port `8765`, `/api/health`, upload, URL ingest, chat/RAG, Wiki Vault, Wiki Loop, owner-scoped upload reports, selected uploads, graph, and chunk-preview API surface before v0.1.4 claims PBS source compatibility.
 - `CAS_KNOWLEDGE_OWNER_MODE=trusted-header` and `CAS_KNOWLEDGE_SINGLE_OWNER` are explicit.
 - Gateway derives a stable owner hint from UserToken/Authorization and does not trust forwarded owner headers by default.
 - Knowledge Engine scoped APIs require a trusted owner header in the base deployment.
@@ -299,6 +300,8 @@ Delivered:
 - `npm run verify:pbs:cutover` is a local write smoke gate and fails unless `CAS_PBS_BASE_URL` and PBS auth material are configured
 - live PBS route failures propagate as non-2xx CAS HTTP status with PBS trace evidence
 - Gateway can require a ConfigMap-backed customer workspace ACL before proxying private knowledge requests; live mode enables this and verifies mismatched nested `source_metadata.customer_id` is rejected before reaching Knowledge Engine
+- Gateway recursively detects customer/workspace/tenant aliases in query/body payloads, rejects nested scope smuggling before PBS, strips nested scope aliases from proxied payloads, and preserves only the verified canonical `customer_id`
+- Knowledge Engine blocks PBS live responses whose report rows, wiki vault payloads, topology graphs, or RAG citations carry mismatched customer, workspace, tenant, customer-workspace, owner, or PBS user hash scope
 - strict PBS preflight checks that all applied ingress NetworkPolicies selecting knowledge-engine pods only allow Gateway pods on TCP `8080`
 - `deploy:crc` starts OpenShift binary builds without `--follow --wait`, follows build logs separately, and polls final build phase to avoid cancellation after slow uploads
 - `release:crc:v0.1.4` is bound to current PASS CRC deployment evidence, refuses stale or wrong-HEAD evidence, records `promotedImages`, requires app release sources to match verified runtime digests, and records both the verified external Postgres digest and the promoted internal ImageStream digest
@@ -313,6 +316,7 @@ Still required:
 - real PBS runtime route/service name confirmation in the target cluster
 - real PBS runtime HTTPS or service-mesh mTLS confirmation in the target cluster
 - real `cas-pbs-auth` Secret material creation outside git
+- real `cas-knowledge-internal-auth/owner-hmac-secret` material creation outside git
 - real `cas-knowledge-postgres-live` Secret material creation outside git
 - cleanup of legacy CRC `cas-knowledge-postgres` Secret before live apply
 - PBS runtime pod labels matching the CAS egress policy
@@ -358,9 +362,11 @@ v0.1.4 currently proves:
 - PBS HTTP shadow/live adapter with fake PBS verification for upload, URL ingest, reports, RAG, wiki-loop, wiki status, wiki vault topology, and note save
 - PBS live outbound owner/hash contract verification across upload, URL ingest, reports, chat, wiki run/status, wiki vault, and note save
 - PBS live outbound customer scope verification for reports, wiki status, and wiki vault
-- PBS live response scope verification so mismatched customer IDs or PBS owner/user hashes are blocked before report rows, wiki vault payloads, or topology graphs reach CAS callers
+- PBS live response scope verification so mismatched customer/workspace/tenant/customer-workspace IDs or PBS owner/user hashes are blocked before report rows, wiki vault payloads, topology graphs, or RAG citations reach CAS callers
 - rendered PBS shadow/live deployment overlays with HTTPS service-token transport, shadow optional token Secret reference, live required token Secret reference, live required Postgres Secret references, no dev owner/DB Secret material, release image tags, and restricted knowledge-engine egress to labeled PBS runtime pods on `8765`
 - rendered PBS live overlay with Gateway customer ACL required from `cas-knowledge-live-config/customer-access-json`; production cutover uses the generated `pbs-live-site` overlay from `render:pbs:live-prereqs` so strict preflight sees a reviewed concrete customer/group mapping instead of placeholder policy
+- rendered PBS live prerequisites include `cas-knowledge-internal-auth/owner-hmac-secret` for Gateway/Knowledge Engine owner-header signing and verification
+- source/API contract verification against `F:\AI_Projects\PBS-Dev3` through `verify:pbs:source-contract:required`
 - topology normalization across PBS `graph`, `topology.graph`, `links`, `relations`, `relationships`, `node_id`, `source_id`, and `target_id` variants without mixing wrapper and nested graph candidates
 - topology normalization preserves PBS summary counts, wikilinks, tags, entity/concept nodes, relation signals, degree/weight, selected context, selected upload metadata, and renders those Wiki Vault side-channel fields in the Cywell dashboard
 - Knowledge Engine ingress isolation so only the CAS gateway can call scoped data APIs in-cluster

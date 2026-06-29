@@ -166,21 +166,66 @@ function customerListAllows(list, customerId) {
   return normalizeCustomerList(list).some((pattern) => customerPatternMatches(pattern, customerId));
 }
 
+const customerScopeKeys = new Set([
+  "customer_id",
+  "customerId",
+  "customer_workspace_id",
+  "customerWorkspaceId",
+  "tenant_id",
+  "tenantId",
+  "workspace_id",
+  "workspaceId"
+]);
+
 function customerIdsFromRequest(url, body) {
   const ids = [];
   const add = (value) => {
+    if (typeof value !== "string" && typeof value !== "number") return;
     const text = String(value ?? "").trim();
     if (text && !ids.includes(text)) ids.push(text);
   };
-  const queryCustomer = url.searchParams.get("customer_id") || url.searchParams.get("customerId");
-  add(queryCustomer);
+  for (const key of customerScopeKeys) add(url.searchParams.get(key));
   if (!body || body.length === 0) return ids;
   const parsed = parseJsonBuffer(body);
-  add(parsed.customer_id ?? parsed.customerId);
-  for (const key of ["source_metadata", "sourceMetadata", "metadata"]) {
-    if (parsed[key] && typeof parsed[key] === "object") add(parsed[key].customer_id ?? parsed[key].customerId);
-  }
+  const walk = (value, depth = 0) => {
+    if (!value || depth > 20) return;
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, depth + 1);
+      return;
+    }
+    if (typeof value !== "object") return;
+    for (const [key, item] of Object.entries(value)) {
+      if (customerScopeKeys.has(key)) add(item);
+      if (item && typeof item === "object") walk(item, depth + 1);
+    }
+  };
+  walk(parsed);
   return ids;
+}
+
+function scrubCustomerScopeAliases(value) {
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => scrubCustomerScopeAliases(item));
+  const scrubbed = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (customerScopeKeys.has(key)) continue;
+    scrubbed[key] = scrubCustomerScopeAliases(item);
+  }
+  return scrubbed;
+}
+
+function normalizedKnowledgeRequestBody(body, customerId) {
+  if (!body || body.length === 0) return body;
+  let parsed;
+  try {
+    parsed = JSON.parse(body.toString("utf8"));
+  } catch {
+    return body;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return body;
+  const normalized = scrubCustomerScopeAliases(parsed);
+  if (customerId && customerId !== "default") normalized.customer_id = customerId;
+  return Buffer.from(JSON.stringify(normalized));
 }
 
 function customerAccessAllowed(ownerResult, customerId) {
@@ -398,6 +443,7 @@ async function proxyKnowledgeRequest(request, response, url) {
       });
       return;
     }
+    const normalizedBody = normalizedKnowledgeRequestBody(body, customerIds.length === 1 ? customerId : "");
     const upstream = await fetch(targetUrl, {
       method: request.method,
       headers: {
@@ -405,7 +451,7 @@ async function proxyKnowledgeRequest(request, response, url) {
         "content-type": request.headers["content-type"] ?? "application/json",
         ...ownerHeaders
       },
-      body,
+      body: normalizedBody,
       signal: controller.signal
     });
     const upstreamBody = Buffer.from(await upstream.arrayBuffer());

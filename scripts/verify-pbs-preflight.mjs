@@ -160,6 +160,11 @@ function bearerTokenLooksUsable(value) {
   return clean.length >= 20 && !/\s/.test(clean) && !valueLooksPlaceholder(clean);
 }
 
+function ownerHmacSecretLooksUsable(value) {
+  const clean = String(value ?? "").trim();
+  return clean.length >= 32 && !/\s/.test(clean) && !valueLooksPlaceholder(clean);
+}
+
 function postgresSecretValuesUsable(secret) {
   const values = {
     database: decodeSecretValue(secret, "database"),
@@ -1153,6 +1158,22 @@ if (authSecret) {
   fail("cluster:pbs-auth-secret-required", "cas-pbs-auth Secret is required for this preflight run");
 } else {
   warn("cluster:pbs-auth-secret-optional", "cas-pbs-auth Secret is absent in the current cluster; live cutover must create it or run preflight with --require-secret");
+}
+const ownerAuthSecret = getJson("cluster:internal-owner-auth-secret", ["get", "secret", "-n", namespace, "cas-knowledge-internal-auth"]);
+if (ownerAuthSecret) {
+  const hasOwnerHmac = Boolean(ownerAuthSecret.data?.["owner-hmac-secret"]);
+  expect("cluster:internal-owner-auth-secret-key", hasOwnerHmac, "cas-knowledge-internal-auth Secret contains owner-hmac-secret key");
+  const ownerHmacSecret = decodeSecretValue(ownerAuthSecret, "owner-hmac-secret");
+  expect(
+    "cluster:internal-owner-auth-secret-content",
+    ownerHmacSecretLooksUsable(ownerHmacSecret),
+    "cas-knowledge-internal-auth owner-hmac-secret decodes to usable non-placeholder signing material",
+    "cas-knowledge-internal-auth owner-hmac-secret must be non-empty, non-placeholder, whitespace-free, and at least 32 characters"
+  );
+} else if (requireSecret) {
+  fail("cluster:internal-owner-auth-secret-required", "cas-knowledge-internal-auth Secret is required for Gateway/Knowledge Engine owner signing");
+} else {
+  warn("cluster:internal-owner-auth-secret-optional", "cas-knowledge-internal-auth Secret is absent; live cutover must create it or run preflight with --require-secret");
 }
 if (overlay === "pbs-live") {
   let liveDatabaseUrl = "";

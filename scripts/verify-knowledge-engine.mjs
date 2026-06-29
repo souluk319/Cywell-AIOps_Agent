@@ -231,6 +231,23 @@ function startFakePbsServer(port) {
         sendFakePbsJson(response, 500, { error: "forced PBS chat failure", code: "forced-chat-failure" });
         return;
       }
+      if (String(body.query ?? "").includes("scope-leak-citation")) {
+        sendFakePbsJson(response, 200, {
+          answer: "PBS leaked citation answer",
+          citations: [
+            {
+              id: "pbs-leaked-citation",
+              title: "Leaked PBS Citation",
+              snippet: "PBS evidence from the wrong customer",
+              metadata: {
+                customer_id: "other-customer",
+                workspace_id: "other-workspace"
+              }
+            }
+          ]
+        });
+        return;
+      }
       sendFakePbsJson(response, 200, {
         answer: `PBS answer for ${body.query}`,
         citations: [{ id: "pbs-citation-1", title: "PBS Citation", snippet: "PBS evidence" }],
@@ -861,6 +878,28 @@ try {
     mismatchedCustomerUpload.response.status === 400 && mismatchedCustomerUpload.body.code === "knowledge-customer-mismatch",
     "gateway rejects conflicting top-level and nested customer workspace identifiers",
     JSON.stringify(mismatchedCustomerUpload.body)
+  );
+  const mismatchedNestedScopeRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      question: "router latency evidence",
+      filters: {
+        customer_id: "forbidden-customer"
+      },
+      payload: {
+        access_policy: {
+          workspace_id: "another-workspace"
+        }
+      }
+    })
+  });
+  expect(
+    "knowledge:customer-acl-blocks-nested-scope-smuggling",
+    mismatchedNestedScopeRag.response.status === 400 && mismatchedNestedScopeRag.body.code === "knowledge-customer-mismatch",
+    "gateway recursively rejects conflicting nested customer, tenant, or workspace selectors before proxying",
+    JSON.stringify(mismatchedNestedScopeRag.body)
   );
   const loopbackUrlIngest = await fetchJson(`${gatewayBase}/api/knowledge/uploads/url-ingest`, {
     method: "POST",
@@ -1897,6 +1936,20 @@ try {
       liveRag.body.trace?.retriever === "pbs-http",
     "PBS live chat response is normalized into CAS RAG shape",
     JSON.stringify(liveRag.body)
+  );
+  const liveLeakedRagCitation = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({ customer_id: "live", question: "scope-leak-citation" })
+  });
+  expect(
+    "knowledge:pbs-live-rag-citation-scope-mismatch-blocked",
+    liveLeakedRagCitation.response.status === 502 &&
+      liveLeakedRagCitation.body.status === "error" &&
+      liveLeakedRagCitation.body.code === "pbs-scope-mismatch" &&
+      liveLeakedRagCitation.body.pbs?.scope_mismatches?.some((item) => String(item.path ?? "").includes("citations")),
+    "PBS live RAG rejects citation rows outside the requested customer/workspace scope",
+    JSON.stringify(liveLeakedRagCitation.body)
   );
   const liveRagFailure = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
     method: "POST",

@@ -33,6 +33,7 @@ const files = [
   "scripts/verify-pbs-live-smoke.mjs",
   "scripts/verify-pbs-preflight.mjs",
   "scripts/render-pbs-live-prereqs.mjs",
+  "scripts/verify-pbs-source-contract.mjs",
   "apps/gateway/src/server.mjs",
   "apps/knowledge-engine/src/cas_knowledge_engine/engine.py",
   "apps/knowledge-engine/src/cas_knowledge_engine/pbs_client.py",
@@ -653,8 +654,11 @@ for (const file of files) {
       );
       expect(
         "knowledge-engine:pbs-live-response-scope",
-        text.includes("def _pbs_scope_mismatches") &&
+          text.includes("def _pbs_scope_mismatches") &&
           text.includes("pbs-scope-mismatch") &&
+          text.includes("customer_workspace_id") &&
+          text.includes("workspace_id") &&
+          text.includes("tenant_id") &&
           text.includes("scope_mismatches") &&
           text.includes("_pbs_scoped_body"),
         "PBS live response bodies are checked against requested customer/owner scope",
@@ -712,10 +716,12 @@ for (const file of files) {
           text.includes("customer access policy must not use default grants") &&
           text.includes("knowledge-customer-forbidden") &&
           text.includes("knowledge-customer-mismatch") &&
-          text.includes("source_metadata") &&
+          text.includes("customerScopeKeys") &&
+          text.includes("normalizedKnowledgeRequestBody") &&
+          text.includes("scrubCustomerScopeAliases") &&
           text.includes("customerAccessAllowed"),
-        "gateway enforces strict configured customer workspace ACL before proxying private knowledge requests",
-        "gateway must enforce configured customer workspace ACL, reject invalid policies, require explicit customer_id, and block broad principals before proxying private knowledge requests"
+        "gateway enforces strict configured customer workspace ACL and strips nested scope aliases before proxying private knowledge requests",
+        "gateway must enforce configured customer workspace ACL, reject invalid policies, require explicit customer_id, block broad principals, and prevent nested scope alias smuggling before proxying private knowledge requests"
       );
     }
     if (file.includes("cas_knowledge_engine/storage.py")) {
@@ -1121,7 +1127,7 @@ for (const file of files) {
         text.includes("render-pbs-live-prereqs.mjs") &&
         text.includes('"verify:pbs:live-prereqs"') &&
         text.includes("--self-test") &&
-        text.includes("verify:pbs:live-prereqs && npm run verify:deploy:manifests")
+        text.includes("verify:pbs:live-prereqs && npm run verify:pbs:source-contract && npm run verify:deploy:manifests")
       ) {
         pass("package:pbs-live-prereqs-renderer", "package.json exposes PBS live prerequisite renderer and includes its self-test in verify");
       } else {
@@ -1189,34 +1195,42 @@ for (const file of files) {
       } else {
         fail("package:release-crc-script", "package.json must expose CRC release image promotion");
       }
+      if (text.includes('"verify:pbs:source-contract"') && text.includes("verify-pbs-source-contract.mjs")) {
+        pass("package:pbs-source-contract-script", "package.json exposes PBS source contract verification");
+      } else {
+        fail("package:pbs-source-contract-script", "package.json must expose PBS source contract verification");
+      }
     }
     if (file.includes("render-pbs-live-prereqs")) {
       expect(
         "pbs-live-prereqs:outputs",
         text.includes("cas-pbs-auth.secret.yaml") &&
+          text.includes("cas-knowledge-internal-auth.secret.yaml") &&
           text.includes("cas-knowledge-postgres-live.secret.yaml") &&
           text.includes("cas-knowledge-live-config.configmap.yaml") &&
           text.includes("pbs-live-site") &&
           text.includes("behavior: replace"),
         "PBS live prerequisite renderer writes reviewed Secret manifests and a pbs-live site overlay with ConfigMap replacement",
-        "PBS live prerequisite renderer must render cas-pbs-auth, cas-knowledge-postgres-live, cas-knowledge-live-config, and generated pbs-live-site manifests"
+        "PBS live prerequisite renderer must render cas-pbs-auth, cas-knowledge-internal-auth, cas-knowledge-postgres-live, cas-knowledge-live-config, and generated pbs-live-site manifests"
       );
       expect(
         "pbs-live-prereqs:validation-contract",
         text.includes("tokenLooksUsable") &&
+          text.includes("hmacSecretLooksUsable") &&
           text.includes("customerAccessPolicyIsConcrete") &&
           text.includes("databaseUrlMatchesSecret") &&
           text.includes("containsWildcard") &&
           text.includes("broadPrincipal") &&
           text.includes("Object.hasOwn(policy ?? {}, \"default\")") &&
           text.includes("CAS_KNOWLEDGE_POSTGRES_DATABASE_URL must target cas-knowledge-postgres Service DNS"),
-        "PBS live prerequisite renderer rejects weak tokens, wildcard/default/broad-principal ACLs, and mismatched Postgres URLs",
-        "PBS live prerequisite renderer must validate token shape, concrete customer ACL, broad principals, and matching service-scoped Postgres URL"
+        "PBS live prerequisite renderer rejects weak tokens/HMAC material, wildcard/default/broad-principal ACLs, and mismatched Postgres URLs",
+        "PBS live prerequisite renderer must validate token/HMAC shape, concrete customer ACL, broad principals, and matching service-scoped Postgres URL"
       );
       expect(
         "pbs-live-prereqs:redacted-evidence",
         text.includes("redactedSummary") &&
           text.includes("sha256(inputs.token)") &&
+          text.includes("sha256(inputs.ownerHmacSecret)") &&
           text.includes("passwordSha256") &&
           text.includes("cas-pbs-live-prereqs-render.json") &&
           text.includes("runGit([\"rev-parse\", \"--short\", \"HEAD\"])"),
@@ -1227,6 +1241,7 @@ for (const file of files) {
         "pbs-live-prereqs:self-test",
         text.includes("--self-test") &&
           text.includes("site-overlay-render") &&
+          text.includes("bad-owner-hmac-rejected") &&
           text.includes("wildcard-acl-rejected") &&
           text.includes("string-wildcard-acl-rejected") &&
           text.includes("broad-group-acl-rejected") &&
@@ -1234,6 +1249,42 @@ for (const file of files) {
           text.includes("redacted-summary"),
         "PBS live prerequisite renderer has self-tests for rendering, redaction, ACL rejection, and DB URL mismatch",
         "PBS live prerequisite renderer must self-test render/redaction/ACL/DB URL validation"
+      );
+    }
+    if (file.includes("verify-pbs-source-contract")) {
+      expect(
+        "pbs-source-contract:runtime-contract",
+        text.includes("deploy/Dockerfile") &&
+          text.includes("docker-compose.yml") &&
+          text.includes("EXPOSE\\s+8765") &&
+          text.includes("http://127.0.0.1:8765/api/health") &&
+          text.includes("playbookstudio-runtime") &&
+          text.includes("cluster:pbs-runtime-service-endpoints"),
+        "PBS source contract verifier checks Dockerfile, compose, runtime port, health endpoint, and Cywell runtime service contract",
+        "PBS source contract verifier must check real PBS source runtime port, health endpoint, and Cywell runtime service contract"
+      );
+      expect(
+        "pbs-source-contract:api-surface",
+        text.includes('/api/uploads/ingest') &&
+          text.includes('/api/uploads/url-ingest') &&
+          text.includes('/api/chat') &&
+          text.includes('/api/wiki-vault') &&
+          text.includes('/api/wiki-vault/notes') &&
+          text.includes('/api/wiki-loop/run') &&
+          text.includes('/api/wiki-loop/status') &&
+          text.includes("owner_user_id") &&
+          text.includes("selected_uploads"),
+        "PBS source contract verifier checks upload, URL ingest, chat, Wiki Vault, Wiki loop, owner-scope, and topology signal API surface",
+        "PBS source contract verifier must check the PBS API surface Cywell depends on"
+      );
+      expect(
+        "pbs-source-contract:evidence",
+        text.includes("cas-pbs-source-contract.json") &&
+          text.includes("CAS_PBS_SOURCE_DIR") &&
+          text.includes("--require-source") &&
+          text.includes("--self-test"),
+        "PBS source contract verifier writes evidence and supports explicit source/self-test modes",
+        "PBS source contract verifier must write evidence and support explicit source/self-test modes"
       );
     }
     if (file.includes("promote-crc-release-images")) {
@@ -1392,6 +1443,8 @@ for (const file of files) {
         text.includes("liveDatabaseUrlMatchesSecret") &&
         text.includes("cluster:knowledge-postgres-live-secret-content") &&
         text.includes("cluster:pbs-auth-secret-content") &&
+        text.includes("cluster:internal-owner-auth-secret-content") &&
+        text.includes("ownerHmacSecretLooksUsable") &&
         text.includes("statefulSetReady") &&
         text.includes("readyPodsUsePromotedDigest") &&
         text.includes("cluster:applied-pbs-config-values") &&
