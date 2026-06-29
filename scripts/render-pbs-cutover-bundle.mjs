@@ -27,8 +27,20 @@ const requiredLocalEvidence = [
 
 const livePreapplyEvidence = [
   "livePreapply",
-  "cas-pbs-preflight-pbs-live-preapply-cluster-required-secrets.json",
+  "cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json",
   "strict PBS live generated-site pre-apply evidence"
+];
+
+const expectedGeneratedSiteOverlayPath = "test-results/pbs-live-prereqs/pbs-live-site";
+const requiredLivePrereqOutputFileKeys = [
+  "pbsAuthSecret",
+  "ownerAuthSecret",
+  "postgresSecret",
+  "liveConfig",
+  "customerAccessJson",
+  "siteKustomization",
+  "siteCustomerAccessJson",
+  "summary"
 ];
 
 function runGit(gitArgs) {
@@ -54,6 +66,10 @@ function gitMetadata() {
 
 function sha256File(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function normalizePath(value) {
+  return String(value ?? "").replace(/\\/g, "/");
 }
 
 function assertOutputUnderTestResults(targetDir) {
@@ -118,6 +134,9 @@ function readEvidence(baseDir, [key, fileName, label]) {
     releaseTag: json.releaseTag,
     overlay: json.overlay,
     overlayPath: json.overlayPath,
+    requireCluster: json.requireCluster,
+    requireSecret: json.requireSecret,
+    skipApplied: json.skipApplied,
     outputFileSha256: json.outputFileSha256,
     renderedSiteOverlaySha256: json.renderedSiteOverlaySha256,
     redactedSummarySha256: json.redactedSummarySha256,
@@ -185,6 +204,8 @@ function currentHeadMatches(evidence, meta) {
 
 function hasRealRenderHashes(evidence) {
   const files = evidence.outputFileSha256;
+  const fileKeys = files && typeof files === "object" ? Object.keys(files).sort() : [];
+  const expectedKeys = [...requiredLivePrereqOutputFileKeys].sort();
   return (
     evidence.mode === "real-render" &&
     typeof evidence.renderedSiteOverlaySha256 === "string" &&
@@ -193,8 +214,22 @@ function hasRealRenderHashes(evidence) {
     evidence.redactedSummarySha256.length >= 32 &&
     files &&
     typeof files === "object" &&
-    Object.values(files).length >= 5 &&
+    fileKeys.length === expectedKeys.length &&
+    fileKeys.every((key, index) => key === expectedKeys[index]) &&
     Object.values(files).every((file) => file && typeof file.sha256 === "string" && file.sha256.length >= 32)
+  );
+}
+
+function isStrictGeneratedSitePreapply(evidence, meta) {
+  return Boolean(
+    evidence.exists &&
+      evidence.fullHead === meta.fullHead &&
+      evidence.treeStatus === "clean" &&
+      evidence.overlay === "pbs-live" &&
+      normalizePath(evidence.overlayPath) === expectedGeneratedSiteOverlayPath &&
+      evidence.requireCluster === true &&
+      evidence.requireSecret === true &&
+      evidence.skipApplied === true
   );
 }
 
@@ -256,6 +291,12 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
   }
 
   const livePreapply = artifacts.livePreapply;
+  if (livePreapply?.exists && !isStrictGeneratedSitePreapply(livePreapply, meta)) {
+    localGateFailures.push({
+      id: "cutover-bundle:live-preapply-generated-site",
+      detail: `${livePreapply.fileName} must be current clean generated-site preapply evidence for ${expectedGeneratedSiteOverlayPath} with cluster, required-secret, and skip-applied flags`
+    });
+  }
   const liveBlockers = livePreapply.failedChecks ?? [];
   let status = "PASS";
   let phase = "live-preapply-ready";
@@ -357,9 +398,12 @@ async function runSelfTest() {
         ownerAuthSecret: { path: "b", sha256: "b".repeat(64), underOutputDir: true },
         postgresSecret: { path: "c", sha256: "c".repeat(64), underOutputDir: true },
         liveConfig: { path: "d", sha256: "d".repeat(64), underOutputDir: true },
-        summary: { path: "e", sha256: "e".repeat(64), underOutputDir: true }
+        customerAccessJson: { path: "e", sha256: "e".repeat(64), underOutputDir: true },
+        siteKustomization: { path: "f", sha256: "f".repeat(64), underOutputDir: true },
+        siteCustomerAccessJson: { path: "g", sha256: "g".repeat(64), underOutputDir: true },
+        summary: { path: "h", sha256: "h".repeat(64), underOutputDir: true }
       },
-      renderedSiteOverlaySha256: "f".repeat(64),
+      renderedSiteOverlaySha256: "i".repeat(64),
       redactedSummarySha256: "1".repeat(64)
     });
     write("cas-pbs-source-contract.json", {
@@ -370,9 +414,14 @@ async function runSelfTest() {
       pbsSource: { branch: "main", head: "def5678", fullHead: "def5678", treeStatus: "clean", requireCleanSource: true, expectedHead: "def5678", contractFileSha256: { "deploy/Dockerfile": "hash" } },
       checks: [{ status: "PASS", id: "ok", detail: "ok" }]
     });
-    write("cas-pbs-preflight-pbs-live-preapply-cluster-required-secrets.json", {
+    write("cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json", {
       ...base,
       status: "FAIL",
+      overlay: "pbs-live",
+      overlayPath: expectedGeneratedSiteOverlayPath,
+      requireCluster: true,
+      requireSecret: true,
+      skipApplied: true,
       summary: { total: 3, passed: 1, failed: 2 },
       checks: [
         { status: "PASS", id: "preflight:render", detail: "rendered" },
@@ -432,6 +481,33 @@ async function runSelfTest() {
           return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
         })(),
         "fixture rejects self-test prerequisite evidence as cutover proof"
+      ],
+      [
+        "cutover-bundle:self-test-missing-prereq-output-rejected",
+        (() => {
+          write("cas-pbs-source-contract.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: { branch: "main", head: "def5678", fullHead: "def5678", treeStatus: "clean", requireCleanSource: true, expectedHead: "def5678", contractFileSha256: { "deploy/Dockerfile": "hash" } },
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          write("cas-pbs-live-prereqs-render.json", {
+            ...base,
+            mode: "real-render",
+            outputFileSha256: {
+              pbsAuthSecret: { path: "a", sha256: "a".repeat(64), underOutputDir: true },
+              postgresSecret: { path: "c", sha256: "c".repeat(64), underOutputDir: true },
+              liveConfig: { path: "d", sha256: "d".repeat(64), underOutputDir: true },
+              summary: { path: "h", sha256: "h".repeat(64), underOutputDir: true }
+            },
+            renderedSiteOverlaySha256: "i".repeat(64),
+            redactedSummarySha256: "1".repeat(64)
+          });
+          return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
+        })(),
+        "fixture rejects prerequisite render evidence missing owner-HMAC and site ACL hashes"
       ]
     ];
     for (const [id, ok, detail] of checks) {

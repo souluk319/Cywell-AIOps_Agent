@@ -17,7 +17,7 @@ configMapGenerator:
     namespace: cywell-ai-sentinel
     literals:
       - service-owner=cas-pbs-live
-      - customer-access-json={"groups":{"cywell-knowledge-admins":["*"]}}
+      - customer-access-json={}
 generatorOptions:
   disableNameSuffixHash: true
 patches:

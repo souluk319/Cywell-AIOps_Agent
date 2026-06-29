@@ -733,6 +733,17 @@ try {
     await page.waitForSelector('[data-test="cas-knowledge-panel-rag"]', { timeout: 15000 });
     await selectedRagReports;
     await page.waitForFunction(() => document.querySelector('[data-test="cas-knowledge-scope-bar"]')?.textContent?.includes("Workflow Router Report"));
+    const ragNavHref = await page.locator('nav[aria-label="Cywell Knowledge"] a').filter({ hasText: "RAG" }).getAttribute("href");
+    const wikiNavHref = await page.locator('nav[aria-label="Cywell Knowledge"] a').filter({ hasText: "LLM Wiki" }).getAttribute("href");
+    const topologyNavHref = await page.locator('nav[aria-label="Cywell Knowledge"] a').filter({ hasText: "Topology" }).getAttribute("href");
+    expect(
+      "console-topology-dom:knowledge-nav-preserves-scope-query",
+      [ragNavHref, wikiNavHref, topologyNavHref].every(
+        (href) => href?.includes("customer_id=workflow-customer") && href.includes("document_id=workflow-doc-1")
+      ),
+      "knowledge menu links preserve the active customer/document scope across feature routes",
+      JSON.stringify({ ragNavHref, wikiNavHref, topologyNavHref })
+    );
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
       page.locator('[data-test="cas-knowledge-rag-query"]').click()
@@ -778,6 +789,34 @@ try {
         allCorpusRagCall.body.enabled_source_scopes.includes("wiki_vault"),
       "full-corpus RAG browser flow removes document pinning but keeps private source lanes",
       JSON.stringify(allCorpusRagCall?.body)
+    );
+    await page.getByLabel("Customer ID").fill("workflow-switched");
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-test="cas-knowledge-scope-bar"]')?.textContent?.includes("Full corpus") &&
+        document.querySelector('input[aria-label="Customer ID"]')?.value === "workflow-switched"
+    );
+    const switchedScopeText = await page.locator('[data-test="cas-knowledge-scope-bar"]').innerText();
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-rag-query"]').click()
+    ]);
+    const switchedCustomerRagCall = calls.findLast?.(
+      (call) => call.method === "POST" && call.path === "/api/knowledge/rag/query" && call.body?.customer_id === "workflow-switched"
+    );
+    expect(
+      "console-topology-dom:customer-change-clears-selected-corpus-scope",
+      switchedScopeText.includes("Full corpus") &&
+        !switchedScopeText.includes("workflow-doc-1") &&
+        switchedCustomerRagCall?.body?.active_document_id === undefined &&
+        switchedCustomerRagCall?.body?.document_source_id === undefined &&
+        switchedCustomerRagCall?.body?.enabled_upload_document_ids === undefined &&
+        switchedCustomerRagCall?.body?.restrict_uploaded_sources === false &&
+        Array.isArray(switchedCustomerRagCall?.body?.enabled_source_scopes) &&
+        switchedCustomerRagCall.body.enabled_source_scopes.includes("user_upload") &&
+        switchedCustomerRagCall.body.enabled_source_scopes.includes("wiki_vault"),
+      "changing customers clears stale selected-document retrieval scope before the next RAG query",
+      JSON.stringify({ switchedScopeText, body: switchedCustomerRagCall?.body })
     );
 
     const noteReports = page.waitForResponse(

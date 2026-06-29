@@ -1078,6 +1078,16 @@ function viewerHref(target: ViewerTarget, customerId: string) {
   return `/cywell/customer-data?${params.toString()}`;
 }
 
+function routeHref(baseHref: string, customerId: string, documentId: string) {
+  const params = new URLSearchParams();
+  const scopedCustomerId = customerId.trim();
+  const scopedDocumentId = documentId.trim();
+  if (scopedCustomerId) params.set("customer_id", scopedCustomerId);
+  if (scopedDocumentId) params.set("document_id", scopedDocumentId);
+  const query = params.toString();
+  return query ? `${baseHref}?${query}` : baseHref;
+}
+
 function viewerTargetKey(target: ViewerTarget) {
   return `${target.kind}:${target.id}:${target.title}`;
 }
@@ -2267,6 +2277,30 @@ export default function CywellKnowledgeRoute() {
   const activeSourceScopes =
     scopeMode === "selected" && selectedCorpusTarget?.source_scope ? [selectedCorpusTarget.source_scope] : ["user_upload", "wiki_vault"];
 
+  const changeCustomerId = React.useCallback((nextCustomerId: string) => {
+    setCustomerId(nextCustomerId);
+    setActionResult(null);
+    setTopologyData(null);
+    setCorpusTargets([]);
+    setSelectedDocumentId("");
+    setSelectedViewerTarget(null);
+    setScopeMode("all");
+    setSelectedTopologyNodeId(null);
+    autoTopologyLoadKey.current = "";
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const scopedCustomerId = nextCustomerId.trim();
+      if (scopedCustomerId) params.set("customer_id", scopedCustomerId);
+      else params.delete("customer_id");
+      params.delete("document_id");
+      params.delete("documentId");
+      params.delete("note_id");
+      params.delete("noteId");
+      const query = params.toString();
+      window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    }
+  }, []);
+
   const openViewer = React.useCallback(
     (target: ViewerTarget) => {
       setSelectedViewerTarget(target);
@@ -2626,7 +2660,12 @@ export default function CywellKnowledgeRoute() {
       <section className="cas-knowledge-layout">
         <nav aria-label="Cywell Knowledge" className="cas-knowledge-nav">
           {routeItems.map((item) => (
-            <a aria-current={item.key === activeKey ? "page" : undefined} data-active={item.key === activeKey} href={item.href} key={item.key}>
+            <a
+              aria-current={item.key === activeKey ? "page" : undefined}
+              data-active={item.key === activeKey}
+              href={routeHref(item.href, customerId, activeDocumentId)}
+              key={item.key}
+            >
               {item.label}
             </a>
           ))}
@@ -2653,7 +2692,7 @@ export default function CywellKnowledgeRoute() {
                   Customer ID
                   <input
                     aria-label="Customer ID"
-                    onChange={(event) => setCustomerId(event.currentTarget.value)}
+                    onChange={(event) => changeCustomerId(event.currentTarget.value)}
                     value={customerId}
                   />
                 </label>

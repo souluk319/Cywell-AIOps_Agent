@@ -1,5 +1,30 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
+## Latest Update - Scope Reset and Cutover Evidence Hardening
+
+Implemented after the parallel console/cutover/evidence review pass:
+
+- Console Knowledge customer changes now clear selected corpus document, viewer state, previous action result, topology state, and document/note query params before the next RAG/Wiki/topology action.
+- Knowledge route navigation preserves the active customer/document query context across customer data, RAG, LLM Wiki, and topology pages.
+- The browser DOM gate now proves that switching from `workflow-customer` to `workflow-switched` clears stale `workflow-doc-1` selected-document RAG scope before sending `/api/knowledge/rag/query`.
+- PBS preflight evidence for generated-site live checks now writes `test-results/cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json`, preventing generated `pbs-live-site` evidence from overwriting default pbs-live evidence.
+- The cutover bundle now requires current clean `fullHead/treeStatus` evidence, generated-site preapply flags/path, exact live prereq output hash keys, clean real-render prereq evidence, and strict PBS source pinning.
+- The tracked pbs-live overlay now fails closed with `customer-access-json={}`; production mappings must come from `render:pbs:live-prereqs` generated site overlay.
+
+Proof captured in this pass:
+
+- `node --check` passed for changed verifier/release/cutover scripts.
+- `npm run verify:console-plugin`: PASS.
+- `npm run verify:console:topology-dom:built`: PASS, 45 browser-backed checks.
+- `npm run verify:console:integration:built`: PASS, 100 checks.
+- `npm run verify:pbs:cutover-bundle`: PASS, 8 checks.
+- `npm run verify:deploy:manifests`: PASS, 283 checks.
+- `npm run verify:pbs:source-contract:required`: PASS, 31 total checks: 30 PASS / 1 WARN for dirty `F:\AI_Projects\PBS-Dev3`.
+- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `46 PASS / 7 FAIL`; failures remain missing external `playbookstudio` namespace/service, missing `cas-pbs-auth`, missing `cas-knowledge-postgres-live`, and existing legacy `cas-knowledge-postgres` dev Secret.
+- `npm run render:pbs:live-prereqs`: blocked in the current shell until approved non-placeholder PBS bearer token, owner HMAC, service owner, concrete customer ACL JSON, and live Postgres DB credentials/URL are supplied.
+- `npm run verify:pbs:live-prereqs`: PASS, 8 self-test checks.
+- `npm run verify`: PASS.
+
 ## Historical Update - Customer Corpus Workbench and Source-Lane Hardening
 
 Implemented after the latest product/runtime/backend review pass:
@@ -151,7 +176,7 @@ Implemented after the live-readiness parallel audit pass:
 - Private knowledge requests are rejected before reaching Knowledge Engine when the verified owner/user/group is not allowed for the requested `customer_id`.
 - Conflicting customer scope across top-level request fields and nested `source_metadata`/`sourceMetadata`/`metadata` is rejected before indexing or outbound PBS calls.
 - pbs-live enables Gateway customer ACL and reads `CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON` from `cas-knowledge-live-config/customer-access-json`.
-- The default live ConfigMap value grants `cywell-knowledge-admins` all customers as an admin placeholder; target production clusters must replace or approve the real user/group/customer mapping.
+- The tracked default live ConfigMap value is fail-closed (`{}`); production clusters must use the rendered `pbs-live-site` overlay from `render:pbs:live-prereqs` for reviewed user/group/customer mapping.
 - Live smoke cutover/release mode now forbids read-only exception bypass and requires write lineage.
 - Cluster direct-engine block verification now requires an actual blocked result from the in-cluster probe, not merely any non-200 response.
 - Strict live preflight now checks `CAS_PBS_TLS_INSECURE=false`, live Gateway customer ACL wiring, and the union of applied ingress NetworkPolicies selecting knowledge-engine pods.
@@ -338,7 +363,7 @@ Latest manifest verifier evidence:
 Latest PBS preflight evidence:
 
 - `test-results/cas-pbs-preflight-pbs-shadow-diagnostic-local-optional-secrets.json`
-- `test-results/cas-pbs-preflight-pbs-live-preapply-cluster-required-secrets.json`
+- `test-results/cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json`
 - shadow diagnostic status: `PASS/WARN` in the local CRC environment because the real `playbookstudio` namespace/service and optional `cas-pbs-auth` Secret are absent
 - live preapply status: expected `FAIL`, `42 PASS / 8 FAIL`
 - rendered live overlay checks pass for provider, ConfigMap env refs, required token Secret ref, live Postgres Secret refs, no literal Secret material, no dev defaults, HTTPS PBS service-token transport, PBS base URL shape, timeout/response bounds, labeled PBS egress, knowledge ingress, runtime readiness gate, corpus readiness gate, and disabled shadow writes

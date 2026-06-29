@@ -48,6 +48,14 @@ function currentGitFullHead() {
   return run("git", ["rev-parse", "HEAD"]);
 }
 
+function currentGitStatusShort() {
+  return run("git", ["status", "--short"]);
+}
+
+function currentGitTreeStatus() {
+  return currentGitStatusShort() ? "dirty" : "clean";
+}
+
 function currentGitBranch() {
   return run("git", ["branch", "--show-current"]);
 }
@@ -306,6 +314,9 @@ try {
         sourceClusterIdentity: deploymentEvidence?.clusterIdentity ?? {},
         branch: currentGitBranch(),
         head: currentGitHead(),
+        fullHead: currentGitFullHead(),
+        treeStatus: currentGitTreeStatus(),
+        statusShort: currentGitStatusShort(),
         forceRelease,
         status: "PASS",
         summary: { total: checks.length, passed: checks.length, failed: 0 },
@@ -352,6 +363,27 @@ try {
         head: (() => {
           try {
             return currentGitHead();
+          } catch {
+            return "";
+          }
+        })(),
+        fullHead: (() => {
+          try {
+            return currentGitFullHead();
+          } catch {
+            return "";
+          }
+        })(),
+        treeStatus: (() => {
+          try {
+            return currentGitTreeStatus();
+          } catch {
+            return "";
+          }
+        })(),
+        statusShort: (() => {
+          try {
+            return currentGitStatusShort();
           } catch {
             return "";
           }

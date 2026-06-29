@@ -17,13 +17,29 @@ const checks = [];
 const releaseImagesEvidencePath = process.env.CAS_RELEASE_IMAGES_EVIDENCE || "test-results/cas-release-images.json";
 const evidencePhase = skipApplied ? "preapply" : overlay === "pbs-shadow" && !requireCluster ? "diagnostic" : "applied";
 const evidenceScope = requireCluster ? "cluster" : "local";
-const evidenceSuffix = [overlay, evidencePhase, evidenceScope, requireSecret ? "required-secrets" : "optional-secrets"].join("-");
+const evidenceOverlay = overlayPathArg ? evidenceToken(lastPathSegment(overlayPath) || `${overlay}-custom`) : overlay;
+const evidenceSuffix = [evidenceOverlay, evidencePhase, evidenceScope, requireSecret ? "required-secrets" : "optional-secrets"].join("-");
 const evidencePath = `test-results/cas-pbs-preflight-${evidenceSuffix}.json`;
 
 function envBool(name, defaultValue = false) {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return defaultValue;
   return ["1", "true", "yes", "y", "on"].includes(String(raw).trim().toLowerCase());
+}
+
+function normalizePath(value) {
+  return String(value ?? "").replace(/\\/g, "/");
+}
+
+function lastPathSegment(value) {
+  return normalizePath(value).split("/").filter(Boolean).pop() ?? "";
+}
+
+function evidenceToken(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function run(command, args, options = {}) {
@@ -523,6 +539,7 @@ function pbsRuntimeEgressScoped(policy) {
 }
 
 function writeEvidence(status) {
+  const gitStatus = run("git", ["status", "--short"]).stdout.trim();
   mkdirSync("test-results", { recursive: true });
   writeFileSync(
     evidencePath,
@@ -531,6 +548,9 @@ function writeEvidence(status) {
         checkedAt,
         branch: run("git", ["branch", "--show-current"]).stdout.trim(),
         head: run("git", ["rev-parse", "--short", "HEAD"]).stdout.trim(),
+        fullHead: run("git", ["rev-parse", "HEAD"]).stdout.trim(),
+        treeStatus: gitStatus ? "dirty" : "clean",
+        statusShort: gitStatus,
         status,
         namespace,
         clusterIdentity: currentClusterIdentity(),

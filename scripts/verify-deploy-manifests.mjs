@@ -499,8 +499,9 @@ function runRenderedChecks() {
     "render:pbs-live:gateway-customer-acl-required",
     envValue(liveGatewayDeployment, "CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS") === "true" &&
       envFromConfig(liveGatewayDeployment, "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON", "cas-knowledge-live-config", "customer-access-json") &&
-      live.includes("cywell-knowledge-admins"),
-    "PBS live gateway requires configured customer workspace ACL"
+      live.includes("customer-access-json: '{}'") &&
+      !live.includes("[\"*\"]"),
+    "PBS live gateway requires customer workspace ACL and the tracked default overlay fails closed"
   );
   expect("render:pbs-live:knowledge-deployment", Boolean(liveDeployment), "PBS live renders cas-knowledge-engine Deployment");
   expect(
@@ -948,6 +949,7 @@ for (const file of files) {
         text.includes("newTag: v0.1.4") &&
         text.includes("cas-knowledge-live-config") &&
         text.includes("customer-access-json") &&
+        text.includes("customer-access-json={}") &&
         text.includes("gateway-customer-access-live-patch.yaml") &&
         text.includes("delete-dev-knowledge-env-patch.yaml") &&
         !text.includes("delete-dev-postgres-secret.yaml") &&
@@ -1357,7 +1359,7 @@ for (const file of files) {
           text.includes("cas-deploy-manifests.json") &&
           text.includes("cas-pbs-live-prereqs-render.json") &&
           text.includes("cas-pbs-source-contract.json") &&
-          text.includes("cas-pbs-preflight-pbs-live-preapply-cluster-required-secrets.json"),
+          text.includes("cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json"),
         "PBS cutover bundle renderer collects CRC, release, manifest, prereq, source-contract, and live preapply evidence",
         "PBS cutover bundle renderer must collect the release evidence set needed for live cutover handoff"
       );
@@ -1377,6 +1379,9 @@ for (const file of files) {
           text.includes("git-tree-clean") &&
           text.includes("sourceContractPinned") &&
           text.includes("hasRealRenderHashes") &&
+          text.includes("isStrictGeneratedSitePreapply") &&
+          text.includes("requiredLivePrereqOutputFileKeys") &&
+          text.includes("expectedGeneratedSiteOverlayPath") &&
           text.includes("live-prereqs-real-render") &&
           text.includes("source-contract-pinned") &&
           text.includes("artifactSummary") &&
@@ -1822,6 +1827,7 @@ for (const file of files) {
 }
 
 const failures = checks.filter((check) => check.status === "FAIL");
+const gitStatus = run("git", ["status", "--short"]);
 mkdirSync("test-results", { recursive: true });
 writeFileSync(
   "test-results/cas-deploy-manifests.json",
@@ -1830,6 +1836,9 @@ writeFileSync(
       checkedAt,
       branch: run("git", ["branch", "--show-current"]),
       head: run("git", ["rev-parse", "--short", "HEAD"]),
+      fullHead: run("git", ["rev-parse", "HEAD"]),
+      treeStatus: gitStatus ? "dirty" : "clean",
+      statusShort: gitStatus,
       status: failures.length > 0 ? "FAIL" : "PASS",
       summary: {
         total: checks.length,

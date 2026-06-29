@@ -354,14 +354,18 @@ const summary = {
   failed: checks.filter((check) => check.status === "FAIL").length
 };
 const status = summary.failed ? "FAIL" : "PASS";
+const cywellGit = gitMetadata(process.cwd());
 writeFileSync(
   evidencePath,
   JSON.stringify(
     {
       status,
       checkedAt,
-      branch: runGit(["branch", "--show-current"]),
-      head: runGit(["rev-parse", "--short", "HEAD"]),
+      branch: cywellGit.branch,
+      head: cywellGit.head,
+      fullHead: cywellGit.fullHead,
+      treeStatus: cywellGit.treeStatus,
+      statusShort: cywellGit.statusShort,
       sourceDir,
       pbsSource: existsSync(sourceDir)
         ? {

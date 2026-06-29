@@ -112,8 +112,8 @@ Run these before applying live manifests:
 
 ```powershell
 npm run verify
+npm run render:pbs:live-prereqs
 npm run verify:pbs:source-contract:required
-npm run verify:pbs:live-prereqs
 npm run verify:deploy:manifests
 npm run release:crc:v0.1.4
 npm run verify:pbs:preflight:live:site:preapply
@@ -123,7 +123,8 @@ Required result:
 
 - `verify` passes.
 - `verify:pbs:source-contract:required` passes against the pinned PBS source checkout before live feature parity is claimed. The evidence must include PBS source branch, HEAD, tree status, and contract file hashes. For strict release, set `CAS_PBS_SOURCE_HEAD` and `CAS_PBS_REQUIRE_CLEAN_SOURCE=true`; otherwise a dirty checkout is recorded as a WARN, not a pass/fail blocker.
-- `verify:pbs:live-prereqs` passes and writes `test-results/cas-pbs-live-prereqs-render.json`.
+- `verify:pbs:live-prereqs` passes as a renderer self-test and writes `test-results/cas-pbs-live-prereqs-self-test.json`.
+- `render:pbs:live-prereqs` writes the real reviewed live prereq manifests, generated `pbs-live-site` overlay, redacted summary, and `test-results/cas-pbs-live-prereqs-render.json`.
 - `verify:deploy:manifests` passes.
 - `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags. If `v0.1.4` tags already exist and must intentionally move, rerun as `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` and capture the old/new image evidence.
 - `verify:pbs:preflight:live:site:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
@@ -210,7 +211,7 @@ Save command output or JSON artifacts for the release record:
 - `oc get deploy,statefulset,svc,networkpolicy,secret -n cywell-ai-sentinel`
 - `oc get svc,pods -n playbookstudio --show-labels`
 - `test-results/cas-pbs-preflight-pbs-shadow-applied-cluster-optional-secrets.json` if shadow mode is applied
-- `test-results/cas-pbs-preflight-pbs-live-applied-cluster-required-secrets.json`
+- `test-results/cas-pbs-preflight-pbs-live-site-applied-cluster-required-secrets.json`
 - `test-results/cas-pbs-live-smoke-cluster-cutover.json`
 - `test-results/cas-release-images.json`
 - `test-results/cas-pbs-live-prereqs-render.json`
