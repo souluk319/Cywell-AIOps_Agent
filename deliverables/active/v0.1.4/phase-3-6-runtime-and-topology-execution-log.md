@@ -1,6 +1,17 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - Launcher DOM Proof, Source Pinning, and Live Cutover Gate Hardening
+## Latest Update - CRC Release Evidence Refresh and Console Plugin Alignment
+
+Implemented after the CRC deploy evidence refresh:
+
+- Removed the stale CRC verifier expectation that legacy `cywell-opslens` remains enabled. The deploy script and verifier now require native `lightspeed-console-plugin` and legacy `cywell-opslens` to be disabled, `cywell-ai-sentinel` to be enabled, and the OpenShift native `LightspeedButton` capability to be disabled.
+- Rebuilt and redeployed CRC from clean pushed HEAD `2b2758c54ba544b11828de7ba93ff558fa3169c1`. `npm run deploy:crc` is PASS with 72 checks; the console operator plugin list is `networking-console-plugin,monitoring-plugin,cywell-ai-sentinel`, and the launcher/topology/Lightspeed-through-plugin smokes pass.
+- Re-promoted local CRC `v0.1.4` release ImageStreamTags from the refreshed CRC runtime digest evidence. `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` is PASS with 21 checks.
+- Regenerated current clean local evidence: `npm run verify:deploy:manifests` is PASS with 309 checks, and `$env:CAS_PBS_SOURCE_HEAD="6604777abb9e6bd44a83c6a12f36e31ac396489e"; npm run verify:release:source-pinning` is PASS with 62 checks.
+- `npm run verify:pbs:preflight:live:site:preapply` is expected FAIL with 56 PASS / 6 FAIL. The stale release evidence and per-image digest blockers are closed; remaining blockers are missing `cas-pbs-auth`, missing `cas-knowledge-postgres-live`, missing real live-prereq render/hash binding, and legacy CRC dev Secret cleanup.
+- `npm run render:pbs:cutover-bundle` is expected FAIL with `local-evidence-invalid` until approved live token, owner-HMAC, customer ACL, and live Postgres inputs are rendered into fresh real prereq evidence and the generated-site preapply is rerun against that hash-bound site overlay.
+
+## Previous Update - Launcher DOM Proof, Source Pinning, and Live Cutover Gate Hardening
 
 Implemented after the parallel console/cutover/evidence review pass:
 
