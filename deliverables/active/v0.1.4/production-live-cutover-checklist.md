@@ -116,6 +116,8 @@ Required result:
 - `verify:pbs:preflight:live:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
 - `verify:pbs:preflight:live:preapply` confirms release-image evidence is current-head and sourced from non-stale CRC deployment evidence.
 - `verify:pbs:preflight:live:preapply` confirms the Gateway Kubernetes API NetworkPolicy allows the API IP and port in the same egress rule.
+- `verify:pbs:preflight:live:preapply` confirms `playbookstudio-runtime` has ready Endpoints on port `8765` once the PBS namespace/service exists.
+- `verify:pbs:preflight:live:preapply` confirms `cas-pbs-auth` and `cas-knowledge-postgres-live` contain usable non-placeholder values; the Postgres `database-url` credentials/database must match the individual Secret keys.
 
 Stop immediately if any gate fails.
 
@@ -155,13 +157,16 @@ Required result:
 - `CAS_PBS_BEARER_TOKEN` comes from required `cas-pbs-auth/bearer-token`.
 - `DATABASE_URL` and Postgres credentials come from required `cas-knowledge-postgres-live`.
 - `DATABASE_URL` targets the `cas-knowledge-postgres` Service DNS on port `5432`, not localhost or a pod-local endpoint.
+- Decoded live Secret values are non-placeholder; `cas-knowledge-postgres-live/database-url` username, password, and database match `username`, `password`, and `database`.
 - Legacy CRC dev Secret `cas-knowledge-postgres` is absent before live cutover.
 - PBS egress policy is present and scoped exactly to DNS, Postgres, and labeled PBS runtime pods on port `8765`.
+- Applied Gateway, Console Plugin, Knowledge Engine, and Postgres NetworkPolicy unions stay inside their allowlists; no extra applied policy can broaden access for those pods.
 - PBS service-token auth uses HTTPS/mTLS transport; plain HTTP with bearer token is not accepted.
 - Knowledge Engine applied env includes PBS config refs, required runtime/corpus readiness gates, HMAC Secret refs, and live Secret refs.
 - Gateway applied env enables customer workspace ACL and reads `CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON` from `cas-knowledge-live-config/customer-access-json`.
 - Applied ingress NetworkPolicy union for knowledge-engine pods allows only Gateway pods on TCP `8080`.
-- Upload -> RAG -> wiki vault -> topology lineage passes through the Gateway.
+- Gateway rejects a valid owner requesting an unmapped customer with `403` before PBS, and rejects conflicting nested `source_metadata.customer_id` with `400` before PBS.
+- Upload -> RAG -> wiki vault -> topology lineage passes through the Gateway with exact document/customer/source IDs and a direct topology document-note edge.
 - Direct console-plugin pod access to `cas-knowledge-engine` remains blocked.
 
 ## Rollback Criteria
@@ -172,8 +177,10 @@ Rollback or stop the cutover if any of these occur:
 - `verify:pbs:cutover:cluster` fails.
 - PBS health reports DB/vector/corpus readiness false.
 - RAG answers lose uploaded document citations.
+- RAG citations, wiki notes, or topology edges only match a smoke token/title but do not carry the exact uploaded document/customer/source IDs.
 - Wiki vault or topology returns empty graph data for the cutover smoke customer.
 - Gateway owner verification fails open or forwards user bearer tokens to Knowledge Engine.
+- Gateway customer ACL fails open for an unmapped customer or lets conflicting nested customer metadata reach PBS.
 - NetworkPolicy permits broad namespace, pod, or internet peers for Gateway, Console Plugin, Knowledge Engine, or Postgres.
 
 ## Evidence To Capture

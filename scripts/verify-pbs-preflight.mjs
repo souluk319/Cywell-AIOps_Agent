@@ -121,6 +121,46 @@ function decodeSecretValue(secret, key) {
   }
 }
 
+function valueLooksPlaceholder(value) {
+  const clean = String(value ?? "").trim().toLowerCase();
+  return (
+    !clean ||
+    /[\x00-\x1f\x7f]/.test(clean) ||
+    /^(changeme|change-me|todo|placeholder|example|sample|dummy|token|bearer-token|secret|password|dev|test|none|null|x+|\*+)$/.test(clean) ||
+    clean.includes("cas_knowledge_dev")
+  );
+}
+
+function bearerTokenLooksUsable(value) {
+  const clean = String(value ?? "").trim();
+  return clean.length >= 20 && !/\s/.test(clean) && !valueLooksPlaceholder(clean);
+}
+
+function postgresSecretValuesUsable(secret) {
+  const values = {
+    database: decodeSecretValue(secret, "database"),
+    username: decodeSecretValue(secret, "username"),
+    password: decodeSecretValue(secret, "password"),
+    databaseUrl: decodeSecretValue(secret, "database-url")
+  };
+  return (
+    Object.values(values).every((value) => !valueLooksPlaceholder(value)) &&
+    values.password.length >= 16 &&
+    liveDatabaseUrlUsesService(values.databaseUrl) &&
+    liveDatabaseUrlMatchesSecret(values.databaseUrl, values)
+  );
+}
+
+function liveDatabaseUrlMatchesSecret(urlText, values) {
+  try {
+    const url = new URL(urlText);
+    const database = decodeURIComponent(url.pathname.replace(/^\//, ""));
+    return decodeURIComponent(url.username) === values.username && decodeURIComponent(url.password) === values.password && database === values.database;
+  } catch {
+    return false;
+  }
+}
+
 function envFromConfig(deployment, envName, configName, key) {
   const block = envBlock(deployment, envName);
   return block.includes("configMapKeyRef:") && block.includes(`name: ${configName}`) && block.includes(`key: ${key}`);
@@ -164,13 +204,19 @@ function configMapDataValue(configMapJson, key) {
 function customerAccessPolicyIsConcrete(jsonText) {
   try {
     const policy = JSON.parse(jsonText);
-    const groups = policy?.groups && typeof policy.groups === "object" ? policy.groups : {};
-    const users = policy?.users && typeof policy.users === "object" ? policy.users : {};
-    const entries = [...Object.values(groups), ...Object.values(users)].flatMap((value) => (Array.isArray(value) ? value : []));
+    const entriesFromTable = (table) =>
+      table && typeof table === "object" && !Array.isArray(table) ? Object.values(table).flatMap((value) => (Array.isArray(value) ? value : [])) : [];
+    const defaultEntries = Array.isArray(policy?.default) ? policy.default : [];
+    const entries = [
+      ...defaultEntries,
+      ...entriesFromTable(policy?.owners),
+      ...entriesFromTable(policy?.groups),
+      ...entriesFromTable(policy?.users)
+    ];
     return entries.length > 0 && entries.every((value) => {
       const clean = String(value).trim();
       return clean && !clean.includes("*");
-    });
+    }) && defaultEntries.length === 0;
   } catch {
     return false;
   }
@@ -530,6 +576,138 @@ function networkPolicyAllowsAnyIp(policy, ips, ports) {
   });
 }
 
+function dnsEgressRule(rule = {}) {
+  const to = rule.to ?? [];
+  return (
+    to.length > 0 &&
+    portsEqual(rule.ports ?? [], [
+      { protocol: "TCP", port: 53 },
+      { protocol: "UDP", port: 53 },
+      { protocol: "TCP", port: 5353 },
+      { protocol: "UDP", port: 5353 }
+    ]) &&
+    to.every((peer) => {
+      if (!peerHasNoBroadAccess(peer)) return false;
+      if (selectorMatches(peer.namespaceSelector, { "kubernetes.io/metadata.name": "openshift-dns" }) && !peer.podSelector && !peer.ipBlock) return true;
+      if (peer.ipBlock && !peer.namespaceSelector && !peer.podSelector) return true;
+      return false;
+    })
+  );
+}
+
+function podEgressRule(rule = {}, port, labels) {
+  const to = rule.to ?? [];
+  return (
+    to.length === 1 &&
+    peerHasNoBroadAccess(to[0]) &&
+    selectorMatches(to[0].podSelector, labels) &&
+    !to[0].namespaceSelector &&
+    !to[0].ipBlock &&
+    portsEqual(rule.ports ?? [], [{ protocol: "TCP", port }])
+  );
+}
+
+function namespacedPodEgressRule(rule = {}, port, namespaceName, podLabels) {
+  const to = rule.to ?? [];
+  return (
+    to.length === 1 &&
+    peerHasNoBroadAccess(to[0]) &&
+    selectorMatches(to[0].namespaceSelector, { "kubernetes.io/metadata.name": namespaceName }) &&
+    selectorMatches(to[0].podSelector, podLabels) &&
+    !to[0].ipBlock &&
+    portsEqual(rule.ports ?? [], [{ protocol: "TCP", port }])
+  );
+}
+
+function apiEgressRule(rule = {}, apiTargets = []) {
+  return apiTargets.some((target) => networkPolicyAllowsAnyIp({ spec: { egress: [rule] } }, [target.ip], [target.port]));
+}
+
+function gatewayIngressRule(rule = {}) {
+  const from = rule.from ?? [];
+  return (
+    from.length > 0 &&
+    from.every((peer) => {
+      if (!peerHasNoBroadAccess(peer)) return false;
+      if (selectorMatches(peer.namespaceSelector, { "kubernetes.io/metadata.name": "openshift-console" }) && !peer.podSelector && !peer.ipBlock) return true;
+      if (
+        selectorMatches(peer.podSelector, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "console-plugin" }) &&
+        !peer.namespaceSelector &&
+        !peer.ipBlock
+      ) {
+        return true;
+      }
+      return false;
+    }) &&
+    portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 9443 }])
+  );
+}
+
+function consoleIngressRule(rule = {}) {
+  const from = rule.from ?? [];
+  return (
+    from.length === 1 &&
+    peerHasNoBroadAccess(from[0]) &&
+    selectorMatches(from[0].namespaceSelector, { "kubernetes.io/metadata.name": "openshift-console" }) &&
+    !from[0].podSelector &&
+    !from[0].ipBlock &&
+    portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 9443 }])
+  );
+}
+
+function postgresIngressRule(rule = {}) {
+  const from = rule.from ?? [];
+  return (
+    from.length === 1 &&
+    peerHasNoBroadAccess(from[0]) &&
+    selectorMatches(from[0].podSelector, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "knowledge-engine" }) &&
+    !from[0].namespaceSelector &&
+    !from[0].ipBlock &&
+    portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 5432 }])
+  );
+}
+
+function appliedPolicyUnionScoped({ policies = [], labels = {}, ingressRule, egressRule, requireIngress = false, requireEgress = false }) {
+  const ingressPolicies = policies.filter((policy) => ingressPolicyApplies(policy) && selectorSelectsLabels(policy.spec?.podSelector ?? {}, labels));
+  const egressPolicies = policies.filter((policy) => egressPolicyApplies(policy) && selectorSelectsLabels(policy.spec?.podSelector ?? {}, labels));
+  const badIngress = [];
+  const badEgress = [];
+  for (const policy of ingressPolicies) {
+    for (const rule of policy.spec?.ingress ?? []) {
+      if (!ingressRule(rule)) badIngress.push(policy.metadata?.name ?? "unnamed");
+    }
+  }
+  for (const policy of egressPolicies) {
+    for (const rule of policy.spec?.egress ?? []) {
+      if (!egressRule(rule)) badEgress.push(policy.metadata?.name ?? "unnamed");
+    }
+  }
+  const missing = [];
+  if (requireIngress && ingressPolicies.length === 0) missing.push("ingress");
+  if (requireEgress && egressPolicies.length === 0) missing.push("egress");
+  return {
+    ok: badIngress.length === 0 && badEgress.length === 0 && missing.length === 0,
+    ingressPolicies: ingressPolicies.map((policy) => policy.metadata?.name).filter(Boolean),
+    egressPolicies: egressPolicies.map((policy) => policy.metadata?.name).filter(Boolean),
+    badIngress,
+    badEgress,
+    missing
+  };
+}
+
+function gatewayEgressRule(rule = {}, apiTargets = []) {
+  return (
+    dnsEgressRule(rule) ||
+    namespacedPodEgressRule(rule, 8443, "openshift-lightspeed", { "app.kubernetes.io/name": "lightspeed-service-api" }) ||
+    podEgressRule(rule, 8080, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "knowledge-engine" }) ||
+    apiEgressRule(rule, apiTargets)
+  );
+}
+
+function consoleEgressRule(rule = {}) {
+  return dnsEgressRule(rule) || podEgressRule(rule, 9443, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "gateway" });
+}
+
 function collectKubernetesApiTargets() {
   const targets = [];
   const service = getJson("cluster:kubernetes-api-service", ["get", "service", "-n", "default", "kubernetes"]);
@@ -543,6 +721,14 @@ function collectKubernetesApiTargets() {
     }
   }
   return targets;
+}
+
+function runtimeServiceEndpointsReady(endpoints) {
+  return (endpoints?.subsets ?? []).some((subset) => {
+    const hasReadyAddress = (subset.addresses ?? []).some((address) => Boolean(address.ip || address.hostname));
+    const hasPort = (subset.ports ?? []).some((port) => Number(port.port) === 8765);
+    return hasReadyAddress && hasPort;
+  });
 }
 
 function firstContainerImage(workload) {
@@ -883,6 +1069,15 @@ if (runtimeService) {
         `selected pods must be Ready and labeled for PBS egress: ${JSON.stringify((runtimePods.items ?? []).map((pod) => ({ name: pod.metadata?.name, labels: pod.metadata?.labels, phase: pod.status?.phase })))}`
       );
     }
+    const runtimeEndpoints = getJson("cluster:pbs-runtime-service-endpoints", ["get", "endpoints", "-n", "playbookstudio", "playbookstudio-runtime"]);
+    if (runtimeEndpoints) {
+      expect(
+        "cluster:pbs-runtime-service-endpoints-ready",
+        runtimeServiceEndpointsReady(runtimeEndpoints),
+        "playbookstudio-runtime Service has at least one ready endpoint on PBS backend port 8765",
+        `playbookstudio-runtime Endpoints must expose a ready address and port 8765: ${JSON.stringify(runtimeEndpoints.subsets ?? [])}`
+      );
+    }
   } else {
     fail("cluster:pbs-runtime-service-selector-empty", "playbookstudio-runtime Service must have a selector so egress label checks are enforceable");
   }
@@ -891,6 +1086,13 @@ const authSecret = getJson("cluster:pbs-auth-secret", ["get", "secret", "-n", na
 if (authSecret) {
   const hasBearer = Boolean(authSecret.data?.["bearer-token"]);
   expect("cluster:pbs-auth-secret-key", hasBearer, "cas-pbs-auth Secret contains bearer-token key");
+  const bearerToken = decodeSecretValue(authSecret, "bearer-token");
+  expect(
+    "cluster:pbs-auth-secret-content",
+    bearerTokenLooksUsable(bearerToken),
+    "cas-pbs-auth bearer-token decodes to usable non-placeholder service-token material",
+    "cas-pbs-auth bearer-token must be non-empty, non-placeholder, whitespace-free, and at least 20 characters"
+  );
 } else if (requireSecret) {
   fail("cluster:pbs-auth-secret-required", "cas-pbs-auth Secret is required for this preflight run");
 } else {
@@ -899,6 +1101,7 @@ if (authSecret) {
 if (overlay === "pbs-live") {
   let liveDatabaseUrl = "";
   const releaseImagesEvidence = loadReleaseImagesEvidence();
+  let apiTargets = [];
   if (requireCluster) {
     for (const imageName of ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine", "cas-knowledge-postgres"]) {
       const imageTag = getJson(`cluster:release-image:${imageName}`, ["get", "imagestreamtag", "-n", namespace, `${imageName}:v0.1.4`]);
@@ -921,7 +1124,7 @@ if (overlay === "pbs-live") {
         );
       }
     }
-    const apiTargets = collectKubernetesApiTargets();
+    apiTargets = collectKubernetesApiTargets();
     const networkPolicies = getJson("cluster:gateway-networkpolicies", ["get", "networkpolicy", "-n", namespace]);
     if (networkPolicies) {
       const gatewayPolicies = (networkPolicies.items ?? []).filter((policy) => selectorMatchesGateway(policy.spec?.podSelector));
@@ -949,6 +1152,12 @@ if (overlay === "pbs-live") {
       liveDatabaseUrlUsesService(liveDatabaseUrl),
       "cas-knowledge-postgres-live database-url targets the knowledge Postgres Service on port 5432",
       "cas-knowledge-postgres-live database-url must use cas-knowledge-postgres Service DNS on port 5432, not localhost or a pod-local endpoint"
+    );
+    expect(
+      "cluster:knowledge-postgres-live-secret-content",
+      postgresSecretValuesUsable(liveDbSecret),
+      "cas-knowledge-postgres-live Secret decodes to non-placeholder matching database, username, password, and service DATABASE_URL",
+      "cas-knowledge-postgres-live Secret values must be non-placeholder and database-url username/password/database must match the individual keys"
     );
   } else if (requireSecret) {
     fail("cluster:knowledge-postgres-live-secret-required", "cas-knowledge-postgres-live Secret is required for live cutover");
@@ -1194,6 +1403,7 @@ if (overlay === "pbs-live") {
     }
     const appliedNetworkPolicies = getJson("cluster:applied-networkpolicy-union", ["get", "networkpolicy", "-n", namespace]);
     if (appliedNetworkPolicies) {
+      const policies = appliedNetworkPolicies.items ?? [];
       const union = appliedKnowledgeIngressUnionScoped(appliedNetworkPolicies.items ?? [], appliedKnowledgeLabels);
       expect(
         "cluster:applied-knowledge-ingress-union-scoped",
@@ -1207,6 +1417,48 @@ if (overlay === "pbs-live") {
         egressUnion.ok,
         "applied knowledge-engine egress union allows only DNS, Postgres, and labeled PBS runtime pods",
         JSON.stringify(egressUnion)
+      );
+      const gatewayUnion = appliedPolicyUnionScoped({
+        policies,
+        labels: { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "gateway" },
+        ingressRule: gatewayIngressRule,
+        egressRule: (rule) => gatewayEgressRule(rule, apiTargets),
+        requireIngress: true,
+        requireEgress: true
+      });
+      expect(
+        "cluster:applied-gateway-networkpolicy-union-scoped",
+        gatewayUnion.ok,
+        "applied gateway NetworkPolicy union allows only console/plugin ingress and DNS/Lightspeed/knowledge/Kubernetes-API egress",
+        JSON.stringify(gatewayUnion)
+      );
+      const consoleUnion = appliedPolicyUnionScoped({
+        policies,
+        labels: { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "console-plugin" },
+        ingressRule: consoleIngressRule,
+        egressRule: consoleEgressRule,
+        requireIngress: true,
+        requireEgress: true
+      });
+      expect(
+        "cluster:applied-console-plugin-networkpolicy-union-scoped",
+        consoleUnion.ok,
+        "applied console-plugin NetworkPolicy union allows only OpenShift Console ingress and DNS/gateway egress",
+        JSON.stringify(consoleUnion)
+      );
+      const postgresUnion = appliedPolicyUnionScoped({
+        policies,
+        labels: { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "knowledge-postgres" },
+        ingressRule: postgresIngressRule,
+        egressRule: () => false,
+        requireIngress: true,
+        requireEgress: true
+      });
+      expect(
+        "cluster:applied-postgres-networkpolicy-union-scoped",
+        postgresUnion.ok,
+        "applied knowledge-postgres NetworkPolicy union allows only knowledge-engine ingress and default-deny egress",
+        JSON.stringify(postgresUnion)
       );
     }
     const appliedPbsEgress = getJson("cluster:applied-pbs-egress-policy", [

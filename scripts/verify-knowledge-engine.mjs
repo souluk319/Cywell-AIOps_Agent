@@ -1380,6 +1380,31 @@ try {
     JSON.stringify({ body: boundaryForbiddenCustomer.body, before: forbiddenBoundaryPrivateCountBefore, after: forbiddenBoundaryPrivateCountAfter })
   );
 
+  const mismatchBoundaryPrivateCountBefore = boundaryEngine.records.filter((record) => record.path === "/api/knowledge/uploads/ingest").length;
+  const boundaryMismatchedCustomerUpload = await fetchJson(`${boundaryGatewayBase}/api/knowledge/uploads/ingest`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${boundaryUserToken}` },
+    body: JSON.stringify({
+      customer_id: "boundary",
+      file_name: "mismatched-boundary.txt",
+      content: "mismatched nested customer metadata must fail at the gateway",
+      source_metadata: { customer_id: "outside-boundary" }
+    })
+  });
+  const mismatchBoundaryPrivateCountAfter = boundaryEngine.records.filter((record) => record.path === "/api/knowledge/uploads/ingest").length;
+  expect(
+    "knowledge:gateway-customer-mismatch-not-proxied",
+    boundaryMismatchedCustomerUpload.response.status === 400 &&
+      boundaryMismatchedCustomerUpload.body.code === "knowledge-customer-mismatch" &&
+      mismatchBoundaryPrivateCountAfter === mismatchBoundaryPrivateCountBefore,
+    "gateway rejects conflicting nested customer metadata before the internal Knowledge Engine hop",
+    JSON.stringify({
+      body: boundaryMismatchedCustomerUpload.body,
+      before: mismatchBoundaryPrivateCountBefore,
+      after: mismatchBoundaryPrivateCountAfter
+    })
+  );
+
   const rejectedBoundaryPrivateCountBefore = boundaryEngine.records.filter((record) => record.path === "/api/knowledge/rag/query").length;
   const boundaryNoOwner = await fetchJson(`${boundaryGatewayBase}/api/knowledge/rag/query`, {
     method: "POST",

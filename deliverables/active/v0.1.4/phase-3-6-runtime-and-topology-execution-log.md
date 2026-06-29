@@ -1,6 +1,27 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - Wiki Vault Side-Channels, Staged Wiki Loop, and Structural API Egress
+## Latest Update - Live Cutover Gate Hardening
+
+Implemented after the third parallel review pass:
+
+- Strict live preflight now validates `playbookstudio-runtime` Endpoints on port `8765`, not only the Service selector and ready pods.
+- `cas-pbs-auth/bearer-token` is decoded and rejected if it is empty, short, whitespace-bearing, or obvious placeholder material.
+- `cas-knowledge-postgres-live` is decoded as a contract: `database`, `username`, `password`, and `database-url` must be non-placeholder, the password must be production-length, `database-url` must target the Postgres Service on port `5432`, and the URL credentials/database must match the individual Secret keys.
+- Applied live NetworkPolicy union checks now cover Gateway, Console Plugin, Knowledge Engine, and Postgres. Gateway egress is allowlisted to DNS, Lightspeed, Knowledge Engine, and the discovered Kubernetes API target only; Postgres egress remains default-deny.
+- Live customer ACL concrete validation now evaluates `default`, `owners`, `users`, and `groups`; wildcard entries anywhere are rejected and `default` must be empty before cutover.
+- PBS live smoke now exercises valid-owner/unmapped-customer fail-closed behavior and conflicting nested customer metadata rejection before any PBS trace is attached.
+- PBS live write lineage now requires exact document/customer/source IDs across upload, RAG citation, LLM Wiki note, and a direct topology document-note edge. Title/snippet/answer/body token fallback no longer proves cutover lineage.
+- Gateway boundary verification now proves conflicting nested customer metadata is rejected before the Knowledge Engine receives the upload request.
+
+Proof captured in this pass:
+
+- `node --check` passed for changed verification and preflight scripts.
+- `npm run verify:knowledge-engine`: PASS, 83 checks.
+- `npm run verify:deploy:manifests`: PASS, 260 checks.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL, `42 PASS / 8 FAIL`; failures remain external live prerequisites plus replacement of the rendered wildcard customer ACL placeholder.
+- `npm run verify`: PASS.
+
+## Previous Update - Wiki Vault Side-Channels, Staged Wiki Loop, and Structural API Egress
 
 Implemented after the second parallel review pass:
 

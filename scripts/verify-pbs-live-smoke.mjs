@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -265,6 +266,65 @@ function hasFailedStage(body) {
   return Array.isArray(body?.stages) && body.stages.some((stage) => String(stage?.status ?? "").toLowerCase() === "failed");
 }
 
+function stableTokenOwner(token) {
+  return `token-${createHash("sha256").update(token).digest("hex").slice(0, 16)}`;
+}
+
+function sameOptional(value, expected) {
+  return value === undefined || value === null || value === "" || String(value) === String(expected);
+}
+
+function citationHasExactLineage(citation, uploadedDocumentId, uploadedDocumentSourceId, customerId) {
+  const docOk =
+    String(citation?.document_id ?? "") === String(uploadedDocumentId) ||
+    String(citation?.document_source_id ?? "") === String(uploadedDocumentId) ||
+    (uploadedDocumentSourceId && String(citation?.document_source_id ?? "") === String(uploadedDocumentSourceId));
+  const customerOk = String(citation?.customer_id ?? "") === String(customerId) || String(citation?.source_collection ?? "") === String(customerId);
+  const sourceOk = sameOptional(citation?.source_scope, "user_upload") && sameOptional(citation?.source_kind, "upload");
+  return docOk && customerOk && sourceOk;
+}
+
+function wikiNoteHasExactLineage(note, uploadedDocumentId, customerId) {
+  const docOk =
+    String(note?.document_id ?? "") === String(uploadedDocumentId) ||
+    String(note?.source_document_id ?? "") === String(uploadedDocumentId) ||
+    String(note?.provenance?.source_document_id ?? "") === String(uploadedDocumentId);
+  return docOk && sameOptional(note?.customer_id, customerId) && sameOptional(note?.compiled_wiki, true) && sameOptional(note?.book_slug, "pbs-llm-wiki");
+}
+
+function topologyHasExactLineage(topologyBody, uploadedDocumentId, customerId, lineageNote) {
+  const nodes = Array.isArray(topologyBody?.nodes) ? topologyBody.nodes : [];
+  const edges = Array.isArray(topologyBody?.edges) ? topologyBody.edges : [];
+  const docNode = nodes.find(
+    (node) =>
+      String(node?.id ?? "") === String(uploadedDocumentId) ||
+      String(node?.document_source_id ?? "") === String(uploadedDocumentId) ||
+      String(node?.source_document_id ?? "") === String(uploadedDocumentId)
+  );
+  const noteNode = nodes.find(
+    (node) =>
+      String(node?.type ?? "").includes("wiki") &&
+      (String(node?.id ?? "") === String(lineageNote?.id ?? "") ||
+        String(node?.document_id ?? "") === String(uploadedDocumentId) ||
+        String(node?.source_document_id ?? "") === String(uploadedDocumentId) ||
+        String(node?.provenance?.source_document_id ?? "") === String(uploadedDocumentId))
+  );
+  const edge = edges.find(
+    (candidate) =>
+      docNode &&
+      noteNode &&
+      ((String(candidate?.source ?? "") === String(noteNode.id) && String(candidate?.target ?? "") === String(docNode.id)) ||
+        (String(candidate?.source ?? "") === String(docNode.id) && String(candidate?.target ?? "") === String(noteNode.id)))
+  );
+  const edgeLineageOk =
+    edge &&
+    sameOptional(edge.customer_id, customerId) &&
+    (String(edge.source_document_id ?? "") === String(uploadedDocumentId) ||
+      String(edge.provenance?.source_document_id ?? "") === String(uploadedDocumentId) ||
+      (edge.source_document_id === undefined && edge.provenance?.source_document_id === undefined));
+  return { ok: Boolean(docNode && noteNode && edgeLineageOk), docNode, noteNode, edge };
+}
+
 function spawnChild(command, args, env) {
   const child = spawn(command, args, {
     cwd: process.cwd(),
@@ -461,6 +521,10 @@ async function runClusterSmoke() {
     "function engineReq(path){return new Promise((resolve,reject)=>{const r=http.request(`http://${knowledgeEngineHost}:8080${path}`,{method:'GET',timeout:5000},res=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>resolve({status:res.statusCode,body:parse(b)}));});r.on('timeout',()=>{r.destroy(new Error('knowledge engine direct health timed out'))});r.on('error',reject);r.end();});}",
     "function traceOk(body){return body?.pbs?.ok===true&&Number(body?.pbs?.status||0)>=200&&Number(body?.pbs?.status||0)<300}",
     "function casOk(result){return result.status>=200&&result.status<300&&result.body?.status!=='error'&&traceOk(result.body)}",
+    "function sameOptional(value,expected){return value===undefined||value===null||value===''||String(value)===String(expected)}",
+    "function citationExact(c,docId,sourceId){const doc=String(c?.document_id||'')===String(docId)||String(c?.document_source_id||'')===String(docId)||(sourceId&&String(c?.document_source_id||'')===String(sourceId));const customer=String(c?.customer_id||'')===customerId||String(c?.source_collection||'')===customerId;return doc&&customer&&sameOptional(c?.source_scope,'user_upload')&&sameOptional(c?.source_kind,'upload')}",
+    "function noteExact(n,docId){const doc=String(n?.document_id||'')===String(docId)||String(n?.source_document_id||'')===String(docId)||String(n?.provenance?.source_document_id||'')===String(docId);return doc&&sameOptional(n?.customer_id,customerId)&&sameOptional(n?.compiled_wiki,true)&&sameOptional(n?.book_slug,'pbs-llm-wiki')}",
+    "function topologyExact(body,docId,note){const nodes=Array.isArray(body?.nodes)?body.nodes:[];const edges=Array.isArray(body?.edges)?body.edges:[];const docNode=nodes.find(n=>String(n?.id||'')===String(docId)||String(n?.document_source_id||'')===String(docId)||String(n?.source_document_id||'')===String(docId));const noteNode=nodes.find(n=>String(n?.type||'').includes('wiki')&&(String(n?.id||'')===String(note?.id||'')||String(n?.document_id||'')===String(docId)||String(n?.source_document_id||'')===String(docId)||String(n?.provenance?.source_document_id||'')===String(docId)));const edge=edges.find(e=>docNode&&noteNode&&((String(e?.source||'')===String(noteNode.id)&&String(e?.target||'')===String(docNode.id))||(String(e?.source||'')===String(docNode.id)&&String(e?.target||'')===String(noteNode.id))));const edgeOk=edge&&sameOptional(edge.customer_id,customerId)&&(String(edge.source_document_id||'')===String(docId)||String(edge.provenance?.source_document_id||'')===String(docId)||(edge.source_document_id===undefined&&edge.provenance?.source_document_id===undefined));return {ok:Boolean(docNode&&noteNode&&edgeOk),docNode,noteNode,edge}}",
     "(async()=>{",
     "const health=await req('/api/knowledge/healthz');",
     "const healthOk=health.status===200&&health.body?.provider===undefined&&health.body?.engine?.provider===undefined&&health.body?.status==='ok'&&Array.isArray(health.body?.capabilities)&&health.body?.storage===undefined&&health.body?.counts===undefined&&health.body?.provider_config===undefined&&health.body?.engine?.endpoint===undefined;",
@@ -474,30 +538,35 @@ async function runClusterSmoke() {
     "const spoofRemote=await req('/api/knowledge/rag/query','POST',{customer_id:customerId,question:'owner required'},false,{'x-remote-user':'spoofed-pbs-live-cluster'});",
     "const spoofOpenShift=await req('/api/knowledge/rag/query','POST',{customer_id:customerId,question:'owner required'},false,{'x-openshift-user':'spoofed-pbs-live-cluster'});",
     "const ownerEnforced=noOwner.status===401&&spoofRemote.status===401&&spoofOpenShift.status===401;",
+    "const forbiddenCustomer=await req('/api/knowledge/rag/query','POST',{customer_id:`${customerId}-forbidden`,question:'customer ACL should fail closed'});",
+    "const customerAclFailClosed=forbiddenCustomer.status===403&&forbiddenCustomer.body?.code==='knowledge-customer-forbidden'&&forbiddenCustomer.body?.pbs===undefined;",
+    "const mismatchedCustomer=await req('/api/knowledge/uploads/ingest','POST',{customer_id:customerId,file_name:'pbs-live-cluster-mismatched-customer.txt',content:'conflicting nested customer metadata must fail closed',source_metadata:{customer_id:`${customerId}-mismatch`}});",
+    "const customerMismatchFailClosed=mismatchedCustomer.status===400&&mismatchedCustomer.body?.code==='knowledge-customer-mismatch'&&mismatchedCustomer.body?.pbs===undefined;",
     "const wikiStatus=await req(`/api/knowledge/wiki-loop/status?customer_id=${customerId}`);",
     "const topology=await req(`/api/knowledge/topology?customer_id=${customerId}`);",
     "const initialNodes=Array.isArray(topology.body?.nodes)?topology.body.nodes:[];",
     "const initialEdges=Array.isArray(topology.body?.edges)?topology.body.edges:[];",
     "const initialIds=new Set(initialNodes.map(n=>String(n.id||'')).filter(Boolean));",
     "const initialGraphOk=initialEdges.every(e=>initialIds.has(String(e.source||''))&&initialIds.has(String(e.target||'')));",
-    "const result={healthOk,runtimeReady,embeddingReady,corpusReady,ownerEnforced,wikiStatusOk:casOk(wikiStatus),topologyOk:casOk(topology),initialNodes:initialNodes.length,initialEdges:initialEdges.length,initialGraphOk,noOwnerStatus:noOwner.status,spoofRemoteStatus:spoofRemote.status,spoofOpenShiftStatus:spoofOpenShift.status};",
+    "const result={healthOk,runtimeReady,embeddingReady,corpusReady,ownerEnforced,customerAclFailClosed,customerMismatchFailClosed,wikiStatusOk:casOk(wikiStatus),topologyOk:casOk(topology),initialNodes:initialNodes.length,initialEdges:initialEdges.length,initialGraphOk,noOwnerStatus:noOwner.status,spoofRemoteStatus:spoofRemote.status,spoofOpenShiftStatus:spoofOpenShift.status,forbiddenCustomerStatus:forbiddenCustomer.status,mismatchedCustomerStatus:mismatchedCustomer.status};",
     "if(!writeSmoke){result.writeSkipped=true;result.readOnlyTopologyReady=readOnlyException?initialNodes.length>0&&initialGraphOk:true;console.log(JSON.stringify(result));return;}",
     "const upload=await req('/api/knowledge/uploads/ingest','POST',{customer_id:customerId,file_name:fileName,filename:fileName,content:`${lineageToken} router latency evidence from cluster cutover smoke.`,source_scope:'user_upload',visibility:'private_user',source_kind:'upload',source_metadata:{customer_id:customerId,verifier:'cas-pbs-live-cluster-smoke',lineage_token:lineageToken},index:true,force_reingest:false});",
     "const uploadedDocumentId=upload.body?.document?.id||upload.body?.document?.document_source_id||upload.body?.document_source_id;",
+    "const uploadedDocumentSourceId=upload.body?.document?.document_source_id||upload.body?.document_source_id||uploadedDocumentId;",
     "const rag=await req('/api/knowledge/rag/query','POST',{customer_id:customerId,question:`${lineageToken} router latency evidence`});",
     "const citations=Array.isArray(rag.body?.citations)?rag.body.citations:[];",
-    "const ragLineageOk=Boolean(uploadedDocumentId)&&citations.some(c=>c.document_id===uploadedDocumentId||c.document_source_id===uploadedDocumentId||c.title===upload.body?.document?.title||String(c.snippet||'').includes(lineageToken)||String(rag.body?.answer||'').includes(lineageToken));",
+    "const exactCitation=citations.find(c=>citationExact(c,uploadedDocumentId,uploadedDocumentSourceId));",
+    "const ragLineageOk=Boolean(uploadedDocumentId&&exactCitation);",
     "const wiki=await req('/api/knowledge/wiki-loop/run','POST',{customer_id:customerId,document_id:uploadedDocumentId});",
     "const vault=await req(`/api/knowledge/wiki-vault?customer_id=${customerId}`);",
     "const notes=Array.isArray(vault.body?.notes)?vault.body.notes:[];",
-    "const lineageNote=notes.find(n=>n.document_id===uploadedDocumentId||n.source_document_id===uploadedDocumentId||n.provenance?.source_document_id===uploadedDocumentId||String(n.body||'').includes(lineageToken));",
+    "const lineageNote=notes.find(n=>noteExact(n,uploadedDocumentId));",
     "const postTopology=await req(`/api/knowledge/topology?customer_id=${customerId}`);",
+    "const topologyLineage=topologyExact(postTopology.body,uploadedDocumentId,lineageNote);",
     "const nodes=Array.isArray(postTopology.body?.nodes)?postTopology.body.nodes:[];",
     "const edges=Array.isArray(postTopology.body?.edges)?postTopology.body.edges:[];",
-    "const docNode=nodes.find(n=>n.id===uploadedDocumentId||n.document_source_id===uploadedDocumentId||n.source_document_id===uploadedDocumentId);",
-    "const noteNode=nodes.find(n=>String(n.type||'').includes('wiki')&&(n.id===lineageNote?.id||n.document_id===uploadedDocumentId||n.source_document_id===uploadedDocumentId||n.provenance?.source_document_id===uploadedDocumentId));",
-    "const topologyLineageOk=Boolean(docNode&&noteNode)&&edges.some(e=>(e.source===noteNode.id&&e.target===docNode.id)||(e.source===docNode.id&&e.target===noteNode.id)||e.source_document_id===uploadedDocumentId||e.provenance?.source_document_id===uploadedDocumentId);",
-    "Object.assign(result,{lineageToken,fileName,uploadedDocumentId,uploadOk:casOk(upload)&&upload.body?.status==='indexed',ragOk:casOk(rag)&&rag.body?.trace?.retriever==='pbs-http',ragLineageOk,wikiOk:casOk(wiki)&&!String(wiki.body?.status||'').toLowerCase().includes('error'),vaultOk:casOk(vault),wikiLineageOk:Boolean(lineageNote),postTopologyOk:casOk(postTopology),postNodes:nodes.length,postEdges:edges.length,topologyLineageOk});",
+    "const exactLineageOk=Boolean(uploadedDocumentId&&exactCitation&&lineageNote&&topologyLineage.ok);",
+    "Object.assign(result,{lineageToken,fileName,uploadedDocumentId,uploadedDocumentSourceId,uploadOk:casOk(upload)&&upload.body?.status==='indexed',ragOk:casOk(rag)&&rag.body?.trace?.retriever==='pbs-http',ragLineageOk,exactCitation,wikiOk:casOk(wiki)&&!String(wiki.body?.status||'').toLowerCase().includes('error'),vaultOk:casOk(vault),wikiLineageOk:Boolean(lineageNote),lineageNote,postTopologyOk:casOk(postTopology),postNodes:nodes.length,postEdges:edges.length,topologyLineageOk:topologyLineage.ok,topologyLineage,exactLineageOk});",
     "console.log(JSON.stringify(result));",
     "})().catch(e=>{console.error(e.stack||e.message);process.exit(1);});"
   ].join("");
@@ -521,6 +590,12 @@ async function runClusterSmoke() {
     "pbs-live:cluster-owner-enforcement",
     smoke.status === 0 && smokeBody?.ownerEnforced === true,
     "gateway rejects no-owner and spoofed owner headers in applied pbs-live path",
+    JSON.stringify(smokeBody ?? { stdout: smoke.stdout, stderr: smoke.stderr })
+  );
+  expect(
+    "pbs-live:cluster-customer-acl-fail-closed",
+    smoke.status === 0 && smokeBody?.customerAclFailClosed === true && smokeBody?.customerMismatchFailClosed === true,
+    "gateway rejects unmapped customers and conflicting nested customer metadata before PBS in applied pbs-live path",
     JSON.stringify(smokeBody ?? { stdout: smoke.stdout, stderr: smoke.stderr })
   );
   expect(
@@ -550,8 +625,9 @@ async function runClusterSmoke() {
         smokeBody?.vaultOk === true &&
         smokeBody?.wikiLineageOk === true &&
         smokeBody?.postTopologyOk === true &&
-        smokeBody?.topologyLineageOk === true,
-      "applied pbs-live preserves upload -> RAG -> wiki vault -> topology lineage through gateway pod",
+        smokeBody?.topologyLineageOk === true &&
+        smokeBody?.exactLineageOk === true,
+      "applied pbs-live preserves exact upload -> RAG -> wiki vault -> topology document/customer/source lineage through gateway pod",
       JSON.stringify(smokeBody ?? { stdout: smoke.stdout, stderr: smoke.stderr })
     );
   }
@@ -703,6 +779,8 @@ try {
     skip("pbs-live:corpus-ready", "CAS_PBS_LIVE_REQUIRE_CORPUS_READY is false; corpus readiness check skipped");
   }
 
+  const smokeBearer = "pbs-live-smoke-owner";
+  const smokeCustomerId = "pbs-live-smoke";
   const gatewayEnv = {
     ...process.env,
     HOST: "127.0.0.1",
@@ -711,7 +789,9 @@ try {
     CAS_EVIDENCE_PROVIDER: "none",
     CAS_KNOWLEDGE_OWNER_IDENTITY_MODE: "token-hash",
     CAS_KNOWLEDGE_ENGINE_URL: base,
-    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000"
+    CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS: "10000",
+    CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS: "true",
+    CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({ owners: { [stableTokenOwner(smokeBearer)]: [smokeCustomerId] } })
   };
   spawnChild("node", ["apps/gateway/src/server.mjs"], gatewayEnv);
   const gatewayBase = `http://127.0.0.1:${gatewayPort}`;
@@ -731,17 +811,17 @@ try {
   );
   const gatewayNoOwner = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
     method: "POST",
-    body: JSON.stringify({ customer_id: "pbs-live-smoke", question: "owner required" })
+    body: JSON.stringify({ customer_id: smokeCustomerId, question: "owner required" })
   });
   const gatewaySpoofRemote = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
     method: "POST",
     headers: { "x-remote-user": "spoofed-pbs-live-owner" },
-    body: JSON.stringify({ customer_id: "pbs-live-smoke", question: "owner required" })
+    body: JSON.stringify({ customer_id: smokeCustomerId, question: "owner required" })
   });
   const gatewaySpoofOpenShift = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
     method: "POST",
     headers: { "x-openshift-user": "spoofed-pbs-live-owner" },
-    body: JSON.stringify({ customer_id: "pbs-live-smoke", question: "owner required" })
+    body: JSON.stringify({ customer_id: smokeCustomerId, question: "owner required" })
   });
   expect(
     "pbs-live:gateway-owner-enforcement",
@@ -755,15 +835,43 @@ try {
     JSON.stringify({ noOwner: gatewayNoOwner.body, remote: gatewaySpoofRemote.body, openshift: gatewaySpoofOpenShift.body })
   );
 
-  const headers = { authorization: "Bearer pbs-live-smoke-owner" };
-  const wikiStatus = await fetchJson(`${gatewayBase}/api/knowledge/wiki-loop/status?customer_id=pbs-live-smoke`, { headers });
+  const headers = { authorization: `Bearer ${smokeBearer}` };
+  const forbiddenCustomer = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ customer_id: `${smokeCustomerId}-forbidden`, question: "customer ACL should fail closed" })
+  });
+  expect(
+    "pbs-live:gateway-customer-acl-fail-closed",
+    forbiddenCustomer.response.status === 403 && forbiddenCustomer.body.code === "knowledge-customer-forbidden" && forbiddenCustomer.body.pbs === undefined,
+    "gateway rejects a valid owner against an unmapped customer before any PBS trace is attached",
+    JSON.stringify(forbiddenCustomer.body)
+  );
+  const mismatchedCustomer = await fetchJson(`${gatewayBase}/api/knowledge/uploads/ingest`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      customer_id: smokeCustomerId,
+      file_name: "pbs-live-mismatched-customer.txt",
+      content: "conflicting nested customer metadata must fail closed",
+      source_metadata: { customer_id: `${smokeCustomerId}-mismatch` }
+    })
+  });
+  expect(
+    "pbs-live:gateway-customer-mismatch-fail-closed",
+    mismatchedCustomer.response.status === 400 && mismatchedCustomer.body.code === "knowledge-customer-mismatch" && mismatchedCustomer.body.pbs === undefined,
+    "gateway rejects conflicting nested customer metadata before any PBS trace is attached",
+    JSON.stringify(mismatchedCustomer.body)
+  );
+
+  const wikiStatus = await fetchJson(`${gatewayBase}/api/knowledge/wiki-loop/status?customer_id=${smokeCustomerId}`, { headers });
   expect(
     "pbs-live:wiki-status",
     casLiveOk(wikiStatus) && wikiStatus.body.provider === "pbs-http-live",
     "CAS pbs-http-live exposes PBS wiki-loop status",
     JSON.stringify(wikiStatus.body)
   );
-  const topology = await fetchJson(`${gatewayBase}/api/knowledge/topology?customer_id=pbs-live-smoke`, { headers });
+  const topology = await fetchJson(`${gatewayBase}/api/knowledge/topology?customer_id=${smokeCustomerId}`, { headers });
   const topologyNodes = Array.isArray(topology.body?.nodes) ? topology.body.nodes : [];
   const topologyEdges = Array.isArray(topology.body?.edges) ? topology.body.edges : [];
   const topologyNodeIds = new Set(topologyNodes.map((node) => String(node?.id ?? "")));
@@ -796,13 +904,13 @@ try {
       method: "POST",
       headers,
       body: JSON.stringify({
-        customer_id: "pbs-live-smoke",
+        customer_id: smokeCustomerId,
         file_name: `cas-pbs-live-smoke-${stamp}.txt`,
         content: `CAS PBS live smoke ${stamp}: ${lineageToken} router latency evidence for RAG and wiki-loop verification.`,
         source_scope: "user_upload",
         visibility: "private_user",
         source_kind: "upload",
-        source_metadata: { customer_id: "pbs-live-smoke", verifier: "cas-pbs-live-smoke", lineage_token: lineageToken },
+        source_metadata: { customer_id: smokeCustomerId, verifier: "cas-pbs-live-smoke", lineage_token: lineageToken },
         index: true,
         force_reingest: false
       })
@@ -814,15 +922,19 @@ try {
       JSON.stringify(upload.body)
     );
     const uploadedDocumentId = upload.body.document?.id || upload.body.document?.document_source_id || upload.body.document_source_id;
+    const uploadedDocumentSourceId = upload.body.document?.document_source_id || upload.body.document_source_id || uploadedDocumentId;
     const rag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
       method: "POST",
       headers,
       body: JSON.stringify({
-        customer_id: "pbs-live-smoke",
+        customer_id: smokeCustomerId,
         question: `${lineageToken} router latency evidence`
       })
     });
     const ragCitations = Array.isArray(rag.body.citations) ? rag.body.citations : [];
+    const exactCitation = ragCitations.find((citation) =>
+      citationHasExactLineage(citation, uploadedDocumentId, uploadedDocumentSourceId, smokeCustomerId)
+    );
     expect(
       "pbs-live:rag",
       casLiveOk(rag) &&
@@ -836,21 +948,14 @@ try {
     expect(
       "pbs-live:rag-lineage",
       Boolean(uploadedDocumentId) &&
-        ragCitations.some(
-          (citation) =>
-            citation.document_id === uploadedDocumentId ||
-            citation.document_source_id === uploadedDocumentId ||
-            citation.title === upload.body.document?.title ||
-            String(citation.snippet ?? "").includes(lineageToken) ||
-            String(rag.body.answer ?? "").includes(lineageToken)
-        ),
-      "CAS pbs-http-live RAG cites the document uploaded by this smoke run",
+        Boolean(exactCitation),
+      "CAS pbs-http-live RAG cites the exact uploaded document/customer/source IDs from this smoke run",
       JSON.stringify({ uploadedDocumentId, lineageToken, citations: ragCitations, answer: rag.body.answer })
     );
     const wiki = await fetchJson(`${gatewayBase}/api/knowledge/wiki-loop/run`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ customer_id: "pbs-live-smoke", document_id: uploadedDocumentId })
+      body: JSON.stringify({ customer_id: smokeCustomerId, document_id: uploadedDocumentId })
     });
     expect(
       "pbs-live:wiki-loop",
@@ -861,49 +966,28 @@ try {
       "CAS pbs-http-live wiki-loop write smoke succeeds",
       JSON.stringify(wiki.body)
     );
-    const vault = await fetchJson(`${gatewayBase}/api/knowledge/wiki-vault?customer_id=pbs-live-smoke`, { headers });
+    const vault = await fetchJson(`${gatewayBase}/api/knowledge/wiki-vault?customer_id=${smokeCustomerId}`, { headers });
     const vaultNotes = Array.isArray(vault.body.notes) ? vault.body.notes : [];
-    const lineageNote = vaultNotes.find(
-      (note) =>
-        note.document_id === uploadedDocumentId ||
-        note.source_document_id === uploadedDocumentId ||
-        note.provenance?.source_document_id === uploadedDocumentId ||
-        String(note.body ?? "").includes(lineageToken)
-    );
+    const lineageNote = vaultNotes.find((note) => wikiNoteHasExactLineage(note, uploadedDocumentId, smokeCustomerId));
     expect(
       "pbs-live:wiki-lineage",
       casLiveOk(vault) && Boolean(lineageNote),
-      "CAS pbs-http-live wiki vault exposes a note tied to the uploaded smoke document",
+      "CAS pbs-http-live wiki vault exposes a compiled wiki note tied to the exact uploaded smoke document",
       JSON.stringify({ uploadedDocumentId, lineageToken, lineageNote, notes: vaultNotes.slice(0, 5) })
     );
-    const postWriteTopology = await fetchJson(`${gatewayBase}/api/knowledge/topology?customer_id=pbs-live-smoke`, { headers });
-    const postWriteNodes = Array.isArray(postWriteTopology.body.nodes) ? postWriteTopology.body.nodes : [];
-    const postWriteEdges = Array.isArray(postWriteTopology.body.edges) ? postWriteTopology.body.edges : [];
-    const postWriteDocNode = postWriteNodes.find(
-      (node) => node.id === uploadedDocumentId || node.document_source_id === uploadedDocumentId || node.source_document_id === uploadedDocumentId
-    );
-    const postWriteNoteNode = postWriteNodes.find(
-      (node) =>
-        String(node.type ?? "").includes("wiki") &&
-        (node.document_id === uploadedDocumentId ||
-          node.source_document_id === uploadedDocumentId ||
-          node.provenance?.source_document_id === uploadedDocumentId ||
-          node.id === lineageNote?.id)
-    );
-    const postWriteLineageEdge = postWriteEdges.some(
-      (edge) =>
-        postWriteNoteNode &&
-        postWriteDocNode &&
-        ((edge.source === postWriteNoteNode.id && edge.target === postWriteDocNode.id) ||
-          (edge.source === postWriteDocNode.id && edge.target === postWriteNoteNode.id) ||
-          edge.source_document_id === uploadedDocumentId ||
-          edge.provenance?.source_document_id === uploadedDocumentId)
-    );
+    const postWriteTopology = await fetchJson(`${gatewayBase}/api/knowledge/topology?customer_id=${smokeCustomerId}`, { headers });
+    const topologyLineage = topologyHasExactLineage(postWriteTopology.body, uploadedDocumentId, smokeCustomerId, lineageNote);
     expect(
       "pbs-live:topology-lineage",
-      casLiveOk(postWriteTopology) && Boolean(postWriteDocNode) && Boolean(postWriteNoteNode) && postWriteLineageEdge,
-      "CAS pbs-http-live topology links the uploaded document and its LLM Wiki note",
-      JSON.stringify({ uploadedDocumentId, lineageToken, postWriteDocNode, postWriteNoteNode, postWriteEdges })
+      casLiveOk(postWriteTopology) && topologyLineage.ok,
+      "CAS pbs-http-live topology directly links the exact uploaded document and its LLM Wiki note",
+      JSON.stringify({ uploadedDocumentId, lineageToken, ...topologyLineage })
+    );
+    expect(
+      "pbs-live:exact-lineage-ids",
+      Boolean(uploadedDocumentId && exactCitation && lineageNote && topologyLineage.ok),
+      "PBS live write smoke proves exact upload -> RAG -> LLM Wiki -> topology document/customer/source lineage",
+      JSON.stringify({ uploadedDocumentId, uploadedDocumentSourceId, exactCitation, lineageNote, topologyLineage })
     );
   }
 } catch (error) {

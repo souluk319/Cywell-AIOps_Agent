@@ -1240,6 +1240,8 @@ for (const file of files) {
         text.includes("cluster-gateway-health") &&
         text.includes("cluster-console-plugin-gateway-service") &&
         text.includes("cluster-write-lineage") &&
+        text.includes("cluster-customer-acl-fail-closed") &&
+        text.includes("exactLineageOk") &&
         text.includes("cluster-direct-engine-blocked") &&
         text.includes("typeof directBody?.blocked") &&
         text.includes("appliedPbsEgressScoped") &&
@@ -1261,10 +1263,10 @@ for (const file of files) {
         text.includes("preflight:tls-insecure-disabled") && text.includes('configValue(configMap, "tls-insecure") === "false"'),
         "PBS preflight rejects tls-insecure=true regressions"
       );
-      if (text.includes("playbookstudio-runtime") && text.includes("port 8765")) {
-        pass("pbs-preflight:runtime-service-contract", "PBS preflight checks runtime service and backend port");
+      if (text.includes("playbookstudio-runtime") && text.includes("port 8765") && text.includes("cluster:pbs-runtime-service-endpoints-ready")) {
+        pass("pbs-preflight:runtime-service-contract", "PBS preflight checks runtime service, endpoint readiness, and backend port");
       } else {
-        fail("pbs-preflight:runtime-service-contract", "PBS preflight must check runtime service/backend port");
+        fail("pbs-preflight:runtime-service-contract", "PBS preflight must check runtime service/backend port and ready endpoints");
       }
       if (
         text.includes("CAS_PBS_REQUIRE_RUNTIME_READY") &&
@@ -1279,12 +1281,21 @@ for (const file of files) {
         text.includes("cluster:applied-knowledge-ingress-union-scoped") &&
         text.includes("appliedKnowledgeEgressUnionScoped") &&
         text.includes("cluster:applied-knowledge-egress-union-scoped") &&
+        text.includes("cluster:applied-gateway-networkpolicy-union-scoped") &&
+        text.includes("cluster:applied-console-plugin-networkpolicy-union-scoped") &&
+        text.includes("cluster:applied-postgres-networkpolicy-union-scoped") &&
         text.includes("liveDatabaseUrlUsesService") &&
+        text.includes("liveDatabaseUrlMatchesSecret") &&
+        text.includes("cluster:knowledge-postgres-live-secret-content") &&
+        text.includes("cluster:pbs-auth-secret-content") &&
         text.includes("statefulSetReady") &&
         text.includes("readyPodsUsePromotedDigest") &&
         text.includes("cluster:applied-pbs-config-values") &&
         text.includes("cluster:applied-live-customer-acl") &&
         text.includes("preflight:live-customer-acl-concrete") &&
+        text.includes("policy?.default") &&
+        text.includes("policy?.owners") &&
+        text.includes("defaultEntries.length === 0") &&
         text.includes('!clean.includes("*")') &&
         text.includes("sourceEvidenceHead") &&
         text.includes("staleEvidenceAllowed") &&
@@ -1303,6 +1314,7 @@ for (const file of files) {
         text.includes("networkPolicyPortMatches") &&
         text.includes("cluster:release-image:") &&
         text.includes("preflight:live-postgres-image-pinned") &&
+        text.includes("cluster:pbs-runtime-service-endpoints-ready") &&
         text.includes("updatedReplicas") &&
         text.includes("unavailableReplicas") &&
         text.includes("pinnedProductionImage") &&
