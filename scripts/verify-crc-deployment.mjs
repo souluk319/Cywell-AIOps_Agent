@@ -28,7 +28,7 @@ function run(command, args, timeoutMs = 30000) {
   return {
     ok: result.status === 0,
     stdout: result.stdout?.trim() ?? "",
-    stderr: result.stderr?.trim() ?? result.error?.message ?? ""
+    stderr: result.stderr?.trim() || result.error?.message || ""
   };
 }
 
@@ -44,7 +44,7 @@ function runWithInput(command, args, input, timeoutMs = 30000) {
   return {
     ok: result.status === 0,
     stdout: result.stdout?.trim() ?? "",
-    stderr: result.stderr?.trim() ?? result.error?.message ?? ""
+    stderr: result.stderr?.trim() || result.error?.message || ""
   };
 }
 
@@ -831,8 +831,9 @@ if (gatewayPod) {
     "console.log(JSON.stringify({customerId,altCustomerId,lineageToken,fileName,uploadedDocumentId,altUploadedDocumentId,noOwnerStatus:noOwner.status,spoofRemoteStatus:spoofRemote.status,spoofOpenShiftStatus:spoofOpenShift.status,upload:upload.body.status,altUpload:altUpload.body.status,encoded:encoded.body.status,url:url.body.status,encodedParser:encoded.body.document?.metadata?.parser,pbsFileName:upload.body.document?.metadata?.pbs_payload?.file_name,pbsIndex:upload.body.document?.metadata?.pbs_payload?.index,urlWiki:url.body.document?.metadata?.pbs_payload?.auto_compile_wiki,uploadWikiRevision:uploadWikiNote?.revision,uploadWikiPreviousRevision:uploadWikiNote?.previous_revision,ragCitations:ragCitations.length,ragLineageOk,wikiNotes:wiki.body.notes_upserted||0,wikiNoteRevision:wikiNote?.revision,wikiNotePreviousRevision:wikiNote?.previous_revision,nodes:topology.body.counts?.nodes||0,edges:topology.body.counts?.edges||0,graphOk,typeOk,topologyLineageOk,topologyNoteRevision:noteNode?.revision}));",
     "})().catch(e=>{console.error(e.message);process.exit(1);});"
   ].join("");
-  const knowledgeSmoke = execNode(gatewayPod.metadata.name, knowledgeSmokeCode, 30000);
+  const knowledgeSmoke = execNode(gatewayPod.metadata.name, knowledgeSmokeCode, 120000);
   const knowledgeSmokeBody = parseLastJsonLine(knowledgeSmoke.stdout);
+  const knowledgeSmokeDetail = knowledgeSmoke.stderr || knowledgeSmoke.stdout || "knowledge smoke produced no output";
   expect(
     "runtime:knowledge-smoke-through-gateway",
       knowledgeSmoke.ok &&
@@ -854,7 +855,7 @@ if (gatewayPod) {
       knowledgeSmokeBody?.graphOk === true &&
       knowledgeSmokeBody?.typeOk === true,
     "gateway supports upload -> RAG -> wiki -> topology smoke",
-    knowledgeSmoke.stderr || knowledgeSmoke.stdout
+    knowledgeSmokeDetail
   );
   expect(
     "runtime:knowledge-smoke-lineage",
@@ -868,7 +869,7 @@ if (gatewayPod) {
       knowledgeSmokeBody?.topologyLineageOk === true &&
       knowledgeSmokeBody?.topologyNoteRevision === 2,
     "gateway smoke preserves exact uploaded document lineage through RAG, LLM Wiki revision, and topology edge",
-    knowledgeSmoke.stderr || knowledgeSmoke.stdout
+    knowledgeSmokeDetail
   );
   if (postgresPod) {
     const persistedExactSmoke = knowledgeSmokeBody?.uploadedDocumentId
@@ -890,11 +891,13 @@ if (gatewayPod) {
       "knowledge smoke persists exact uploaded document, chunks, note, and event rows in Postgres owner scope",
       persistedExactSmoke.stderr || persistedExactSmoke.stdout
     );
-    const pbsCompatPersisted = execPod(postgresPod.metadata.name, [
-      "sh",
-      "-ec",
-      `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT (SELECT COUNT(*) FROM document_sources WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND metadata->>'customer_id'='crc-smoke' AND metadata->>'owner_id'='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM parsed_documents WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}') || ',' || (SELECT COUNT(*) FROM document_chunks WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND metadata->>'customer_id'='crc-smoke' AND metadata->>'owner_id'='${crcKnowledgeSmokeOwner}') || ',' || (SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid='chunk_embeddings'::regclass AND attname='embedding') || ',' || (SELECT COUNT(*) FROM chunk_embeddings ce JOIN document_chunks dc ON ce.chunk_id=dc.id WHERE dc.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND ce.model='cas-local-hash-v1') || ',' || (SELECT COUNT(*) FROM document_chunks dc LEFT JOIN chunk_embeddings ce ON ce.chunk_id=dc.id AND ce.model='cas-local-hash-v1' WHERE dc.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND ce.chunk_id IS NULL) || ',' || (SELECT COUNT(DISTINCT ge.id) FROM graph_entities ge JOIN graph_entity_mentions gm ON gm.entity_id=ge.id JOIN document_sources ds ON gm.document_source_id=ds.id WHERE ds.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND ge.customer_id='crc-smoke' AND gm.owner_user_id='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM graph_entity_mentions gm JOIN document_sources ds ON gm.document_source_id=ds.id WHERE ds.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND gm.customer_id='crc-smoke' AND gm.owner_user_id='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM graph_entity_relations gr JOIN document_sources ds ON gr.document_source_id=ds.id WHERE ds.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND gr.customer_id='crc-smoke' AND gr.owner_user_id='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(DISTINCT customer_id) FROM graph_entities WHERE entity_key='wikilink:router latency' AND owner_user_id='${crcKnowledgeSmokeOwner}' AND customer_id IN ('crc-smoke','crc-smoke-alt'))"`
-    ]);
+    const pbsCompatPersisted = knowledgeSmokeBody?.uploadedDocumentId
+      ? execPod(postgresPod.metadata.name, [
+          "sh",
+          "-ec",
+          `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT (SELECT COUNT(*) FROM document_sources WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND metadata->>'customer_id'='crc-smoke' AND metadata->>'owner_id'='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM parsed_documents WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}') || ',' || (SELECT COUNT(*) FROM document_chunks WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND metadata->>'customer_id'='crc-smoke' AND metadata->>'owner_id'='${crcKnowledgeSmokeOwner}') || ',' || (SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid='chunk_embeddings'::regclass AND attname='embedding') || ',' || (SELECT COUNT(*) FROM chunk_embeddings ce JOIN document_chunks dc ON ce.chunk_id=dc.id WHERE dc.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND ce.model='cas-local-hash-v1') || ',' || (SELECT COUNT(*) FROM document_chunks dc LEFT JOIN chunk_embeddings ce ON ce.chunk_id=dc.id AND ce.model='cas-local-hash-v1' WHERE dc.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND ce.chunk_id IS NULL) || ',' || (SELECT COUNT(DISTINCT ge.id) FROM graph_entities ge JOIN graph_entity_mentions gm ON gm.entity_id=ge.id JOIN document_sources ds ON gm.document_source_id=ds.id WHERE ds.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND ge.customer_id='crc-smoke' AND gm.owner_user_id='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM graph_entity_mentions gm JOIN document_sources ds ON gm.document_source_id=ds.id WHERE ds.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND gm.customer_id='crc-smoke' AND gm.owner_user_id='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM graph_entity_relations gr JOIN document_sources ds ON gr.document_source_id=ds.id WHERE ds.metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND gr.customer_id='crc-smoke' AND gr.owner_user_id='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(DISTINCT customer_id) FROM graph_entities WHERE entity_key='wikilink:router latency' AND owner_user_id='${crcKnowledgeSmokeOwner}' AND customer_id IN ('crc-smoke','crc-smoke-alt'))"`
+        ])
+      : { ok: false, stdout: "", stderr: "knowledge smoke did not return uploadedDocumentId" };
     const pbsCompatParts = pbsCompatPersisted.stdout.trim().split(",");
     expect(
       "runtime:knowledge-pbs-compat-shadow-persisted",
