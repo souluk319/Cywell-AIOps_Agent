@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cas-knowledge-engine
+  namespace: cywell-ai-sentinel
+spec:
+  template:
+    spec:
+      containers:
+        - name: knowledge-engine
+          env:
+            - name: CAS_KNOWLEDGE_PROVIDER
+              value: pbs-http-shadow
+            - name: CAS_PBS_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: cas-pbs-config
+                  key: base-url
+            - name: CAS_PBS_AUTH_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: cas-pbs-config
+                  key: auth-mode
+            - name: CAS_PBS_TIMEOUT_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: cas-pbs-config
+                  key: timeout-ms
+            - name: CAS_PBS_MAX_RESPONSE_BYTES
+              valueFrom:
+                configMapKeyRef:
+                  name: cas-pbs-config
+                  key: max-response-bytes
+            - name: CAS_PBS_TLS_INSECURE
+              valueFrom:
+                configMapKeyRef:
+                  name: cas-pbs-config
+                  key: tls-insecure
+            - name: CAS_PBS_SHADOW_WRITES
+              value: "false"
+            - name: CAS_PBS_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cas-pbs-auth
+                  key: bearer-token
+                  optional: true

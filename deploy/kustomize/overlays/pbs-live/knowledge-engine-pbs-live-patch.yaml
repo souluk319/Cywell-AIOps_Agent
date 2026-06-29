@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cas-knowledge-engine
+  namespace: cywell-ai-sentinel
+spec:
+  template:
+    spec:
+      containers:
+        - name: knowledge-engine
+          env:
+            - name: CAS_KNOWLEDGE_PROVIDER
+              value: pbs-http-live
+            - name: CAS_KNOWLEDGE_SINGLE_OWNER
+              valueFrom:
+                configMapKeyRef:
+                  name: cas-knowledge-live-config
+                  key: service-owner
+                  optional: false
+            - name: CAS_PBS_REQUIRE_RUNTIME_READY
+              value: "true"
+            - name: CAS_PBS_REQUIRE_CORPUS_READY
+              value: "true"
+            - name: CAS_PBS_REQUIRED_READY_SCOPES
+              value: official_docs,study_docs
+            - name: CAS_PBS_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cas-pbs-auth
+                  key: bearer-token
+                  optional: false
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cas-knowledge-postgres-live
+                  key: database-url
+                  optional: false

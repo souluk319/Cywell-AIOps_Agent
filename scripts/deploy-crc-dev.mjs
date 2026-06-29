@@ -23,6 +23,60 @@ function run(command, args, options = {}) {
   return result.stdout?.trim() ?? "";
 }
 
+function tryRun(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    stdio: options.stdio ?? "pipe",
+    timeout: options.timeoutMs ?? 900000,
+    windowsHide: true
+  });
+
+  return {
+    ok: result.status === 0,
+    stdout: result.stdout?.trim() ?? "",
+    stderr: result.stderr?.trim() ?? result.error?.message ?? ""
+  };
+}
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function waitForBuildComplete(build) {
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    const phase = run("oc", ["get", "build", build, "-n", project, "-o", "jsonpath={.status.phase}"]);
+    if (phase === "Complete") return;
+    if (["Cancelled", "Error", "Failed"].includes(phase)) {
+      run("oc", ["describe", "build", build, "-n", project], { stdio: "inherit" });
+      throw new Error(`OpenShift build ${build} finished with phase ${phase}`);
+    }
+    sleep(2000);
+  }
+  run("oc", ["describe", "build", build, "-n", project], { stdio: "inherit" });
+  throw new Error(`Timed out waiting for OpenShift build ${build} to complete`);
+}
+
+function startBinaryBuild(buildName) {
+  console.log(`Starting OpenShift binary build: ${buildName}`);
+  const output = run(
+    "oc",
+    ["start-build", buildName, "-n", project, `--from-dir=${contextDir}`, "--wait=false", "-o", "name"],
+    { timeoutMs: 1200000 }
+  );
+  const buildRef = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("build.build.openshift.io/") || line.startsWith("build/"));
+  const build = buildRef?.split("/").pop();
+  if (!build) {
+    throw new Error(`Could not determine OpenShift build name for ${buildName}: ${output}`);
+  }
+  console.log(`Following OpenShift build: ${build}`);
+  run("oc", ["logs", "-n", project, `build/${build}`, "-f"], { stdio: "inherit", timeoutMs: 1800000 });
+  waitForBuildComplete(build);
+}
+
 async function copyBuildContext() {
   await rm(contextDir, { recursive: true, force: true });
   await mkdir(contextDir, { recursive: true });
@@ -40,6 +94,7 @@ async function copyBuildContext() {
   };
 
   await cp(resolve("apps/gateway"), resolve(contextDir, "apps/gateway"), { recursive: true, filter });
+  await cp(resolve("apps/knowledge-engine"), resolve(contextDir, "apps/knowledge-engine"), { recursive: true, filter });
   await cp(resolve("apps/console-plugin"), resolve(contextDir, "apps/console-plugin"), { recursive: true, filter });
   await cp(resolve("packages/contracts"), resolve(contextDir, "packages/contracts"), { recursive: true, filter });
 }
@@ -86,28 +141,75 @@ function ensureCasReplacesLightspeed() {
 console.log("Preparing minimal CAS build context");
 await copyBuildContext();
 
+console.log("Ensuring CAS namespace exists before CRC binary builds");
+run("oc", ["apply", "-f", "deploy/kustomize/base/00-namespace.yaml"], { stdio: "inherit" });
+
 console.log("Applying CRC BuildConfigs");
 run("oc", ["apply", "-f", "deploy/kustomize/overlays/crc/buildconfigs.yaml"], { stdio: "inherit" });
 
-for (const buildName of ["cas-gateway", "cas-console-plugin"]) {
-  console.log(`Starting OpenShift binary build: ${buildName}`);
-  run(
-    "oc",
-    ["start-build", buildName, "-n", project, `--from-dir=${contextDir}`, "--follow", "--wait"],
-    { stdio: "inherit", timeoutMs: 1200000 }
-  );
+for (const buildName of ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine"]) {
+  startBinaryBuild(buildName);
 }
 
 console.log("Applying CAS manifests");
+const operator = tryRun("oc", ["get", "deploy/cywell-ai-sentinel-operator", "-n", project, "-o", "name"], { timeoutMs: 30000 });
+if (operator.ok && operator.stdout) {
+  console.log("Pausing the v0.1.3 OLM operator so the v0.1.4 dev manifests own runtime workloads");
+  run("oc", ["scale", "deploy/cywell-ai-sentinel-operator", "-n", project, "--replicas=0"], { stdio: "inherit" });
+} else {
+  console.log("No v0.1.3 OLM operator found; continuing clean v0.1.4 dev deploy");
+}
+
 run("oc", ["apply", "-k", "deploy/kustomize/base"], { stdio: "inherit" });
+
+console.log("Pinning CAS deployments to freshly built dev images");
+run(
+  "oc",
+  [
+    "set",
+    "image",
+    "deploy/cas-gateway",
+    "gateway=image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-gateway:dev",
+    "-n",
+    project
+  ],
+  { stdio: "inherit" }
+);
+run(
+  "oc",
+  [
+    "set",
+    "image",
+    "deploy/cas-console-plugin",
+    "console-plugin=image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-console-plugin:dev",
+    "-n",
+    project
+  ],
+  { stdio: "inherit" }
+);
+run(
+  "oc",
+  [
+    "set",
+    "image",
+    "deploy/cas-knowledge-engine",
+    "knowledge-engine=image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-knowledge-engine:dev",
+    "-n",
+    project
+  ],
+  { stdio: "inherit" }
+);
 
 console.log("Restarting CAS deployments to pull the latest dev tags");
 run("oc", ["rollout", "restart", "deploy/cas-gateway", "-n", project], { stdio: "inherit" });
 run("oc", ["rollout", "restart", "deploy/cas-console-plugin", "-n", project], { stdio: "inherit" });
+run("oc", ["rollout", "restart", "deploy/cas-knowledge-engine", "-n", project], { stdio: "inherit" });
 
 console.log("Waiting for CAS deployments");
+run("oc", ["rollout", "status", "statefulset/cas-knowledge-postgres", "-n", project, "--timeout=240s"], { stdio: "inherit" });
 run("oc", ["rollout", "status", "deploy/cas-gateway", "-n", project, "--timeout=180s"], { stdio: "inherit" });
 run("oc", ["rollout", "status", "deploy/cas-console-plugin", "-n", project, "--timeout=180s"], { stdio: "inherit" });
+run("oc", ["rollout", "status", "deploy/cas-knowledge-engine", "-n", project, "--timeout=180s"], { stdio: "inherit" });
 
 ensureCasReplacesLightspeed();
 

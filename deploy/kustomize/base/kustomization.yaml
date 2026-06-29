@@ -6,5 +6,7 @@ resources:
   - 20-networkpolicy.yaml
   - 21-lightspeed-ingress.yaml
   - 30-gateway.yaml
+  - 35-knowledge-engine.yaml
+  - 36-knowledge-postgres.yaml
   - 40-console-plugin-workload.yaml
   - 50-consoleplugin.yaml

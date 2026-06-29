@@ -1,6 +1,31 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: cas-gateway-ingress
+  namespace: cywell-ai-sentinel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cywell-ai-sentinel
+      app.kubernetes.io/component: gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-console
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cywell-ai-sentinel
+              app.kubernetes.io/component: console-plugin
+      ports:
+        - protocol: TCP
+          port: 9443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: cas-gateway-egress
   namespace: cywell-ai-sentinel
 spec:
@@ -27,13 +52,6 @@ spec:
         - protocol: TCP
           port: 5353
     - to:
-        - namespaceSelector: {}
-      ports:
-        - protocol: TCP
-          port: 443
-        - protocol: TCP
-          port: 6443
-    - to:
         - ipBlock:
             cidr: 10.217.4.1/32
       ports:
@@ -55,3 +73,128 @@ spec:
       ports:
         - protocol: TCP
           port: 8443
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cywell-ai-sentinel
+              app.kubernetes.io/component: knowledge-engine
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cas-console-plugin-ingress
+  namespace: cywell-ai-sentinel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cywell-ai-sentinel
+      app.kubernetes.io/component: console-plugin
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-console
+      ports:
+        - protocol: TCP
+          port: 9443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cas-console-plugin-egress
+  namespace: cywell-ai-sentinel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cywell-ai-sentinel
+      app.kubernetes.io/component: console-plugin
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+        - ipBlock:
+            cidr: 10.217.4.10/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 5353
+        - protocol: TCP
+          port: 5353
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cywell-ai-sentinel
+              app.kubernetes.io/component: gateway
+      ports:
+        - protocol: TCP
+          port: 9443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cas-knowledge-engine-egress
+  namespace: cywell-ai-sentinel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cywell-ai-sentinel
+      app.kubernetes.io/component: knowledge-engine
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+        - ipBlock:
+            cidr: 10.217.4.10/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 5353
+        - protocol: TCP
+          port: 5353
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cywell-ai-sentinel
+              app.kubernetes.io/component: knowledge-postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cas-knowledge-engine-ingress
+  namespace: cywell-ai-sentinel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cywell-ai-sentinel
+      app.kubernetes.io/component: knowledge-engine
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cywell-ai-sentinel
+              app.kubernetes.io/component: gateway
+      ports:
+        - protocol: TCP
+          port: 8080

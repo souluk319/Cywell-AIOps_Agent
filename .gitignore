@@ -1,6 +1,11 @@
 .env
 .env.*
-deliverables/
+deliverables/*
+!deliverables/active/
+deliverables/active/*
+!deliverables/active/README.md
+!deliverables/active/v0.1.4/
+!deliverables/active/v0.1.4/**
 docs/
 node_modules/
 apps/*/dist/
@@ -11,4 +16,6 @@ coverage/
 *.tsbuildinfo
 *.log
 desktop.ini
+__pycache__/
+*.pyc
 

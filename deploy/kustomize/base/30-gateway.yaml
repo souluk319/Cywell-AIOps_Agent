@@ -51,6 +51,16 @@ spec:
               value: "true"
             - name: CAS_EVIDENCE_TIMEOUT_MS
               value: "8000"
+            - name: CAS_KNOWLEDGE_OWNER_IDENTITY_MODE
+              value: openshift-selfsubjectreview
+            - name: CAS_KNOWLEDGE_OWNER_IDENTITY_TIMEOUT_MS
+              value: "3000"
+            - name: CAS_KNOWLEDGE_ENGINE_URL
+              value: http://cas-knowledge-engine.cywell-ai-sentinel.svc.cluster.local:8080
+            - name: CAS_KNOWLEDGE_ENGINE_TIMEOUT_MS
+              value: "30000"
+            - name: CAS_MAX_REQUEST_BYTES
+              value: "26214400"
           ports:
             - name: https
               containerPort: 9443

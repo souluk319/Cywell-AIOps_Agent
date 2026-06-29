@@ -1,0 +1,552 @@
+#!/usr/bin/env node
+import { createServer } from "node:http";
+import { access, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { basename, extname, join, resolve } from "node:path";
+import { chromium } from "playwright-core";
+
+const checks = [];
+const calls = [];
+const root = process.cwd();
+const distDir = resolve(root, "apps/console-plugin/dist");
+const requireBrowser =
+  process.argv.includes("--require-browser") ||
+  ["1", "true", "yes", "y", "on"].includes(String(process.env.CAS_TOPOLOGY_DOM_REQUIRE_BROWSER ?? "").toLowerCase());
+
+function record(status, id, detail, evidence) {
+  checks.push({ status, id, detail, evidence });
+  console.log(`[${status}] ${id}: ${detail}`);
+  if (evidence) console.log(evidence);
+}
+
+function pass(id, detail) {
+  record("PASS", id, detail);
+}
+
+function fail(id, detail, evidence) {
+  record("FAIL", id, detail, evidence);
+}
+
+function skip(id, detail) {
+  record("SKIP", id, detail);
+}
+
+function expect(id, condition, detail, evidence) {
+  if (condition) pass(id, detail);
+  else fail(id, detail, evidence);
+}
+
+async function exists(path) {
+  try {
+    await access(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function contentType(path) {
+  const extension = extname(path).toLowerCase();
+  if (extension === ".js") return "text/javascript; charset=utf-8";
+  if (extension === ".css") return "text/css; charset=utf-8";
+  if (extension === ".json") return "application/json; charset=utf-8";
+  if (extension === ".html") return "text/html; charset=utf-8";
+  return "application/octet-stream";
+}
+
+function readRequestBody(request) {
+  return new Promise((resolveBody, rejectBody) => {
+    let data = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      data += chunk;
+    });
+    request.on("end", () => {
+      if (!data) {
+        resolveBody(null);
+        return;
+      }
+      try {
+        resolveBody(JSON.parse(data));
+      } catch {
+        resolveBody(data);
+      }
+    });
+    request.on("error", rejectBody);
+  });
+}
+
+function sendJson(response, status, body) {
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(body));
+}
+
+function denseTopologyGraph() {
+  const nodes = Array.from({ length: 28 }, (_, index) => {
+    const type = index % 5 === 0 ? "document" : index % 5 === 1 ? "wiki-note" : index % 5 === 2 ? "term" : index % 5 === 3 ? "runtime" : "image";
+    return {
+      node_id: `dense-node-${index}`,
+      kind: type,
+      title: `Dense Customer Topology Node ${index} With Long Operational Label`,
+      summary: `Dense topology node ${index} validates layout behavior with realistic long customer text.`,
+      status: index % 3 === 0 ? "indexed" : "linked"
+    };
+  });
+  const links = nodes.slice(1).map((node, index) => ({
+    source_id: index % 4 === 0 ? node.node_id : "dense-node-0",
+    target_id: index % 4 === 0 ? "dense-node-0" : node.node_id,
+    kind: index % 2 === 0 ? "relates" : "mentions"
+  }));
+  return {
+    counts: { nodes: nodes.length, edges: links.length, documents: 6, notes: 6 },
+    nodes,
+    links
+  };
+}
+
+function topologyResponse(customerId) {
+  const graph =
+    customerId === "dense-topology"
+      ? denseTopologyGraph()
+      : {
+          counts: { nodes: 4, edges: 3, documents: 1, notes: 1 },
+          nodes: [
+            {
+              node_id: "doc-router",
+              kind: "document",
+              title: "ACME Router Evidence",
+              summary: "Uploaded customer runbook for router latency.",
+              status: "indexed"
+            },
+            {
+              node_id: "wiki-router",
+              kind: "wiki-note",
+              title: "ACME Router Wiki",
+              summary: "LLM Wiki note compiled from ACME Router Evidence.",
+              revision: 4,
+              previous_revision: 3,
+              provenance: { source_document_id: "doc-router", source: "wiki-loop" }
+            },
+            { node_id: "term-latency", kind: "term", title: "latency" },
+            { node_id: "pbs-runtime", kind: "runtime", title: "PBS Runtime" }
+          ],
+          links: [
+            { source_id: "wiki-router", target_id: "doc-router", kind: "summarizes" },
+            { source_id: "doc-router", target_id: "term-latency", kind: "mentions" },
+            { source_id: "pbs-runtime", target_id: "wiki-router", kind: "feeds" }
+          ]
+        };
+  return {
+    status: "ok",
+    customer_id: customerId,
+    topology: {
+      graph
+    }
+  };
+}
+
+function harnessHtml() {
+  return `<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cywell Topology DOM Smoke</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    window.loadPluginEntry = function loadPluginEntry(_name, container) {
+      window.__cywellPluginContainer = container;
+    };
+  </script>
+  <script src="/vendor/react.development.js"></script>
+  <script src="/vendor/react-dom.development.js"></script>
+  <script src="/api/plugins/cywell-ai-sentinel/plugin-entry.js"></script>
+  <script>
+    (async function mountPlugin() {
+      const container = window.__cywellPluginContainer;
+      const reactShare = {
+        react: {
+          "18.3.1": {
+            from: "console-topology-dom-smoke",
+            eager: true,
+            loaded: true,
+            get: function getReact() {
+              return function provideReact() {
+                return window.React;
+              };
+            }
+          }
+        }
+      };
+      await container.init(reactShare);
+      const factory = await container.get("CywellKnowledgeRoute");
+      const module = factory();
+      const Component = module.default || module;
+      window.__cywellMounted = true;
+      window.ReactDOM.createRoot(document.getElementById("root")).render(window.React.createElement(Component));
+    })().catch(function mountError(error) {
+      console.error("topology harness mount failed", error && error.stack ? error.stack : error);
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function createHarnessServer() {
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (url.pathname === "/cywell/topology") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(harnessHtml());
+      return;
+    }
+    if (url.pathname === "/favicon.ico") {
+      response.writeHead(204);
+      response.end();
+      return;
+    }
+
+    if (url.pathname === "/vendor/react.development.js" || url.pathname === "/vendor/react-dom.development.js") {
+      const vendorFile =
+        basename(url.pathname) === "react.development.js"
+          ? resolve(root, "node_modules/react/umd/react.development.js")
+          : resolve(root, "node_modules/react-dom/umd/react-dom.development.js");
+      response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+      response.end(await readFile(vendorFile));
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/plugins/cywell-ai-sentinel/")) {
+      const relativePath = decodeURIComponent(url.pathname.replace("/api/plugins/cywell-ai-sentinel/", ""));
+      if (!relativePath || relativePath.includes("..")) {
+        response.writeHead(404);
+        response.end("missing plugin asset");
+        return;
+      }
+      const filePath = join(distDir, relativePath);
+      if (!(await exists(filePath))) {
+        response.writeHead(404);
+        response.end("missing plugin asset");
+        return;
+      }
+      response.writeHead(200, { "content-type": contentType(filePath) });
+      response.end(await readFile(filePath));
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/proxy/plugin/cywell-ai-sentinel/cas-api/api/knowledge/")) {
+      const body = await readRequestBody(request);
+      const knowledgePath = url.pathname.replace("/api/proxy/plugin/cywell-ai-sentinel/cas-api", "");
+      calls.push({ method: request.method, path: knowledgePath, query: Object.fromEntries(url.searchParams.entries()), body });
+      if (request.method === "GET" && knowledgePath === "/api/knowledge/healthz") {
+        sendJson(response, 200, {
+          status: "ok",
+          service: "cas-knowledge-engine",
+          engine: { provider: "local", status: "ok" },
+          capabilities: []
+        });
+        return;
+      }
+      if (request.method === "GET" && knowledgePath === "/api/knowledge/topology") {
+        sendJson(response, 200, topologyResponse(url.searchParams.get("customer_id") || "default"));
+        return;
+      }
+      if (request.method === "POST" && knowledgePath === "/api/knowledge/rag/query") {
+        sendJson(response, 200, {
+          status: "ok",
+          answer: `RAG answer for ${body?.question ?? "topology node"}`,
+          citations: [{ document_id: "doc-router", title: "ACME Router Evidence", snippet: "router latency evidence" }],
+          trace: { retriever: "dom-smoke" }
+        });
+        return;
+      }
+      sendJson(response, 404, { status: "error", error: `missing harness route ${request.method} ${knowledgePath}` });
+      return;
+    }
+
+    response.writeHead(404);
+    response.end("not found");
+  });
+
+  return new Promise((resolveServer) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      resolveServer({ server, url: `http://127.0.0.1:${address.port}` });
+    });
+  });
+}
+
+async function launchBrowser() {
+  const executableCandidates = [
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    process.env.CHROME_BIN,
+    process.env.MSEDGE_BIN,
+    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Google/Chrome/Application/chrome.exe") : "",
+    process.env.PROGRAMFILES ? join(process.env.PROGRAMFILES, "Google/Chrome/Application/chrome.exe") : "",
+    process.env["PROGRAMFILES(X86)"] ? join(process.env["PROGRAMFILES(X86)"], "Google/Chrome/Application/chrome.exe") : "",
+    process.env.PROGRAMFILES ? join(process.env.PROGRAMFILES, "Microsoft/Edge/Application/msedge.exe") : "",
+    process.env["PROGRAMFILES(X86)"] ? join(process.env["PROGRAMFILES(X86)"], "Microsoft/Edge/Application/msedge.exe") : "",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/microsoft-edge"
+  ].filter(Boolean);
+
+  const attempts = [
+    { channel: "msedge", headless: true },
+    { channel: "chrome", headless: true },
+    ...(await Promise.all(
+      executableCandidates.map(async (executablePath) => ((await exists(executablePath)) ? { executablePath, headless: true } : null))
+    )).filter(Boolean)
+  ];
+
+  const errors = [];
+  for (const launchOptions of attempts) {
+    try {
+      return await chromium.launch({ ...launchOptions, args: ["--no-sandbox"] });
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return { skipped: errors.join("\n") };
+}
+
+async function assertViewportLayout(page, viewport, customerId) {
+  await page.setViewportSize(viewport);
+  await page.getByLabel("Customer ID").fill(customerId);
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes(`/api/knowledge/topology?customer_id=${customerId}`) && response.status() === 200),
+    page.locator('[data-test="cas-knowledge-topology"]').click()
+  ]);
+  await page.waitForSelector('[data-test="cas-topology-node"]', { timeout: 15000 });
+
+  const layout = await page.evaluate(() => {
+    const canvas = document.querySelector('[data-test="cas-topology-canvas"]');
+    const nodes = Array.from(document.querySelectorAll('[data-test="cas-topology-node"]'));
+    const rects = nodes.map((node) => {
+      const rect = node.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+    });
+    const intersections = [];
+    for (let leftIndex = 0; leftIndex < rects.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < rects.length; rightIndex += 1) {
+        const left = rects[leftIndex];
+        const right = rects[rightIndex];
+        const overlap =
+          left.left < right.right - 1 &&
+          left.right > right.left + 1 &&
+          left.top < right.bottom - 1 &&
+          left.bottom > right.top + 1;
+        if (overlap) intersections.push([leftIndex, rightIndex]);
+      }
+    }
+    return {
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      bodyOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      canvasOverflow: canvas ? canvas.scrollWidth - canvas.clientWidth : 0,
+      nodeCount: nodes.length,
+      intersections,
+      labels: nodes.map((node) => node.textContent)
+    };
+  });
+  expect(
+    `console-topology-dom:${viewport.width}w-no-horizontal-overflow`,
+    layout.bodyOverflow <= 1 && layout.canvasOverflow <= 1,
+    `topology layout has no horizontal overflow at ${viewport.width}px`,
+    JSON.stringify(layout)
+  );
+  expect(
+    `console-topology-dom:${viewport.width}w-no-node-overlap`,
+    layout.nodeCount > 0 && layout.intersections.length === 0,
+    `topology nodes do not overlap at ${viewport.width}px`,
+    JSON.stringify(layout)
+  );
+}
+
+const requiredAssets = [
+  resolve(distDir, "plugin-entry.js"),
+  resolve(distDir, "exposed-CywellKnowledgeRoute-chunk.js"),
+  resolve(root, "node_modules/react/umd/react.development.js"),
+  resolve(root, "node_modules/react-dom/umd/react-dom.development.js")
+];
+for (const asset of requiredAssets) {
+  if (!(await exists(asset))) {
+    fail("console-topology-dom:assets", `required asset is missing: ${asset}`);
+  }
+}
+
+let serverHandle;
+let browser;
+try {
+  if (checks.some((check) => check.status === "FAIL")) {
+    throw new Error("required assets missing");
+  }
+  serverHandle = await createHarnessServer();
+  const launchResult = await launchBrowser();
+  if (launchResult?.skipped) {
+    if (requireBrowser) {
+      fail("console-topology-dom:browser", "no local Chrome or Edge executable is available for required DOM smoke", launchResult.skipped);
+    } else {
+      skip("console-topology-dom:browser", "no local Chrome or Edge executable is available for DOM smoke");
+    }
+  } else {
+    browser = launchResult;
+    const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+    const consoleErrors = [];
+    const pageErrors = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+
+    await page.goto(`${serverHandle.url}/cywell/topology`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-topology"]', { timeout: 15000 });
+    expect("console-topology-dom:route", true, "topology route mounts in a real browser");
+    expect(
+      "console-topology-dom:empty-state",
+      (await page.locator('[data-test="cas-topology-dashboard"]').innerText()).includes("Topology data will render"),
+      "initial topology panel renders an empty dashboard state"
+    );
+
+    await page.getByLabel("Customer ID").fill("acme-topology");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=acme-topology") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-topology"]').click()
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 4);
+
+    const topologyCall = calls.find((call) => call.method === "GET" && call.path === "/api/knowledge/topology");
+    expect(
+      "console-topology-dom:customer-query",
+      topologyCall?.query?.customer_id === "acme-topology",
+      "topology load uses the selected customer_id",
+      JSON.stringify(topologyCall)
+    );
+    expect(
+      "console-topology-dom:nav-current",
+      (await page.locator('nav[aria-label="Cywell Knowledge"] a[aria-current="page"]').innerText()) === "Topology",
+      "topology nav exposes the active route with aria-current"
+    );
+
+    const kpiText = await page.locator('[data-test="cas-topology-kpis"]').innerText();
+    const normalizedKpiText = kpiText.toLowerCase();
+    expect(
+      "console-topology-dom:kpis",
+      normalizedKpiText.includes("4\nnodes") &&
+        normalizedKpiText.includes("3\nedges") &&
+        normalizedKpiText.includes("1\ndocs") &&
+        normalizedKpiText.includes("1\nnotes"),
+      "topology dashboard renders node, edge, document, and note KPIs",
+      kpiText
+    );
+    expect(
+      "console-topology-dom:nodes-edges",
+      (await page.locator('[data-test="cas-topology-node"]').count()) === 4 &&
+        (await page.locator('[data-test="cas-topology-edge"]').count()) === 3,
+      "topology dashboard renders all graph nodes and SVG edges"
+    );
+    const tones = await page.locator('[data-test="cas-topology-node"]').evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("data-tone")).sort()
+    );
+    expect(
+      "console-topology-dom:node-tones",
+      ["document", "runtime", "term", "wiki-note"].every((tone) => tones.includes(tone)),
+      "topology nodes carry expected visual tones",
+      JSON.stringify(tones)
+    );
+    const edgeCoordinatesOk = await page.locator('[data-test="cas-topology-edge"]').evaluateAll((edges) =>
+      edges.every((edge) => ["x1", "x2", "y1", "y2"].every((attribute) => Number.isFinite(Number(edge.getAttribute(attribute)))))
+    );
+    expect("console-topology-dom:edge-coordinates", edgeCoordinatesOk, "topology SVG edges have numeric coordinates");
+
+    await page.locator('[data-test="cas-topology-node"]').filter({ hasText: "ACME Router Wiki" }).click();
+    const selectedWikiNode = page.locator('[data-test="cas-topology-node"]').filter({ hasText: "ACME Router Wiki" });
+    expect(
+      "console-topology-dom:selected-node-a11y",
+      (await selectedWikiNode.getAttribute("aria-pressed")) === "true" &&
+        (await selectedWikiNode.getAttribute("aria-label"))?.includes("ACME Router Wiki") &&
+        (await selectedWikiNode.getAttribute("title")) === "ACME Router Wiki",
+      "selected topology node exposes accessible pressed state and full label"
+    );
+    const inspectorText = await page.locator('[data-test="cas-topology-inspector"]').innerText();
+    expect(
+      "console-topology-dom:inspector",
+      inspectorText.includes("ACME Router Wiki") &&
+        inspectorText.includes("wiki-router") &&
+        inspectorText.includes("rev 4") &&
+        inspectorText.includes("source doc-router") &&
+        inspectorText.includes("summarizes"),
+      "node inspector renders selected node lineage and direct relation text",
+      inspectorText
+    );
+
+    await page.getByRole("button", { name: "Docs" }).click();
+    expect(
+      "console-topology-dom:filter-docs",
+      (await page.locator('[data-test="cas-topology-node"]').count()) === 1 &&
+        (await page.getByRole("button", { name: "Docs" }).getAttribute("aria-pressed")) === "true",
+      "node type filter narrows visible graph nodes"
+    );
+    await page.getByRole("button", { name: "All" }).click();
+    expect(
+      "console-topology-dom:filter-all",
+      (await page.locator('[data-test="cas-topology-node"]').count()) === 4 &&
+        (await page.getByRole("button", { name: "All" }).getAttribute("aria-pressed")) === "true",
+      "All filter restores the topology graph"
+    );
+
+    await page.locator('[data-test="cas-topology-node"]').filter({ hasText: "ACME Router Wiki" }).click();
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
+      page.locator('[data-test="cas-topology-rag-action"]').click()
+    ]);
+    const ragCall = calls.findLast?.((call) => call.method === "POST" && call.path === "/api/knowledge/rag/query");
+    const resultText = await page.locator('[data-test="cas-knowledge-result"]').innerText();
+    expect(
+      "console-topology-dom:node-rag",
+      ragCall?.body?.customer_id === "acme-topology" &&
+        String(ragCall?.body?.question ?? "").includes("ACME Router Wiki") &&
+        resultText.includes("RAG answer for ACME Router Wiki") &&
+        (await page.locator('[data-test="cas-topology-dashboard"]').count()) === 1,
+      "topology inspector RAG action posts a node-derived question while preserving the dashboard",
+      JSON.stringify({ ragCall, resultText })
+    );
+    await assertViewportLayout(page, { width: 1024, height: 768 }, "dense-topology");
+    expect(
+      "console-topology-dom:dense-visible-cap",
+      (await page.locator('[data-test="cas-topology-node"]').count()) === 7 &&
+        (await page.locator('[data-test="cas-topology-visible-count"]').innerText()) === "Showing 7 of 28 nodes",
+      "dense topology caps canvas nodes and reports total visible count"
+    );
+    await assertViewportLayout(page, { width: 390, height: 844 }, "dense-topology");
+
+    expect(
+      "console-topology-dom:browser-errors",
+      consoleErrors.length === 0 && pageErrors.length === 0,
+      "browser reports no console errors or uncaught page errors",
+      JSON.stringify({ consoleErrors, pageErrors })
+    );
+  }
+} catch (error) {
+  fail("console-topology-dom:smoke", error instanceof Error ? error.message : "unknown topology DOM smoke failure");
+} finally {
+  if (browser?.close) await browser.close();
+  if (serverHandle?.server) {
+    await new Promise((resolveClose) => serverHandle.server.close(resolveClose));
+  }
+}
+
+const failures = checks.filter((check) => check.status === "FAIL");
+if (failures.length > 0) {
+  console.error(`Console topology DOM verification failed with ${failures.length} failures.`);
+  process.exitCode = 1;
+} else if (requireBrowser && checks.some((check) => check.status === "SKIP")) {
+  console.error("Console topology DOM verification failed because required browser mode produced a skip.");
+  process.exitCode = 1;
+} else if (checks.every((check) => check.status === "SKIP")) {
+  console.log("Console topology DOM verification skipped.");
+} else {
+  console.log(`Console topology DOM verification passed with ${checks.length} checks.`);
+}

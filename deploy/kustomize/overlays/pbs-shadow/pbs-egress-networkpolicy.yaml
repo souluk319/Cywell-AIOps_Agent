@@ -1,0 +1,45 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cas-knowledge-engine-pbs-egress
+  namespace: cywell-ai-sentinel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cywell-ai-sentinel
+      app.kubernetes.io/component: knowledge-engine
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 5353
+        - protocol: TCP
+          port: 5353
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cywell-ai-sentinel
+              app.kubernetes.io/component: knowledge-postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: playbookstudio
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: playbookstudio
+              app.kubernetes.io/component: runtime
+      ports:
+        - protocol: TCP
+          port: 8765
