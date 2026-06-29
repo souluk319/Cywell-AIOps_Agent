@@ -146,7 +146,7 @@ Status: implemented for the v0.1.4 smoke path.
   - `vector(768)` readiness column
   - smoke upload persisted in owner scope
 
-Important: this is still not full PBS corpus/index parity. The current Postgres mode stores CAS JSON payloads and verifies pgvector readiness, but it does not yet write PBS `document_sources`, `document_chunks`, `chunk_embeddings`, or entity graph tables.
+Important: this is still not full PBS corpus/index parity. The CRC/local Postgres path now creates PBS-compatible `document_sources`, `parsed_documents`, `document_chunks`, `chunk_embeddings`, and graph tables, and CAS ingest writes document source, parsed document, and chunk shadow rows. It still does not fabricate embeddings or prove PBS indexer/model parity against a production PBS database.
 
 ### Phase 3 - Customer Data Ingest
 
@@ -300,7 +300,7 @@ Delivered:
 - Gateway can require a ConfigMap-backed customer workspace ACL before proxying private knowledge requests; live mode enables this and verifies mismatched nested `source_metadata.customer_id` is rejected before reaching Knowledge Engine
 - strict PBS preflight checks that all applied ingress NetworkPolicies selecting knowledge-engine pods only allow Gateway pods on TCP `8080`
 - `deploy:crc` starts OpenShift binary builds without `--follow --wait`, follows build logs separately, and polls final build phase to avoid cancellation after slow uploads
-- `release:crc:v0.1.4` is bound to PASS CRC deployment evidence and refuses to promote sources whose digest differs from the verified runtime image digest
+- `release:crc:v0.1.4` is bound to current PASS CRC deployment evidence, refuses stale or wrong-HEAD evidence, records `promotedImages`, requires app release sources to match verified runtime digests, and records both the verified external Postgres digest and the promoted internal ImageStream digest
 
 Still required:
 
@@ -350,6 +350,7 @@ v0.1.4 currently proves:
 - topology KPI strip, PBS-rich node tones, type filters, Signal leaders, relation grid, selected-node inspector, source/viewer metadata, and node-to-RAG action in the live console plugin bundle
 - PBS-compatible upload and URL ingest payload metadata
 - PBS-compatible local Postgres schema and ingest shadow rows for document sources, parsed documents, and chunks
+- local Wiki Vault graph extraction for `[[wikilinks]]`, `#tags`, URLs, concepts, relations, backlinks, selected context/uploads, and RAG citations from vault-only context
 - base64 file upload with lightweight MIME-aware extraction
 - unsafe upload extension/MIME/base64/oversized OOXML rejection before local indexing or PBS-live outbound upload
 - PBS HTTP shadow/live adapter with fake PBS verification for upload, URL ingest, reports, RAG, wiki-loop, wiki status, wiki vault topology, and note save
@@ -365,9 +366,9 @@ v0.1.4 currently proves:
 - owner-required scoped knowledge APIs with Gateway SelfSubjectReview owner mapping and deployed gateway rejection of spoofed owner headers
 - non-2xx propagation for failed PBS live operations
 - request body limits in Gateway and Knowledge Engine
-- pgvector readiness in the live database
+- CRC/local pgvector readiness plus rendered and strict-preflight checks for live Postgres service readiness; production live pgvector readiness still requires target-cluster apply and Secrets
 - smoke data persistence and owner-scoped query behavior
-- CRC `v0.1.4` release tags are promoted only when the source digest matches verified runtime evidence
+- CRC `v0.1.4` release tags are promoted only from current verified runtime evidence, and strict live preflight compares applied release ImageStreamTag digests to `test-results/cas-release-images.json`
 
 v0.1.4 does not yet prove a production PBS live deployment. Full parity still requires applying the PBS overlay against a real PBS runtime, supplying the Secret material outside git, running PBS migrations/indexers against the target database, and verifying live corpus answers against real customer data.
 

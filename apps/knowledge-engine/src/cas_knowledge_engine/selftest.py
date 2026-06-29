@@ -33,7 +33,7 @@ def main() -> None:
                 "customer_id": "acme",
                 "file_name": "openshift-runbook.txt",
                 "filename": "openshift-runbook.txt",
-                "content": "OpenShift router latency increased after ingress certificate rotation. Check route shards and HAProxy logs.",
+                "content": "OpenShift router latency increased after ingress certificate rotation. Check [[Router Latency]], route shards, HAProxy logs, #ingress, and https://example.com/runbook.",
                 "source_scope": "user_upload",
                 "visibility": "private_user",
                 "index": True,
@@ -144,16 +144,24 @@ def main() -> None:
         expect(wiki["notes_upserted"] >= 1, "wiki loop upserts notes")
         vault = engine.wiki_vault("acme")
         expect(vault["notes"], "wiki vault returns notes")
+        expect(vault["top_wikilinks"] and vault["top_wikilinks"][0]["label"] == "Router Latency", "wiki vault exposes upload wikilinks")
+        expect(any(tag["label"] == "ingress" for tag in vault["top_tags"]), "wiki vault exposes upload tags")
+        expect(vault["summary"]["graph_relation_count"] >= 1, "wiki vault summarizes graph relations")
+        expect(vault["selected_context"], "wiki vault exposes selected context")
         topology = engine.topology("acme")
         expect(topology["counts"]["nodes"] >= 2, "topology returns graph nodes")
+        expect(topology["counts"]["wikilinks"] >= 1 and topology["counts"]["tags"] >= 1, "topology returns PBS-style wikilink and tag nodes")
         note = engine.save_note(
             {
                 "customer_id": "acme",
                 "title": "Router Latency Follow-up",
-                "body": "운영 메모: [[router]] latency는 route shard와 연결된다.",
+                "body": "운영 메모: [[router]] latency는 route shard와 연결된다. vault-only-signal-7421 #followup",
             }
         )
         expect(note["note"]["links"] == ["router"], "manual wiki note extracts wikilinks")
+        note_rag = engine.search({"customer_id": "acme", "question": "vault-only-signal-7421"})
+        expect(any(citation.get("source") == "wiki-vault" for citation in note_rag["citations"]), "rag query can cite wiki vault context")
+        expect(note_rag["trace"]["wiki_vault_context_attached"] is True, "rag trace records wiki vault context attachment")
     print("Knowledge engine self-test passed.")
 
 

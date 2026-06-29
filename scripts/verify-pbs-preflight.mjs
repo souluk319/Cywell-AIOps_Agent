@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const namespace = process.env.CAS_PBS_PREFLIGHT_NAMESPACE || "cywell-ai-sentinel";
 const overlayArg = process.argv.find((arg) => arg.startsWith("--overlay="))?.split("=")[1] ?? process.env.CAS_PBS_PREFLIGHT_OVERLAY ?? "pbs-live";
@@ -13,6 +13,7 @@ const requireSecret = process.argv.includes("--require-secret") || envBool("CAS_
 const skipApplied = process.argv.includes("--skip-applied") || envBool("CAS_PBS_PREFLIGHT_SKIP_APPLIED");
 const checkedAt = new Date().toISOString();
 const checks = [];
+const releaseImagesEvidencePath = process.env.CAS_RELEASE_IMAGES_EVIDENCE || "test-results/cas-release-images.json";
 const evidencePhase = skipApplied ? "preapply" : overlay === "pbs-shadow" && !requireCluster ? "diagnostic" : "applied";
 const evidenceScope = requireCluster ? "cluster" : "local";
 const evidenceSuffix = [overlay, evidencePhase, evidenceScope, requireSecret ? "required-secrets" : "optional-secrets"].join("-");
@@ -344,6 +345,7 @@ function writeEvidence(status) {
         requireCluster,
         requireSecret,
         skipApplied,
+        releaseImagesEvidencePath,
         summary: {
           total: checks.length,
           passed: checks.filter((check) => check.status === "PASS").length,
@@ -442,6 +444,50 @@ function firstContainerImage(workload) {
 
 function pinnedProductionImage(image) {
   return image.includes("@sha256:") || /^image-registry\.openshift-image-registry\.svc:5000\/cywell-ai-sentinel\/[^:]+:v0\.1\.4$/.test(image);
+}
+
+function digestPinnedImageReference(image) {
+  return /@sha256:[a-f0-9]{32,}/i.test(String(image ?? ""));
+}
+
+function imageDigest(image) {
+  return String(image ?? "").match(/sha256:[a-f0-9]{32,}/i)?.[0]?.toLowerCase() ?? "";
+}
+
+function currentGitHead() {
+  const result = run("git", ["rev-parse", "--short", "HEAD"]);
+  return result.ok ? result.stdout.trim() : "";
+}
+
+function loadReleaseImagesEvidence() {
+  if (overlay !== "pbs-live") return null;
+  if (!existsSync(releaseImagesEvidencePath)) {
+    const detail = `${releaseImagesEvidencePath} is missing; run release:crc:v0.1.4 before strict pbs-live preflight`;
+    if (requireCluster) fail("cluster:release-images-evidence", detail);
+    else warn("cluster:release-images-evidence", detail);
+    return null;
+  }
+  try {
+    const evidence = JSON.parse(readFileSync(releaseImagesEvidencePath, "utf8"));
+    const head = currentGitHead();
+    const valid =
+      evidence.status === "PASS" &&
+      evidence.namespace === namespace &&
+      evidence.releaseTag === "v0.1.4" &&
+      (!head || evidence.head === head) &&
+      evidence.promotedImages &&
+      typeof evidence.promotedImages === "object";
+    expect(
+      "cluster:release-images-evidence",
+      valid,
+      "release image promotion evidence is PASS, current-head, namespace-scoped, and contains promoted image digests",
+      `${releaseImagesEvidencePath} must be PASS for namespace ${namespace}, current head ${head || "unknown"}, releaseTag v0.1.4, and include promotedImages`
+    );
+    return valid ? evidence : null;
+  } catch (error) {
+    fail("cluster:release-images-evidence", `could not parse ${releaseImagesEvidencePath}: ${error.message}`);
+    return null;
+  }
 }
 
 function liveDatabaseUrlUsesService(urlText) {
@@ -670,17 +716,26 @@ if (authSecret) {
 }
 if (overlay === "pbs-live") {
   let liveDatabaseUrl = "";
+  const releaseImagesEvidence = loadReleaseImagesEvidence();
   if (requireCluster) {
     for (const imageName of ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine", "cas-knowledge-postgres"]) {
       const imageTag = getJson(`cluster:release-image:${imageName}`, ["get", "imagestreamtag", "-n", namespace, `${imageName}:v0.1.4`]);
       if (imageTag) {
         const dockerImageReference = imageTag.image?.dockerImageReference ?? "";
+        const promotedDigest = imageDigest(releaseImagesEvidence?.promotedImages?.[imageName]?.digest);
+        const clusterDigest = imageDigest(dockerImageReference);
         pass(`cluster:release-image:${imageName}:v0.1.4`, `${imageName}:v0.1.4 ImageStreamTag exists`);
         expect(
           `cluster:release-image-reference:${imageName}:v0.1.4`,
-          Boolean(dockerImageReference) && (imageName !== "cas-knowledge-postgres" || dockerImageReference.includes("@sha256:")),
-          `${imageName}:v0.1.4 resolves to an image reference${imageName === "cas-knowledge-postgres" ? " pinned by digest" : ""}`,
-          `${imageName}:v0.1.4 must resolve to image.dockerImageReference${imageName === "cas-knowledge-postgres" ? " with @sha256:" : ""}; found ${dockerImageReference || "none"}`
+          digestPinnedImageReference(dockerImageReference),
+          `${imageName}:v0.1.4 resolves to a digest-pinned image reference`,
+          `${imageName}:v0.1.4 must resolve to image.dockerImageReference with @sha256:; found ${dockerImageReference || "none"}`
+        );
+        expect(
+          `cluster:release-image-evidence:${imageName}:v0.1.4`,
+          Boolean(promotedDigest) && clusterDigest === promotedDigest,
+          `${imageName}:v0.1.4 digest matches promoted release image evidence`,
+          `${imageName}:v0.1.4 digest ${clusterDigest || "missing"} must match promoted evidence digest ${promotedDigest || "missing"}`
         );
       }
     }

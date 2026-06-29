@@ -6,11 +6,15 @@ const namespace = process.env.CAS_RELEASE_NAMESPACE || "cywell-ai-sentinel";
 const releaseTag = process.env.CAS_RELEASE_TAG || "v0.1.4";
 const releaseEvidencePath = process.env.CAS_RELEASE_EVIDENCE || "test-results/cas-crc-deployment.json";
 const forceRelease = ["1", "true", "yes", "y", "on"].includes(String(process.env.CAS_RELEASE_FORCE ?? "").trim().toLowerCase());
+const allowStaleEvidence = ["1", "true", "yes", "y", "on"].includes(String(process.env.CAS_RELEASE_ALLOW_STALE_EVIDENCE ?? "").trim().toLowerCase());
+const evidenceMaxAgeHours = Number(process.env.CAS_RELEASE_EVIDENCE_MAX_AGE_HOURS ?? "24");
 const appImageStreams = ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine"];
 const postgresImageStream = "cas-knowledge-postgres";
+const releaseImageStreams = [...appImageStreams, postgresImageStream];
 const checks = [];
 const checkedAt = new Date().toISOString();
 let deploymentEvidence = null;
+const promotedImages = {};
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -36,6 +40,14 @@ function getJson(args) {
   return JSON.parse(run("oc", [...args, "-o", "json"]));
 }
 
+function currentGitHead() {
+  return run("git", ["rev-parse", "--short", "HEAD"]);
+}
+
+function currentGitBranch() {
+  return run("git", ["branch", "--show-current"]);
+}
+
 function extractDigest(value) {
   const match = String(value ?? "").match(/sha256:[a-f0-9]{32,}/i);
   return match ? match[0].toLowerCase() : "";
@@ -46,8 +58,32 @@ function loadDeploymentEvidence() {
   if (evidence.status !== "PASS") {
     throw new Error(`${releaseEvidencePath} is not PASS; run npm run deploy:crc before release promotion`);
   }
+  if (evidence.namespace !== namespace) {
+    throw new Error(`${releaseEvidencePath} namespace ${evidence.namespace ?? "missing"} does not match release namespace ${namespace}`);
+  }
+  const evidenceHead = String(evidence.head ?? "");
+  const head = currentGitHead();
+  if (evidenceHead !== head && !allowStaleEvidence) {
+    throw new Error(`${releaseEvidencePath} was generated for head ${evidenceHead || "missing"}, current head is ${head}; rerun npm run deploy:crc or set CAS_RELEASE_ALLOW_STALE_EVIDENCE=true intentionally`);
+  }
+  const checkedAtMs = Date.parse(evidence.checkedAt ?? "");
+  if (!Number.isFinite(checkedAtMs)) {
+    throw new Error(`${releaseEvidencePath} has no valid checkedAt timestamp`);
+  }
+  if (Number.isFinite(evidenceMaxAgeHours) && evidenceMaxAgeHours > 0) {
+    const ageHours = (Date.now() - checkedAtMs) / 3600000;
+    if (ageHours > evidenceMaxAgeHours && !allowStaleEvidence) {
+      throw new Error(`${releaseEvidencePath} is ${ageHours.toFixed(1)}h old; rerun npm run deploy:crc or set CAS_RELEASE_ALLOW_STALE_EVIDENCE=true intentionally`);
+    }
+  }
   if (!evidence.verifiedImages || typeof evidence.verifiedImages !== "object") {
     throw new Error(`${releaseEvidencePath} does not contain verifiedImages; rerun npm run deploy:crc with the current verifier`);
+  }
+  for (const name of releaseImageStreams) {
+    const image = evidence.verifiedImages[name];
+    if (!image || image.verified !== true || !extractDigest(image.digest)) {
+      throw new Error(`${releaseEvidencePath} missing verified digest evidence for ${name}`);
+    }
   }
   pass("release:evidence:crc-deployment", `loaded PASS CRC deployment evidence from ${releaseEvidencePath}`, {
     evidenceCheckedAt: evidence.checkedAt,
@@ -97,22 +133,43 @@ function ensureImageStream(name) {
   }
 }
 
-function ensureImageStreamTag(name, tag) {
+function ensureImageStreamTag(name, tag, expectedDigest = "") {
   let lastError = "";
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
       const resolved = getImageStreamTagReference(name, tag);
       if (resolved) {
-        pass(`release:imagestreamtag:${name}:${tag}`, `${name}:${tag} resolves`, { image: resolved });
-        return resolved;
+        const actualDigest = extractDigest(resolved);
+        const normalizedExpected = extractDigest(expectedDigest);
+        if (!normalizedExpected || actualDigest === normalizedExpected) {
+          pass(`release:imagestreamtag:${name}:${tag}`, `${name}:${tag} resolves${normalizedExpected ? " to expected digest" : ""}`, {
+            image: resolved,
+            digest: actualDigest
+          });
+          return resolved;
+        }
+        lastError = `${name}:${tag} resolves to ${actualDigest || "no digest"}, expected ${normalizedExpected}`;
+      } else {
+        lastError = `${name}:${tag} exists but has no resolved image reference`;
       }
-      lastError = `${name}:${tag} exists but has no resolved image reference`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
     sleep(1000);
   }
   throw new Error(lastError || `${name}:${tag} did not resolve`);
+}
+
+function recordPromotedImage(name, image, sourceImage = image) {
+  const digest = extractDigest(image);
+  if (!digest) throw new Error(`${name}:${releaseTag} did not resolve to a digest-pinned image reference`);
+  promotedImages[name] = {
+    tag: releaseTag,
+    sourceImage,
+    image,
+    digest,
+    verifiedDigest: deploymentEvidence?.verifiedImages?.[name]?.digest ?? ""
+  };
 }
 
 function assertReleaseTargetMutable(name, sourceRef) {
@@ -138,11 +195,13 @@ function assertReleaseTargetMutable(name, sourceRef) {
 function promoteAppReleaseTags() {
   for (const name of appImageStreams) {
     ensureImageStream(name);
-    const sourceRef = ensureImageStreamTag(name, "dev");
+    const expectedDigest = deploymentEvidence.verifiedImages[name].digest;
+    const sourceRef = ensureImageStreamTag(name, "dev", expectedDigest);
     assertSourceMatchesDeploymentEvidence(name, sourceRef);
     assertReleaseTargetMutable(name, sourceRef);
     run("oc", ["tag", "-n", namespace, `${name}:dev`, `${name}:${releaseTag}`, "--reference-policy=local"], { stdio: "inherit" });
-    ensureImageStreamTag(name, releaseTag);
+    const promotedRef = ensureImageStreamTag(name, releaseTag, expectedDigest);
+    recordPromotedImage(name, promotedRef, sourceRef);
   }
 }
 
@@ -184,7 +243,8 @@ function promotePostgresReleaseTag() {
     ["tag", "-n", namespace, "--source=docker", digest, `${postgresImageStream}:${releaseTag}`, "--reference-policy=local"],
     { stdio: "inherit" }
   );
-  ensureImageStreamTag(postgresImageStream, releaseTag);
+  const promotedRef = ensureImageStreamTag(postgresImageStream, releaseTag);
+  recordPromotedImage(postgresImageStream, promotedRef, digest);
 }
 
 try {
@@ -200,9 +260,12 @@ try {
         namespace,
         releaseTag,
         releaseEvidencePath,
+        branch: currentGitBranch(),
+        head: currentGitHead(),
         forceRelease,
         status: "PASS",
         summary: { total: checks.length, passed: checks.length, failed: 0 },
+        promotedImages,
         checks
       },
       null,
@@ -221,7 +284,22 @@ try {
         namespace,
         releaseTag,
         releaseEvidencePath,
+        branch: (() => {
+          try {
+            return currentGitBranch();
+          } catch {
+            return "";
+          }
+        })(),
+        head: (() => {
+          try {
+            return currentGitHead();
+          } catch {
+            return "";
+          }
+        })(),
         status: "FAIL",
+        promotedImages,
         error: error instanceof Error ? error.message : String(error),
         checks
       },

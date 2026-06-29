@@ -23,6 +23,8 @@ from .storage import build_store, empty_store
 TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣_./:-]{2,}")
 TAG_RE = re.compile(r"<[^>]+>")
 WIKI_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+HASHTAG_RE = re.compile(r"(?<![\w/])#([0-9A-Za-z가-힣][0-9A-Za-z가-힣_-]{1,63})")
+URL_SIGNAL_RE = re.compile(r"https?://[^\s)\]}>'\"]+")
 PDF_TEXT_RE = re.compile(rb"\(([^()]{2,500})\)")
 UPLOAD_ALLOWED_EXTENSIONS = {
     "",
@@ -1102,6 +1104,216 @@ class KnowledgeEngine:
             return self._with_shadow_write(result, "url_ingest", lambda: self.pbs.url_ingest(payload, resolved_owner_id))
         return result
 
+    def _signal_list(self, values: list[str], limit: int = 12) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            clean = re.sub(r"\s+", " ", str(value or "")).strip().strip("#")
+            if not clean:
+                continue
+            key = clean.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(clean)
+            if len(result) >= limit:
+                break
+        return result
+
+    def _text_signals(self, text: str, fallback_terms: list[str] | None = None) -> dict[str, list[str]]:
+        body = str(text or "")
+        links = self._signal_list(WIKI_LINK_RE.findall(body))
+        tags = self._signal_list(HASHTAG_RE.findall(body))
+        urls = self._signal_list(URL_SIGNAL_RE.findall(body), limit=6)
+        concepts = self._signal_list([*(fallback_terms or []), *top_terms(body, 8)], limit=8)
+        return {"links": links, "tags": tags, "urls": urls, "concepts": concepts}
+
+    def _local_vault_graph(self, *, customer_id: str, owner_id: str, store: dict[str, Any] | None = None) -> dict[str, Any]:
+        store = store or self.load_store()
+        documents = [doc for doc in store["documents"] if self._in_scope(doc, customer_id=customer_id, owner_id=owner_id)]
+        notes = [note for note in store["notes"] if self._in_scope(note, customer_id=customer_id, owner_id=owner_id)]
+        chunks_by_document: dict[str, list[dict[str, Any]]] = {}
+        for chunk in store["chunks"]:
+            if self._in_scope(chunk, customer_id=customer_id, owner_id=owner_id):
+                chunks_by_document.setdefault(str(chunk.get("document_id") or ""), []).append(chunk)
+
+        nodes: dict[str, dict[str, Any]] = {}
+        edges: list[dict[str, Any]] = []
+        relations: list[dict[str, Any]] = []
+        backlinks: list[dict[str, Any]] = []
+        wikilink_counts: Counter[str] = Counter()
+        tag_counts: Counter[str] = Counter()
+
+        def add_node(node_id: str, node_type: str, label: str, **extra: Any) -> None:
+            current = nodes.get(node_id, {})
+            nodes[node_id] = {
+                **current,
+                "id": node_id,
+                "type": node_type,
+                "label": label,
+                **{key: value for key, value in extra.items() if value is not None},
+            }
+
+        def add_relation(source: str, target: str, relation_type: str, label: str = "", **extra: Any) -> None:
+            edge_id = stable_id("edge", f"{source}:{relation_type}:{target}")
+            if not any(edge.get("id") == edge_id for edge in edges):
+                edge = {"id": edge_id, "source": source, "target": target, "type": relation_type, "label": label or relation_type}
+                edge.update({key: value for key, value in extra.items() if value is not None})
+                edges.append(edge)
+            relations.append({"source": source, "target": target, "type": relation_type, "label": label or relation_type, **extra})
+
+        for document in documents:
+            doc_id = str(document["id"])
+            metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+            pbs_payload = metadata.get("pbs_payload") if isinstance(metadata.get("pbs_payload"), dict) else {}
+            source_kind = str(pbs_payload.get("source_kind") or document.get("source_type") or "upload")
+            source_url = str(document.get("source_uri") or metadata.get("url") or pbs_payload.get("url") or "")
+            chunk_texts = " ".join(str(chunk.get("text") or "") for chunk in chunks_by_document.get(doc_id, []))
+            signals = self._text_signals(f"{document.get('title', '')} {document.get('summary', '')} {chunk_texts}", document.get("terms", [])[:8])
+            add_node(
+                doc_id,
+                "upload_document" if source_kind == "upload" else "web_url_source",
+                str(document.get("title") or doc_id),
+                summary=document.get("summary", ""),
+                status=document.get("status", ""),
+                document_source_id=doc_id,
+                source_kind=source_kind,
+                source_url=source_url or None,
+                basic_index_ready=True,
+            )
+            for label in signals["links"]:
+                wikilink_counts[label] += 1
+                link_id = stable_id("wikilink", label.lower())
+                add_node(link_id, "wikilink", label)
+                add_relation(doc_id, link_id, "wikilink", label, source_document_id=doc_id)
+            for label in signals["tags"]:
+                tag_counts[label] += 1
+                tag_id = stable_id("tag", label.lower())
+                add_node(tag_id, "tag", label)
+                add_relation(doc_id, tag_id, "tag", label, source_document_id=doc_id)
+            for label in signals["concepts"][:6]:
+                concept_id = stable_id("concept", label.lower())
+                add_node(concept_id, "concept", label, entity_kind="concept")
+                add_relation(doc_id, concept_id, "mentions", label, source_document_id=doc_id)
+
+        for note in notes:
+            note_id = str(note["id"])
+            body = str(note.get("body") or "")
+            signals = self._text_signals(body, [str(tag) for tag in note.get("tags", [])])
+            document_id = str(note.get("document_id") or "")
+            add_node(
+                note_id,
+                "wiki-note",
+                str(note.get("title") or note_id),
+                summary=body[:240],
+                status=note.get("source", ""),
+                revision=note.get("revision"),
+                previous_revision=note.get("previous_revision"),
+                document_id=document_id or None,
+                source_document_id=note.get("provenance", {}).get("source_document_id") if isinstance(note.get("provenance"), dict) else document_id or None,
+                provenance=note.get("provenance", {}),
+                updated_at=note.get("updated_at"),
+                note_type=note.get("source", ""),
+                compiled_wiki=note.get("source") == "wiki-loop",
+                ready_for_chat=True,
+            )
+            if document_id:
+                add_relation(note_id, document_id, "summarizes", "summarizes", source_document_id=document_id)
+            for label in signals["links"]:
+                wikilink_counts[label] += 1
+                link_id = stable_id("wikilink", label.lower())
+                add_node(link_id, "wikilink", label)
+                add_relation(note_id, link_id, "wikilink", label, source_note_id=note_id)
+                backlinks.append({"source_note_id": note_id, "source_title": note.get("title", ""), "target": label, "type": "wikilink"})
+            for label in signals["tags"]:
+                tag_counts[label] += 1
+                tag_id = stable_id("tag", label.lower())
+                add_node(tag_id, "tag", label)
+                add_relation(note_id, tag_id, "tag", label, source_note_id=note_id)
+
+        degree_by_id: Counter[str] = Counter()
+        for edge in edges:
+            degree_by_id[str(edge["source"])] += 1
+            degree_by_id[str(edge["target"])] += 1
+        for node_id, node in nodes.items():
+            degree = degree_by_id[node_id]
+            node["degree"] = degree
+            node["weight"] = round(min(1.0, 0.2 + degree / 10), 3)
+
+        top_wikilinks = [{"label": label, "count": count} for label, count in wikilink_counts.most_common(12)]
+        top_tags = [{"label": label, "count": count} for label, count in tag_counts.most_common(12)]
+        selected_uploads = [
+            {
+                "id": document["id"],
+                "title": document.get("title", ""),
+                "summary": document.get("summary", ""),
+                "source_kind": (document.get("metadata") or {}).get("pbs_payload", {}).get("source_kind", document.get("source_type", "")) if isinstance(document.get("metadata"), dict) else document.get("source_type", ""),
+            }
+            for document in documents[:8]
+        ]
+        selected_context = [
+            {
+                "id": note["id"],
+                "title": note.get("title", ""),
+                "body": str(note.get("body", ""))[:700],
+                "source": note.get("source", ""),
+                "document_id": note.get("document_id"),
+            }
+            for note in notes[:8]
+        ]
+        summary = {
+            "document_node_count": len(documents),
+            "upload_node_count": len([doc for doc in documents if doc.get("source_type") == "upload"]),
+            "note_count": len(notes),
+            "compiled_note_count": len([note for note in notes if note.get("source") == "wiki-loop"]),
+            "wikilink_count": len(top_wikilinks),
+            "tag_count": len(top_tags),
+            "concept_node_count": len([node for node in nodes.values() if node.get("type") == "concept"]),
+            "entity_node_count": len([node for node in nodes.values() if node.get("type") in {"concept", "wikilink", "tag"}]),
+            "graph_relation_count": len(edges),
+        }
+        topology = {
+            "status": "ok",
+            "customer_id": customer_id,
+            "owner_mode": self.owner_mode,
+            "nodes": list(nodes.values()),
+            "edges": edges,
+            "counts": {
+                "documents": len(documents),
+                "uploads": summary["upload_node_count"],
+                "notes": len(notes),
+                "compiled": summary["compiled_note_count"],
+                "wikilinks": summary["wikilink_count"],
+                "tags": summary["tag_count"],
+                "entities": summary["entity_node_count"],
+                "concepts": summary["concept_node_count"],
+                "relations": len(edges),
+                "nodes": len(nodes),
+                "edges": len(edges),
+            },
+            "pbs": {
+                "schema_version": "cas-local-v1",
+                "summary": summary,
+                "top_wikilinks": top_wikilinks,
+                "top_tags": top_tags,
+                "relations": relations,
+                "selected_context": selected_context,
+                "selected_uploads": selected_uploads,
+            },
+        }
+        return {
+            "documents": documents,
+            "notes": notes,
+            "topology": topology,
+            "summary": summary,
+            "top_wikilinks": top_wikilinks,
+            "top_tags": top_tags,
+            "relations": relations,
+            "backlinks": backlinks,
+            "selected_context": selected_context,
+            "selected_uploads": selected_uploads,
+        }
+
     def search(self, payload: dict[str, Any], owner_id: str | None = None) -> dict[str, Any]:
         question = str(payload.get("question") or payload.get("query") or "").strip()
         customer_id = str(payload.get("customer_id") or payload.get("customerId") or "default")
@@ -1124,15 +1336,35 @@ class KnowledgeEngine:
         scored.sort(key=lambda item: item[0], reverse=True)
         top_chunks = [chunk for _score, chunk in scored[:5]]
         documents = {doc["id"]: doc for doc in store["documents"]}
-        citations = [
+        citations: list[dict[str, Any]] = [
             {
                 "chunk_id": chunk["id"],
                 "document_id": chunk["document_id"],
                 "title": documents.get(chunk["document_id"], {}).get("title", chunk["document_id"]),
                 "snippet": chunk["text"][:260],
+                "source": "chunk",
             }
             for chunk in top_chunks
         ]
+        vault = self._local_vault_graph(customer_id=customer_id, owner_id=resolved_owner_id, store=store)
+        vault_scored: list[tuple[int, dict[str, Any]]] = []
+        for context in vault["selected_context"]:
+            haystack = f"{context.get('title', '')} {context.get('body', '')}".lower()
+            score = sum(4 if term in haystack else 0 for term in query_terms)
+            score += sum(haystack.count(term) for term in query_terms)
+            if score > 0:
+                vault_scored.append((score, context))
+        vault_scored.sort(key=lambda item: item[0], reverse=True)
+        for _score, context in vault_scored[:3]:
+            citations.append(
+                {
+                    "note_id": context["id"],
+                    "document_id": context.get("document_id"),
+                    "title": context.get("title", context["id"]),
+                    "snippet": str(context.get("body") or "")[:260],
+                    "source": "wiki-vault",
+                }
+            )
         answer = "관련 고객 데이터가 아직 적재되지 않았습니다."
         if citations:
             answer = " / ".join(citation["snippet"] for citation in citations[:2])
@@ -1142,7 +1374,7 @@ class KnowledgeEngine:
             "customer_id": customer_id,
             "owner_id": resolved_owner_id,
             "question": question,
-            "citations": [citation["chunk_id"] for citation in citations],
+            "citations": [citation.get("chunk_id") or citation.get("note_id") for citation in citations],
             "created_at": now_ms(),
         }
         store["events"].append(event)
@@ -1157,6 +1389,8 @@ class KnowledgeEngine:
                 "owner_scope": self.owner_mode,
                 "query_terms": query_terms,
                 "matches": len(scored),
+                "vault_matches": len(vault_scored),
+                "wiki_vault_context_attached": bool(vault["selected_context"]),
             },
         }
         if self._pbs_shadow_enabled():
@@ -1364,16 +1598,21 @@ class KnowledgeEngine:
             body["topology"] = self._topology_from_pbs_vault(pbs_result.body if pbs_result.ok else {}, customer_id=customer_id, owner_id=resolved_owner_id)
             return body
         store = self.load_store()
-        documents = [doc for doc in store["documents"] if self._in_scope(doc, customer_id=customer_id, owner_id=resolved_owner_id)]
-        notes = [note for note in store["notes"] if self._in_scope(note, customer_id=customer_id, owner_id=resolved_owner_id)]
-        topology = self.topology(customer_id, owner_id=resolved_owner_id)
+        vault = self._local_vault_graph(customer_id=customer_id, owner_id=resolved_owner_id, store=store)
         result = {
             "status": "ok",
             "customer_id": customer_id,
             "owner_mode": self.owner_mode,
-            "documents": documents,
-            "notes": notes,
-            "topology": topology,
+            "documents": vault["documents"],
+            "notes": vault["notes"],
+            "summary": vault["summary"],
+            "top_wikilinks": vault["top_wikilinks"],
+            "top_tags": vault["top_tags"],
+            "relations": vault["relations"],
+            "backlinks": vault["backlinks"],
+            "selected_context": vault["selected_context"],
+            "selected_uploads": vault["selected_uploads"],
+            "topology": vault["topology"],
         }
         if self._pbs_shadow_enabled():
             return self._with_shadow(result, "wiki_vault", self.pbs.wiki_vault({"customer_id": customer_id}, resolved_owner_id))
@@ -1397,60 +1636,7 @@ class KnowledgeEngine:
                 result["error"] = pbs_result.error
             return result
         store = self.load_store()
-        documents = [doc for doc in store["documents"] if self._in_scope(doc, customer_id=customer_id, owner_id=resolved_owner_id)]
-        notes = [note for note in store["notes"] if self._in_scope(note, customer_id=customer_id, owner_id=resolved_owner_id)]
-        nodes: dict[str, dict[str, Any]] = {}
-        edges: list[dict[str, Any]] = []
-
-        for document in documents:
-            nodes[document["id"]] = {
-                "id": document["id"],
-                "type": "document",
-                "label": document["title"],
-                "summary": document.get("summary", ""),
-                "status": document["status"],
-                "metadata": document.get("metadata", {}),
-                "document_source_id": document.get("id"),
-            }
-            for term in document.get("terms", [])[:8]:
-                term_id = stable_id("term", term)
-                nodes[term_id] = {"id": term_id, "type": "term", "label": term}
-                edges.append({"source": document["id"], "target": term_id, "type": "mentions"})
-
-        for note in notes:
-            nodes[note["id"]] = {
-                "id": note["id"],
-                "type": "wiki-note",
-                "label": note["title"],
-                "summary": note.get("body", "")[:240],
-                "status": note["source"],
-                "revision": note.get("revision"),
-                "previous_revision": note.get("previous_revision"),
-                "document_id": note.get("document_id"),
-                "source_document_id": note.get("provenance", {}).get("source_document_id") if isinstance(note.get("provenance"), dict) else note.get("document_id"),
-                "provenance": note.get("provenance", {}),
-                "updated_at": note.get("updated_at"),
-            }
-            if note.get("document_id"):
-                edges.append({"source": note["id"], "target": note["document_id"], "type": "summarizes"})
-            for tag in note.get("tags", [])[:8]:
-                term_id = stable_id("term", str(tag))
-                nodes[term_id] = {"id": term_id, "type": "term", "label": str(tag)}
-                edges.append({"source": note["id"], "target": term_id, "type": "tags"})
-
-        result = {
-            "status": "ok",
-            "customer_id": customer_id,
-            "owner_mode": self.owner_mode,
-            "nodes": list(nodes.values()),
-            "edges": edges,
-            "counts": {
-                "documents": len(documents),
-                "notes": len(notes),
-                "nodes": len(nodes),
-                "edges": len(edges),
-            },
-        }
+        result = self._local_vault_graph(customer_id=customer_id, owner_id=resolved_owner_id, store=store)["topology"]
         if self._pbs_shadow_enabled():
             return self._with_shadow(result, "wiki_vault_topology", self.pbs.wiki_vault({"customer_id": customer_id}, resolved_owner_id))
         return result

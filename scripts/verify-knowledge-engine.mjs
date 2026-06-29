@@ -724,7 +724,7 @@ try {
       customer_id: "verify",
       file_name: "verify-runbook.txt",
       filename: "verify-runbook.txt",
-      content: "OpenShift router latency is connected to route shards, HAProxy logs, ingress certificates, and namespace events.",
+      content: "OpenShift router latency is connected to [[Router Latency]], route shards, HAProxy logs, ingress certificates, namespace events, #ingress, and https://example.com/verify-runbook.",
       source_scope: "user_upload",
       visibility: "private_user",
       source_kind: "upload",
@@ -886,6 +886,25 @@ try {
     "gateway upload reports list indexed document"
   );
 
+  const localVault = await fetchJson(`${gatewayBase}/api/knowledge/wiki-vault?customer_id=verify`, {
+    headers: ownerHeaders
+  });
+  expect(
+    "knowledge:wiki-vault-local-signals",
+    localVault.response.status === 200 &&
+      localVault.body.summary?.graph_relation_count >= 1 &&
+      Array.isArray(localVault.body.top_wikilinks) &&
+      localVault.body.top_wikilinks.some((item) => item.label === "Router Latency") &&
+      Array.isArray(localVault.body.top_tags) &&
+      localVault.body.top_tags.some((item) => item.label === "ingress") &&
+      Array.isArray(localVault.body.relations) &&
+      localVault.body.relations.length >= 1 &&
+      Array.isArray(localVault.body.selected_context) &&
+      localVault.body.selected_context.length >= 1,
+    "gateway local wiki vault exposes PBS-style wikilinks, tags, relations, and selected context",
+    JSON.stringify(localVault.body)
+  );
+
   const rag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
     method: "POST",
     headers: ownerHeaders,
@@ -907,6 +926,33 @@ try {
       ),
     "gateway RAG cites the uploaded customer document",
     JSON.stringify({ uploadedDocumentId, citations: ragCitations })
+  );
+  const vaultOnlyNote = await fetchJson(`${gatewayBase}/api/knowledge/wiki-vault/notes`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      title: "Vault-only Router Signal",
+      body: "This wiki-only context contains vault-only-signal-7421 and links [[Router Latency]] with #ingress."
+    })
+  });
+  const vaultOnlyRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      question: "vault-only-signal-7421"
+    })
+  });
+  const vaultOnlyCitations = Array.isArray(vaultOnlyRag.body.citations) ? vaultOnlyRag.body.citations : [];
+  expect(
+    "knowledge:rag-wiki-vault-context",
+    vaultOnlyNote.response.status === 200 &&
+      vaultOnlyRag.response.status === 200 &&
+      vaultOnlyRag.body.trace?.wiki_vault_context_attached === true &&
+      vaultOnlyCitations.some((citation) => citation.source === "wiki-vault" && String(citation.snippet ?? "").includes("vault-only-signal-7421")),
+    "gateway RAG can cite local wiki vault context that is not present in uploaded chunks",
+    JSON.stringify({ note: vaultOnlyNote.body, rag: vaultOnlyRag.body })
   );
   const isolatedRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
     method: "POST",
@@ -1393,7 +1439,7 @@ try {
     "knowledge:topology-upload-wiki-lineage",
     Boolean(uploadedDocumentId) &&
       Boolean(wikiNoteId) &&
-      topologyNodes.some((node) => node.id === uploadedDocumentId && node.type === "document") &&
+      topologyNodes.some((node) => node.id === uploadedDocumentId && ["document", "upload_document"].includes(node.type)) &&
       topologyNodes.some(
         (node) =>
           node.id === wikiNoteId &&

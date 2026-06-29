@@ -9,7 +9,7 @@ This summary captures the current v0.1.4 branch verification state for the Cywel
 | Command | Result | Notes |
 | --- | --- | --- |
 | `npm run verify` | PASS | Full local gate including contracts, gateway, knowledge engine, brain, OpenShift evidence, console build, browser topology DOM, console integration, CRC connection preview, and manifest verification |
-| `npm run verify:knowledge-engine` | PASS, 76 checks | Includes Gateway owner verification, signed internal owner headers, ConfigMap-driven customer workspace ACL behavior, internal bearer/header stripping, public health/capabilities sanitization, unsafe upload/URL ingest rejection, PBS shadow/live adapter contracts, PBS live response scope mismatch rejection, rich PBS topology signal preservation, topology provenance, orphan endpoint topology normalization, and single-candidate PBS graph normalization |
+| `npm run verify:knowledge-engine` | PASS, 78 checks | Includes Gateway owner verification, signed internal owner headers, ConfigMap-driven customer workspace ACL behavior, internal bearer/header stripping, public health/capabilities sanitization, unsafe upload/URL ingest rejection, local Wiki Vault signal extraction, RAG citations from vault-only context, PBS shadow/live adapter contracts, PBS live response scope mismatch rejection, rich PBS topology signal preservation, topology provenance, orphan endpoint topology normalization, and single-candidate PBS graph normalization |
 | `npm run verify:console:topology-dom` | PASS, 31 checks | Browser-required smoke with topology auto-load, empty/error reload stale-data protection, PBS-rich KPI/tone/signal-leader/link-filter rendering, filter-scoped node index, orphan edge fallback nodes, mixed-scope graph selection, late-response stale-data protection, dense 28-node searchable index, and 1024px/390px overflow/overlap checks |
 | `npm run verify:console:integration` | PASS, 71 checks | Includes static app `innerHTML` rejection, structural `/cywell/topology` manifest routing/navigation, topology auto-load, PBS topology signal fields/counts, Signal leaders, and built plugin route/bundle checks |
 | `npm run verify:deploy:manifests` | PASS, 257 checks | Includes base/shadow/live/CRC render checks, HMAC Secret refs, no tracked dev DB Secret, pbs-live Gateway customer ACL config, pbs-live Postgres release image pinning, PBS-compatible local schema checks, release image promotion force/evidence binding coverage, explicit strict shadow preflight script coverage, HTTPS PBS service-token transport, PBS live response scope guard coverage, and direct console script build prerequisites |
@@ -40,7 +40,8 @@ Current hardening additions after the initial summary:
 - Local Postgres now creates PBS-compatible `tenants`, `workspaces`, `document_sources`, `parsed_documents`, `document_chunks`, `chunk_embeddings`, and graph tables; CAS ingest writes PBS-compatible document/chunk shadow rows without fabricating embeddings.
 - PBS Wiki Vault topology normalization now preserves PBS summary aliases, wikilinks, tags, entity/concept nodes, degree/weight, source/viewer fields, selected context/uploads, and relation signals.
 - The Cywell topology dashboard renders PBS-rich graph semantics as KPIs, node tones, type filters, Signal leaders, inspector metadata, relation lines, and node-to-RAG actions in the browser-backed release gate.
-- CRC release promotion is now bound to `test-results/cas-crc-deployment.json`; app release sources and the Postgres release source must match the verified runtime digest evidence before `v0.1.4` tags move.
+- CRC release promotion is now bound to current-HEAD `test-results/cas-crc-deployment.json`; app release sources must match verified runtime digest evidence before `v0.1.4` tags move, Postgres records both the verified external runtime digest and promoted internal ImageStream digest, and strict live preflight compares applied release tags to `test-results/cas-release-images.json`.
+- Local Wiki Vault now extracts `[[wikilinks]]`, `#tags`, URLs, concepts, relations, backlinks, selected context/uploads, and can feed RAG citations from wiki-only context.
 
 Clean checkout reproduction:
 
@@ -50,22 +51,15 @@ npm ci: PASS
 npm run verify: PASS
 ```
 
-## Last-Known CRC Deployment Evidence
+## CRC Evidence Policy
 
 | Command | Result | Notes |
 | --- | --- | --- |
-| `npm run deploy:crc` | PASS, 68 runtime checks | Mutating deploy action; rebuilt and deployed `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev` to CRC, created/preserved local Secrets, applied CRC-only API/Lightspeed policies, verified app pod imageID digests against dev ImageStreamTags, verified PBS-compatible Postgres schema/shadow rows, and reran CRC deployment verification |
-| `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` | PASS, 21 release checks | Mutating release action; loaded PASS CRC deployment evidence, verified each release source digest against runtime evidence, and force-promoted `cas-gateway`, `cas-console-plugin`, `cas-knowledge-engine`, and digest-pinned `cas-knowledge-postgres` to local `v0.1.4` ImageStreamTags |
+| `npm run deploy:crc` | PASS, latest 68 runtime checks | Mutating deploy action; rebuilds and deploys `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev` to CRC, creates/preserves local Secrets, applies CRC-only API/Lightspeed policies, verifies app pod imageID digests against dev ImageStreamTags, verifies PBS-compatible Postgres schema/shadow rows, and writes current `head` plus `verifiedImages` to `test-results/cas-crc-deployment.json` |
+| `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` | PASS after current deployment evidence is regenerated | Mutating release action; refuses stale/wrong-HEAD deployment evidence, verifies app release sources against runtime evidence, records `promotedImages`, and force-promotes `cas-gateway`, `cas-console-plugin`, `cas-knowledge-engine`, and digest-pinned `cas-knowledge-postgres` to local `v0.1.4` ImageStreamTags |
 | `npm run verify:pbs:preflight:shadow` | PASS/WARN | Render/config checks pass for `pbs-shadow`; current CRC warns because external `playbookstudio` namespace/service and optional `cas-pbs-auth` are absent |
 
-Latest CRC `v0.1.4` release image references:
-
-```text
-cas-gateway@sha256:2b9ad1fadb5f465e0ea730667fd1e71b39512877f3610e7a7b2c1ab6e9b92689
-cas-console-plugin@sha256:7b0331eff2f7dbf91bce1f977f08f88e86f7c81e5f115e669d3cbd0830028c68
-cas-knowledge-engine@sha256:b986a6da1a2e41c95239a6ca73677a34e030e456c24fcb2ec63c9f95e5ebefa8
-cas-knowledge-postgres@sha256:9073dff8ba54ee8cefcfec5bc2a1269fc9f3aeecbd431eb892549d9b83dc1325
-```
+Current CRC `v0.1.4` release image references are intentionally not duplicated in this tracked document. The source of truth is ignored evidence under `test-results/cas-release-images.json`, specifically `branch`, `head`, `status`, and `promotedImages`.
 
 Local JSON evidence was written under ignored `test-results/`:
 

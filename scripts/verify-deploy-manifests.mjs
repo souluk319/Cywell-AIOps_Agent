@@ -1131,10 +1131,18 @@ for (const file of files) {
         "release-crc:verified-evidence-bound",
         text.includes("CAS_RELEASE_EVIDENCE") &&
           text.includes("cas-crc-deployment.json") &&
+          text.includes("CAS_RELEASE_ALLOW_STALE_EVIDENCE") &&
+          text.includes("CAS_RELEASE_EVIDENCE_MAX_AGE_HOURS") &&
           text.includes("verifiedImages") &&
           text.includes("assertSourceMatchesDeploymentEvidence") &&
+          text.includes("current head is") &&
+          text.includes("namespace") &&
+          text.includes("missing verified digest evidence") &&
+          text.includes("promotedImages") &&
+          text.includes("normalizedExpected") &&
+          text.includes("actualDigest === normalizedExpected") &&
           text.includes("differs from verified CRC deployment digest"),
-        "CRC release promotion refuses sources that differ from verified CRC deployment digest evidence"
+        "CRC release promotion refuses stale evidence, unverified app sources, or release evidence that is not tied to verified CRC deployment digests"
       );
     }
     if (file.includes("verify-crc-deployment")) {
@@ -1217,6 +1225,13 @@ for (const file of files) {
         text.includes("cluster:applied-knowledge-ingress-union-scoped") &&
         text.includes("liveDatabaseUrlUsesService") &&
         text.includes("image.dockerImageReference") &&
+        text.includes("digestPinnedImageReference") &&
+        text.includes("CAS_RELEASE_IMAGES_EVIDENCE") &&
+        text.includes("loadReleaseImagesEvidence") &&
+        text.includes("promotedImages") &&
+        text.includes("cluster:release-image-evidence:") &&
+        text.includes("must match promoted evidence digest") &&
+        text.includes("must resolve to image.dockerImageReference with @sha256:") &&
         text.includes("cluster:pbs-runtime-ready-pods") &&
         text.includes("cluster:gateway-kubernetes-api-egress") &&
         text.includes("cluster:release-image:") &&

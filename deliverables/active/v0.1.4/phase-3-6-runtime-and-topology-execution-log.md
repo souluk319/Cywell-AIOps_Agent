@@ -359,6 +359,27 @@ Historical verified results at this step:
 - `npm run verify:pbs:cutover`: expected `FAIL`; `CAS_PBS_BASE_URL` is not configured
 - `npm run verify:pbs:cutover:cluster`: expected `FAIL`; current CRC has no `playbookstudio` namespace/service, no `cas-pbs-auth`, no `cas-knowledge-postgres-live`, still runs `:dev` base images/provider, has legacy `cas-knowledge-postgres` dev Secret, and has not applied `cas-knowledge-engine-pbs-egress`
 
+## Latest Update - Local Vault Graph and Head-Bound Release Evidence
+
+Implemented in this pass:
+
+- Local Wiki Vault now extracts `[[wikilinks]]`, `#tags`, URLs, concepts, graph relations, backlinks, selected context, and selected upload metadata from CAS uploads and wiki notes.
+- Local RAG now attaches and cites Wiki Vault context, including wiki-only facts that are not present in uploaded document chunks.
+- Local topology now exposes upload document nodes, wiki-note nodes, wikilink/tag/concept nodes, relation edges, degree/weight signals, and PBS-style summary counts.
+- CRC release promotion now rejects stale or wrong-HEAD deployment evidence, enforces verified app source digests, records `promotedImages`, and separates Postgres external verified digest from the internal promoted ImageStream digest.
+- Strict PBS live preflight now requires current release image evidence and compares applied release ImageStreamTag digests to the promoted evidence digest.
+
+Verification in this pass:
+
+- `npm run verify`: `PASS`
+- `npm run verify:knowledge-engine`: `PASS`, 78 checks
+- `npm run verify:console:topology-dom`: `PASS`, 31 checks
+- `npm run verify:deploy:manifests`: `PASS`, 257 checks
+
+Operational note:
+
+- Because CRC deployment and release evidence is now tied to the current git `head`, `npm run deploy:crc` and `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` must be rerun after the final tracked commit for this pass.
+
 ## Current Update - PBS Live Response Scope Hardening
 
 Implemented after the latest parallel review pass:
