@@ -60,13 +60,32 @@ const lightspeedLauncherSelectors = [
   '[data-test="lightspeed-launcher-button"]',
   '[data-test="lightspeed-chat-button"]',
   '[data-test="ols-chatbot-button"]',
-  '[aria-label="OpenShift Lightspeed"]',
-  '[aria-label="Lightspeed"]',
-  '[title="OpenShift Lightspeed"]',
-  '[title="Lightspeed"]',
+  '[data-test*="lightspeed" i]',
+  '[data-test*="ols-chatbot" i]',
+  '[data-test*="openshift-lightspeed" i]',
+  '[aria-label*="Lightspeed" i]',
+  '[title*="Lightspeed" i]',
+  '[id*="lightspeed" i]',
+  '[id*="ols-chatbot" i]',
+  '[class*="lightspeed" i]',
+  '[class*="ols-chatbot" i]',
   ".ols-chatbot-button",
   "#ols-chatbot-button"
 ];
+const lightspeedLauncherRootSelector = [
+  "button",
+  '[role="button"]',
+  "a",
+  '[data-test*="launcher" i]',
+  '[data-test*="lightspeed" i]',
+  '[data-test*="ols-chatbot" i]',
+  '[data-test*="openshift-lightspeed" i]',
+  '[id*="lightspeed" i]',
+  '[id*="ols-chatbot" i]',
+  '[class*="launcher" i]',
+  '[class*="lightspeed" i]',
+  '[class*="ols-chatbot" i]'
+].join(",");
 
 const styles = `
 .cas-launcher-root {
@@ -455,14 +474,15 @@ function CASLauncher() {
     const suppressLightspeedLaunchers = () => {
       for (const selector of lightspeedLauncherSelectors) {
         document.querySelectorAll<HTMLElement>(selector).forEach((element) => {
-          if (element.closest(".cas-launcher-root") || suppressed.has(element)) return;
-          suppressed.set(element, {
-            display: element.style.getPropertyValue("display"),
-            ariaHidden: element.getAttribute("aria-hidden")
+          const launcher = element.closest<HTMLElement>(lightspeedLauncherRootSelector) ?? element;
+          if (launcher.closest(".cas-launcher-root") || suppressed.has(launcher)) return;
+          suppressed.set(launcher, {
+            display: launcher.style.getPropertyValue("display"),
+            ariaHidden: launcher.getAttribute("aria-hidden")
           });
-          element.style.setProperty("display", "none", "important");
-          element.setAttribute("aria-hidden", "true");
-          element.setAttribute("data-cas-suppressed-lightspeed", "true");
+          launcher.style.setProperty("display", "none", "important");
+          launcher.setAttribute("aria-hidden", "true");
+          launcher.setAttribute("data-cas-suppressed-lightspeed", "true");
         });
       }
     };

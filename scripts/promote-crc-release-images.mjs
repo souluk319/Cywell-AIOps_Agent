@@ -8,6 +8,7 @@ const releaseEvidencePath = process.env.CAS_RELEASE_EVIDENCE || "test-results/ca
 const forceRelease = ["1", "true", "yes", "y", "on"].includes(String(process.env.CAS_RELEASE_FORCE ?? "").trim().toLowerCase());
 const allowStaleEvidence = ["1", "true", "yes", "y", "on"].includes(String(process.env.CAS_RELEASE_ALLOW_STALE_EVIDENCE ?? "").trim().toLowerCase());
 const evidenceMaxAgeHours = Number(process.env.CAS_RELEASE_EVIDENCE_MAX_AGE_HOURS ?? "24");
+const approvedCywellRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/Cywell-AIOps_Agent(?:\.git)?$/i;
 const appImageStreams = ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine"];
 const postgresImageStream = "cas-knowledge-postgres";
 const releaseImageStreams = [...appImageStreams, postgresImageStream];
@@ -29,6 +30,22 @@ function run(command, args, options = {}) {
     throw new Error(`${command} ${args.join(" ")} failed\n${detail}`);
   }
   return result.stdout?.trim() ?? "";
+}
+
+function runResult(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    stdio: options.stdio ?? "pipe",
+    timeout: options.timeoutMs ?? 60000,
+    windowsHide: true
+  });
+  return {
+    ok: result.status === 0,
+    status: result.status ?? 1,
+    stdout: result.stdout?.trim() ?? "",
+    stderr: (result.stderr ?? result.error?.message ?? "").trim()
+  };
 }
 
 function pass(id, detail, extra = {}) {
@@ -60,6 +77,43 @@ function currentGitBranch() {
   return run("git", ["branch", "--show-current"]);
 }
 
+function currentCywellRemoteProof() {
+  const fullHead = currentGitFullHead();
+  const remote = runResult("git", ["config", "--get", "remote.origin.url"], { timeoutMs: 10000 });
+  const proof = {
+    remoteOriginUrl: remote.stdout,
+    remoteApproved: approvedCywellRemotePattern.test(remote.stdout),
+    remoteFetchOk: false,
+    remoteContainsHead: false,
+    remoteRefsContainingHead: [],
+    remoteVerifiedAt: checkedAt,
+    remoteVerificationError: ""
+  };
+  if (!proof.remoteApproved) {
+    proof.remoteVerificationError = `remote.origin.url is not approved: ${remote.stdout || remote.stderr || "missing"}`;
+    return proof;
+  }
+  const fetch = runResult("git", ["fetch", "--quiet", "--prune", "origin"], { timeoutMs: 60000 });
+  proof.remoteFetchOk = fetch.ok;
+  if (!fetch.ok) {
+    proof.remoteVerificationError = fetch.stderr || "git fetch --prune origin failed";
+    return proof;
+  }
+  const contains = runResult("git", ["branch", "-r", "--contains", fullHead], { timeoutMs: 20000 });
+  if (!contains.ok) {
+    proof.remoteVerificationError = contains.stderr || `git branch -r --contains ${fullHead} failed`;
+    return proof;
+  }
+  const refs = contains.stdout
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\*\s*/, "").trim())
+    .filter((line) => line.startsWith("origin/") && !line.includes(" -> "));
+  proof.remoteRefsContainingHead = refs;
+  proof.remoteContainsHead = refs.length > 0;
+  if (!proof.remoteContainsHead) proof.remoteVerificationError = `no fetched origin branch contains ${fullHead}`;
+  return proof;
+}
+
 function currentClusterIdentity() {
   return {
     context: run("oc", ["config", "current-context"]),
@@ -85,6 +139,9 @@ function extractDigest(value) {
 }
 
 function loadDeploymentEvidence() {
+  if (allowStaleEvidence) {
+    throw new Error("CAS_RELEASE_ALLOW_STALE_EVIDENCE is not supported for v0.1.4 release promotion; rerun npm run deploy:crc from the current clean head instead");
+  }
   const evidence = JSON.parse(readFileSync(releaseEvidencePath, "utf8"));
   if (evidence.status !== "PASS") {
     throw new Error(`${releaseEvidencePath} is not PASS; run npm run deploy:crc before release promotion`);
@@ -96,17 +153,17 @@ function loadDeploymentEvidence() {
   const head = currentGitHead();
   const evidenceFullHead = String(evidence.fullHead ?? "");
   const fullHead = currentGitFullHead();
-  if (evidenceHead !== head && !allowStaleEvidence) {
-    throw new Error(`${releaseEvidencePath} was generated for head ${evidenceHead || "missing"}, current head is ${head}; rerun npm run deploy:crc or set CAS_RELEASE_ALLOW_STALE_EVIDENCE=true intentionally`);
+  if (evidenceHead !== head) {
+    throw new Error(`${releaseEvidencePath} was generated for head ${evidenceHead || "missing"}, current head is ${head}; rerun npm run deploy:crc`);
   }
-  if (evidenceFullHead !== fullHead && !allowStaleEvidence) {
-    throw new Error(`${releaseEvidencePath} fullHead ${evidenceFullHead || "missing"} does not match current head ${fullHead}; rerun npm run deploy:crc or set CAS_RELEASE_ALLOW_STALE_EVIDENCE=true intentionally`);
+  if (evidenceFullHead !== fullHead) {
+    throw new Error(`${releaseEvidencePath} fullHead ${evidenceFullHead || "missing"} does not match current head ${fullHead}; rerun npm run deploy:crc`);
   }
-  if (evidence.treeStatus !== "clean" && !allowStaleEvidence) {
+  if (evidence.treeStatus !== "clean") {
     throw new Error(`${releaseEvidencePath} was generated from a ${evidence.treeStatus || "missing"} git tree; rerun npm run deploy:crc from a clean committed tree`);
   }
   const actualClusterIdentity = currentClusterIdentity();
-  if (!clusterIdentityMatches(evidence.clusterIdentity, actualClusterIdentity) && !allowStaleEvidence) {
+  if (!clusterIdentityMatches(evidence.clusterIdentity, actualClusterIdentity)) {
     throw new Error(`${releaseEvidencePath} cluster identity does not match the current cluster; rerun npm run deploy:crc against this cluster`);
   }
   const checkedAtMs = Date.parse(evidence.checkedAt ?? "");
@@ -115,8 +172,8 @@ function loadDeploymentEvidence() {
   }
   if (Number.isFinite(evidenceMaxAgeHours) && evidenceMaxAgeHours > 0) {
     const ageHours = (Date.now() - checkedAtMs) / 3600000;
-    if (ageHours > evidenceMaxAgeHours && !allowStaleEvidence) {
-      throw new Error(`${releaseEvidencePath} is ${ageHours.toFixed(1)}h old; rerun npm run deploy:crc or set CAS_RELEASE_ALLOW_STALE_EVIDENCE=true intentionally`);
+    if (ageHours > evidenceMaxAgeHours) {
+      throw new Error(`${releaseEvidencePath} is ${ageHours.toFixed(1)}h old; rerun npm run deploy:crc`);
     }
   }
   if (!evidence.verifiedImages || typeof evidence.verifiedImages !== "object") {
@@ -128,10 +185,16 @@ function loadDeploymentEvidence() {
       throw new Error(`${releaseEvidencePath} missing verified digest evidence for ${name}`);
     }
   }
+  const cywellSource = currentCywellRemoteProof();
+  if (!cywellSource.remoteApproved || !cywellSource.remoteFetchOk || !cywellSource.remoteContainsHead) {
+    throw new Error(`current Cywell HEAD must be present in an approved fetched origin/* ref before release promotion: ${cywellSource.remoteVerificationError || "missing remote proof"}`);
+  }
+  evidence.cywellSource = cywellSource;
   pass("release:evidence:crc-deployment", `loaded PASS CRC deployment evidence from ${releaseEvidencePath}`, {
     evidenceCheckedAt: evidence.checkedAt,
     evidenceHead: evidence.head,
-    staleEvidenceAllowed: allowStaleEvidence
+    staleEvidenceAllowed: allowStaleEvidence,
+    cywellSource
   });
   return evidence;
 }
@@ -310,6 +373,7 @@ try {
         sourceEvidenceTreeStatus: deploymentEvidence?.treeStatus ?? "",
         sourceEvidenceCheckedAt: deploymentEvidence?.checkedAt ?? "",
         staleEvidenceAllowed: allowStaleEvidence,
+        cywellSource: deploymentEvidence?.cywellSource ?? {},
         clusterIdentity: currentClusterIdentity(),
         sourceClusterIdentity: deploymentEvidence?.clusterIdentity ?? {},
         branch: currentGitBranch(),
@@ -345,6 +409,7 @@ try {
         sourceEvidenceTreeStatus: deploymentEvidence?.treeStatus ?? "",
         sourceEvidenceCheckedAt: deploymentEvidence?.checkedAt ?? "",
         staleEvidenceAllowed: allowStaleEvidence,
+        cywellSource: deploymentEvidence?.cywellSource ?? {},
         clusterIdentity: (() => {
           try {
             return currentClusterIdentity();

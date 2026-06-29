@@ -1214,15 +1214,16 @@ for (const file of files) {
       }
       if (
         text.includes('"verify:release:pbs-live"') &&
+        text.includes('"verify:release": "npm run verify:release:pbs-live"') &&
         text.includes("verify:release:source-pinning") &&
         text.includes("verify:pbs:preflight:live:site:preapply") &&
         text.includes("render-pbs-cutover-bundle.mjs --require-live-ready") &&
         text.includes("verify:pbs:preflight:live:site") &&
         text.includes("--cutover --cluster")
       ) {
-        pass("package:pbs-live-release-script", "package.json exposes non-skipping PBS live release gate with source pinning and live-ready bundle proof");
+        pass("package:pbs-live-release-script", "package.json exposes non-skipping PBS live release gate with source pinning, a top-level release alias, and live-ready bundle proof");
       } else {
-        fail("package:pbs-live-release-script", "package.json must expose non-skipping PBS live release gate through source pinning, generated-site preapply, live-ready bundle proof, and cluster cutover smoke");
+        fail("package:pbs-live-release-script", "package.json must expose non-skipping PBS live release gate through verify:release, source pinning, generated-site preapply, live-ready bundle proof, and cluster cutover smoke");
       }
       if (
         text.includes('"verify:release:source-pinning"') &&
@@ -1365,8 +1366,10 @@ for (const file of files) {
           text.includes("fullGitSha") &&
           text.includes("remoteOriginUrl") &&
           text.includes("approvedRemoteUrl") &&
+          text.includes("strictApprovedRemotePattern") &&
           text.includes("remoteRefsContainingExpectedHead") &&
           text.includes("remoteContainsExpectedHead") &&
+          text.includes('"--prune"') &&
           text.includes("git-remote-approved") &&
           text.includes("git-head-expected-remote-ref") &&
           text.includes("git-head-expected-full-sha") &&
@@ -1406,9 +1409,16 @@ for (const file of files) {
           text.includes("currentHeadMatches") &&
           text.includes("git-tree-clean") &&
           text.includes("sourceContractPinned") &&
+          text.includes("sourceContractTimingValid") &&
+          text.includes("releaseImagesCywellSourcePinned") &&
+          text.includes("releaseImages:cywell-source-pinned") &&
           text.includes("approvedPbsRemoteUrl") &&
+          text.includes("strictApprovedPbsRemotePattern") &&
+          text.includes("approvedCywellRemotePattern") &&
+          text.includes("remoteFetchOk") &&
           text.includes("remoteContainsExpectedHead") &&
           text.includes("remoteRefsContainingExpectedHead") &&
+          text.includes("maxSourceProofAgeMinutes") &&
           text.includes("allow-dirty-live-ready") &&
           text.includes(":clean-source") &&
           text.includes("requiredPbsContractFiles") &&
@@ -1423,6 +1433,8 @@ for (const file of files) {
           text.includes("renderedSiteOverlayHash") &&
           text.includes("evidence.renderedSiteOverlaySha256 === livePrereqsRender?.renderedSiteOverlaySha256") &&
           text.includes("clusterEvidenceFailures") &&
+          text.includes("CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON") &&
+          text.includes("expected-live-cluster-required") &&
           text.includes("clusterIdentityMatches") &&
           text.includes("expectedLivePrereqOutputDir") &&
           text.includes("underOutputDir") &&
@@ -1440,7 +1452,7 @@ for (const file of files) {
           text.includes("Compatibility copy") &&
           text.includes("cas-pbs-cutover-bundle.json") &&
           text.includes("--require-live-ready"),
-        "PBS cutover bundle renderer checks current-head clean evidence, approved PBS remote/source pinning, runtime source stamps, real-render hashes, artifact hashes, canonical bundle output, compatibility copy output, and live-ready enforcement",
+        "PBS cutover bundle renderer checks current-head clean evidence, approved PBS remote/source pinning, fresh remote fetch proof, runtime source stamps, real-render hashes, artifact hashes, canonical bundle output, compatibility copy output, and live-ready enforcement",
         "PBS cutover bundle renderer must bind bundle evidence to current clean source, reject dirty/unpinned PBS source evidence, reject self-test prereq evidence, and support strict live-ready mode"
       );
       expect(
@@ -1455,16 +1467,18 @@ for (const file of files) {
           text.includes("self-test-preapply-hash-mismatch-rejected") &&
           text.includes("self-test-aged-preapply-rejected") &&
           text.includes("self-test-cluster-mismatch-rejected") &&
+          text.includes("self-test-cywell-source-remote-proof-rejected") &&
           text.includes("self-test-runtime-source-mismatch-rejected") &&
           text.includes("self-test-dirty-local-evidence-rejected") &&
           text.includes("self-test-dirty-source-rejected") &&
           text.includes("self-test-source-contract-hash-set-rejected") &&
           text.includes("self-test-source-remote-proof-rejected") &&
+          text.includes("self-test-stale-source-proof-rejected") &&
           text.includes("self-test-prereq-self-test-rejected") &&
           text.includes("self-test-prereq-output-dir-rejected") &&
           text.includes("self-test-fail-retains-external-blockers"),
-        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding/freshness, runtime source revision binding, source hash shape, remote ref proof, cluster mismatch rejection, dirty local/source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention",
-        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding/freshness, runtime source revision binding, source hash shape, remote ref proof, cluster mismatch rejection, dirty local/source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention"
+        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding/freshness, runtime source revision binding, source hash shape, PBS and Cywell remote ref proof, stale source proof rejection, cluster mismatch rejection, dirty local/source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention",
+        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding/freshness, runtime source revision binding, source hash shape, PBS and Cywell remote ref proof, stale source proof rejection, cluster mismatch rejection, dirty local/source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention"
       );
     }
     if (file.includes("verify-console-launcher-dom")) {
@@ -1475,7 +1489,10 @@ for (const file of files) {
           text.includes("cas-launcher-button") &&
           text.includes("console-launcher-dom:bottom-right-fixed") &&
           text.includes("console-launcher-dom:native-lightspeed-suppressed") &&
+          text.includes("console-launcher-dom:native-lightspeed-variants-suppressed") &&
+          text.includes("console-launcher-dom:unrelated-controls-not-suppressed") &&
           text.includes("lightspeed-launcher-button") &&
+          text.includes("late-child-title-root") &&
           text.includes("console-launcher-dom:no-duplicate-after-remount") &&
           text.includes("/api/aiops/brainz") &&
           text.includes("/api/aiops/query") &&
@@ -1513,6 +1530,11 @@ for (const file of files) {
           text.includes("CAS_RELEASE_EVIDENCE") &&
           text.includes("cas-crc-deployment.json") &&
           text.includes("CAS_RELEASE_ALLOW_STALE_EVIDENCE") &&
+          text.includes("not supported for v0.1.4 release promotion") &&
+          text.includes("currentCywellRemoteProof") &&
+          text.includes("Cywell-AIOps_Agent") &&
+          text.includes('"--prune"') &&
+          text.includes("remoteContainsHead") &&
           text.includes("CAS_RELEASE_EVIDENCE_MAX_AGE_HOURS") &&
           text.includes("currentGitFullHead") &&
           text.includes("currentClusterIdentity") &&
@@ -1522,6 +1544,7 @@ for (const file of files) {
           text.includes("sourceEvidenceTreeStatus") &&
           text.includes("sourceClusterIdentity") &&
           text.includes("sourceEvidenceCheckedAt") &&
+          text.includes("cywellSource") &&
           text.includes("staleEvidenceAllowed") &&
           text.includes("verifiedImages") &&
           text.includes("assertSourceMatchesDeploymentEvidence") &&
@@ -1532,7 +1555,7 @@ for (const file of files) {
           text.includes("normalizedExpected") &&
           text.includes("actualDigest === normalizedExpected") &&
           text.includes("differs from verified CRC deployment digest"),
-        "CRC release promotion refuses stale evidence, dirty-source evidence, unverified app sources, or release evidence that is not tied to verified CRC deployment digests"
+        "CRC release promotion refuses stale evidence, dirty-source evidence, stale-evidence overrides, unverified app sources, or release evidence that is not tied to verified CRC deployment digests"
       );
     }
     if (file.includes("verify-crc-deployment")) {
@@ -1629,6 +1652,14 @@ for (const file of files) {
       if (
         text.includes("CAS_PBS_REQUIRE_RUNTIME_READY") &&
         text.includes("CAS_PBS_REQUIRE_CORPUS_READY") &&
+        text.includes("strictPinnedSourceEvidenceValid") &&
+        text.includes("cluster:pinned-pbs-source-evidence") &&
+        text.includes("releaseEvidenceCywellSourceValid") &&
+        text.includes("approvedCywellRemotePattern") &&
+        text.includes("remoteFetchOk") &&
+        text.includes("strictApprovedPbsRemotePattern") &&
+        text.includes("requiredPbsContractFiles") &&
+        text.includes("maxPinnedSourceEvidenceAgeMinutes") &&
         text.includes("sha256Text") &&
         text.includes("renderedSiteOverlaySha256") &&
         text.includes("cas-knowledge-postgres-live") &&
@@ -1703,9 +1734,9 @@ for (const file of files) {
         text.includes("skipApplied") &&
         text.includes("pbs-live")
       ) {
-        pass("pbs-preflight:live-readiness-gate", "PBS preflight checks overlays, live runtime health, corpus, Secret, release images, Postgres image pinning, applied policies, API egress, and PBS pod-label gates");
+        pass("pbs-preflight:live-readiness-gate", "PBS preflight checks overlays, strict pinned PBS source evidence, live runtime health, corpus, Secret, release images, Postgres image pinning, applied policies, API egress, and PBS pod-label gates");
       } else {
-        fail("pbs-preflight:live-readiness-gate", "PBS preflight must check overlays, live runtime health, corpus, Secret, release images, Postgres image pinning, applied policies, API egress, and PBS pod-label gates");
+        fail("pbs-preflight:live-readiness-gate", "PBS preflight must check overlays, strict pinned PBS source evidence, live runtime health, corpus, Secret, release images, Postgres image pinning, applied policies, API egress, and PBS pod-label gates");
       }
     }
     if (file.includes("21-lightspeed-ingress")) {

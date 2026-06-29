@@ -18,12 +18,11 @@ const selfTest = args.has("--self-test");
 const checkedAt = new Date().toISOString();
 const maxLivePreapplyAgeMinutesInput = Number(process.env.CAS_PBS_CUTOVER_MAX_PREAPPLY_AGE_MINUTES || 120);
 const maxLivePreapplyAgeMinutes = Number.isFinite(maxLivePreapplyAgeMinutesInput) && maxLivePreapplyAgeMinutesInput > 0 ? maxLivePreapplyAgeMinutesInput : 120;
-const defaultApprovedPbsRemotePattern = "github\\.com[:/]souluk319/PBS_DEV_Part3(?:\\.git)?$";
-const approvedPbsRemotePatterns = (process.env.CAS_PBS_APPROVED_REMOTE_PATTERN || defaultApprovedPbsRemotePattern)
-  .split(",")
-  .map((pattern) => pattern.trim())
-  .filter(Boolean)
-  .map((pattern) => new RegExp(pattern, "i"));
+const maxSourceProofAgeMinutesInput = Number(process.env.CAS_PBS_CUTOVER_MAX_SOURCE_PROOF_AGE_MINUTES || maxLivePreapplyAgeMinutes);
+const maxSourceProofAgeMinutes = Number.isFinite(maxSourceProofAgeMinutesInput) && maxSourceProofAgeMinutesInput > 0 ? maxSourceProofAgeMinutesInput : maxLivePreapplyAgeMinutes;
+const expectedLiveClusterIdentityJson = String(process.env.CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON || "").trim();
+const strictApprovedPbsRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/PBS_DEV_Part3(?:\.git)?$/i;
+const approvedCywellRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/Cywell-AIOps_Agent(?:\.git)?$/i;
 
 const requiredLocalEvidence = [
   ["crcDeployment", "cas-crc-deployment.json", "CRC deployment evidence"],
@@ -170,6 +169,7 @@ function readEvidence(baseDir, [key, fileName, label]) {
     namespace: json.namespace,
     releaseTag: json.releaseTag,
     sourceClusterIdentity: json.sourceClusterIdentity,
+    cywellSource: json.cywellSource,
     outputDir: json.outputDir,
     overlay: json.overlay,
     overlayPath: json.overlayPath,
@@ -276,6 +276,15 @@ function clusterIdentitySummary(identity = {}) {
   return clusterIdentityFields.map((field) => `${field}=${identity[field] ?? "missing"}`).join(", ");
 }
 
+function expectedLiveClusterIdentity() {
+  if (!expectedLiveClusterIdentityJson) return null;
+  try {
+    return JSON.parse(expectedLiveClusterIdentityJson);
+  } catch {
+    return { invalid: true };
+  }
+}
+
 function evidenceTimeMs(evidence) {
   const value = Date.parse(String(evidence?.checkedAt ?? ""));
   return Number.isFinite(value) ? value : 0;
@@ -288,6 +297,34 @@ function livePreapplyTimingValid(livePreapply, livePrereqsRender, releaseImages)
   if (Date.parse(checkedAt) - preapplyTime > maxAgeMs) return false;
   const prerequisiteTimes = [livePrereqsRender, releaseImages].map(evidenceTimeMs).filter(Boolean);
   return prerequisiteTimes.every((time) => preapplyTime >= time);
+}
+
+function sourceContractTimingValid(evidence) {
+  const sourceTime = evidenceTimeMs(evidence);
+  const remoteTime = Date.parse(String(evidence?.pbsSource?.remoteVerifiedAt ?? ""));
+  if (!sourceTime || !Number.isFinite(remoteTime)) return false;
+  const maxAgeMs = Math.max(1, maxSourceProofAgeMinutes) * 60 * 1000;
+  const now = Date.parse(checkedAt);
+  if (now - sourceTime > maxAgeMs || now - remoteTime > maxAgeMs) return false;
+  const oneMinuteMs = 60 * 1000;
+  return Math.abs(remoteTime - sourceTime) <= oneMinuteMs;
+}
+
+function releaseImagesCywellSourcePinned(evidence) {
+  const source = evidence?.cywellSource ?? {};
+  const remoteTime = evidenceTimeMs({ checkedAt: source.remoteVerifiedAt });
+  const maxAgeMs = Math.max(1, maxSourceProofAgeMinutes) * 60 * 1000;
+  return Boolean(
+    source.remoteApproved === true &&
+      source.remoteFetchOk === true &&
+      source.remoteContainsHead === true &&
+      Array.isArray(source.remoteRefsContainingHead) &&
+      source.remoteRefsContainingHead.some((ref) => typeof ref === "string" && ref.startsWith("origin/")) &&
+      typeof source.remoteVerifiedAt === "string" &&
+      remoteTime &&
+      Date.parse(checkedAt) - remoteTime <= maxAgeMs &&
+      approvedCywellRemotePattern.test(String(source.remoteOriginUrl ?? "").trim())
+  );
 }
 
 function clusterEvidenceFailures(artifacts) {
@@ -306,6 +343,23 @@ function clusterEvidenceFailures(artifacts) {
     });
     return failures;
   }
+  const expectedClusterIdentity = expectedLiveClusterIdentity();
+  if (requireLiveReady && !expectedClusterIdentityJson) {
+    failures.push({
+      id: "cutover-bundle:expected-live-cluster-required",
+      detail: "CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON must be set for --require-live-ready so live cutover evidence cannot be assembled for the wrong cluster or namespace"
+    });
+  } else if (expectedClusterIdentity?.invalid || (expectedClusterIdentity && !completeClusterIdentity(expectedClusterIdentity))) {
+    failures.push({
+      id: "cutover-bundle:expected-live-cluster-invalid",
+      detail: "CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON must be valid JSON with server, namespace, namespaceUid, and infrastructureName"
+    });
+  } else if (expectedClusterIdentity && !clusterIdentityMatches(expectedClusterIdentity, anchor.clusterIdentity)) {
+    failures.push({
+      id: "cutover-bundle:expected-live-cluster",
+      detail: `${anchor.fileName} clusterIdentity (${clusterIdentitySummary(anchor.clusterIdentity)}) does not match expected live cluster (${clusterIdentitySummary(expectedClusterIdentity)})`
+    });
+  }
   for (const [key, evidence] of clusterArtifacts) {
     if (!completeClusterIdentity(evidence.clusterIdentity)) {
       failures.push({
@@ -321,6 +375,12 @@ function clusterEvidenceFailures(artifacts) {
   }
   const releaseImages = artifacts.releaseImages;
   if (releaseImages?.exists) {
+    if (!releaseImagesCywellSourcePinned(releaseImages)) {
+      failures.push({
+        id: "cutover-bundle:releaseImages:cywell-source-pinned",
+        detail: `${releaseImages.fileName} must prove the Cywell release HEAD is contained in an approved fetched origin/* ref before live cutover`
+      });
+    }
     if (!completeClusterIdentity(releaseImages.sourceClusterIdentity)) {
       failures.push({
         id: "cutover-bundle:releaseImages:source-cluster-identity",
@@ -437,17 +497,19 @@ function sourceContractPinned(evidence) {
       /^[a-f0-9]{40}$/i.test(String(pbsSource?.fullHead ?? "")) &&
       pbsSource.fullHead === pbsSource.expectedHead &&
       approvedPbsRemoteUrl(pbsSource?.remoteOriginUrl) &&
+      pbsSource.remoteFetchOk === true &&
       pbsSource.remoteContainsExpectedHead === true &&
       Array.isArray(pbsSource.remoteRefsContainingExpectedHead) &&
       pbsSource.remoteRefsContainingExpectedHead.some((ref) => typeof ref === "string" && ref.startsWith("origin/")) &&
       typeof pbsSource.remoteVerifiedAt === "string" &&
+      sourceContractTimingValid(evidence) &&
       exactHashSet
   );
 }
 
 function approvedPbsRemoteUrl(value) {
   const remote = String(value ?? "").trim();
-  return Boolean(remote && approvedPbsRemotePatterns.some((pattern) => pattern.test(remote)));
+  return Boolean(remote && strictApprovedPbsRemotePattern.test(remote));
 }
 
 function livePreapplyRuntimeSourceMatches(livePreapply, sourceContract) {
@@ -504,7 +566,7 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
   if (sourceContract?.exists && !sourceContractPinned(sourceContract)) {
     localGateFailures.push({
       id: "cutover-bundle:source-contract-pinned",
-      detail: "cas-pbs-source-contract-pinned.json must come from verify:release:source-pinning with clean PBS source, CAS_PBS_SOURCE_HEAD, approved remote identity, and approved remote ref containment proof"
+      detail: `cas-pbs-source-contract-pinned.json must come from verify:release:source-pinning with clean PBS source, CAS_PBS_SOURCE_HEAD, approved remote identity, successful fresh remote fetch, and approved remote ref containment proof no older than ${maxSourceProofAgeMinutes} minutes`
     });
   }
 
@@ -647,7 +709,15 @@ async function runSelfTest() {
       sourceClusterIdentity: clusterIdentity,
       status: "PASS",
       summary: { total: 1, passed: 1, failed: 0 },
-      checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+      checks: [{ status: "PASS", id: "ok", detail: "ok" }],
+      cywellSource: {
+        remoteOriginUrl: "git@github.com:souluk319/Cywell-AIOps_Agent.git",
+        remoteApproved: true,
+        remoteFetchOk: true,
+        remoteContainsHead: true,
+        remoteRefsContainingHead: ["origin/v0.1.4"],
+        remoteVerifiedAt: checkedAt
+      }
     };
     const pbsFullHead = "d".repeat(40);
     const pbsShortHead = pbsFullHead.slice(0, 7);
@@ -661,6 +731,7 @@ async function runSelfTest() {
       remoteContainsExpectedHead: true,
       remoteRefsContainingExpectedHead: ["origin/main"],
       remoteVerifiedAt: checkedAt,
+      remoteFetchOk: true,
       treeStatus: "clean",
       requireCleanSource: true,
       expectedHead: pbsFullHead,
@@ -820,6 +891,27 @@ async function runSelfTest() {
         "fixture rejects live preapply evidence from a different cluster identity"
       ],
       [
+        "cutover-bundle:self-test-cywell-source-remote-proof-rejected",
+        (() => {
+          write("cas-release-images.json", {
+            ...base,
+            cywellSource: {
+              remoteOriginUrl: "git@github.com:souluk319/Cywell-AIOps_Agent.git",
+              remoteApproved: true,
+              remoteFetchOk: false,
+              remoteContainsHead: false,
+              remoteRefsContainingHead: [],
+              remoteVerifiedAt: checkedAt,
+              remoteVerificationError: "no fetched origin branch contains the Cywell release head"
+            }
+          });
+          const unproven = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          write("cas-release-images.json", base);
+          return unproven.status === "FAIL" && unproven.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:releaseImages:cywell-source-pinned");
+        })(),
+        "fixture rejects release image evidence without approved Cywell remote ref containment proof"
+      ],
+      [
         "cutover-bundle:self-test-runtime-source-mismatch-rejected",
         (() => {
           writeLivePreapplyEvidence({
@@ -944,6 +1036,32 @@ async function runSelfTest() {
           return unproven.status === "FAIL" && unproven.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:source-contract-pinned");
         })(),
         "fixture rejects pinned PBS source evidence without approved remote ref containment proof"
+      ],
+      [
+        "cutover-bundle:self-test-stale-source-proof-rejected",
+        (() => {
+          const staleCheckedAt = new Date(Date.parse(checkedAt) - (maxSourceProofAgeMinutes + 5) * 60 * 1000).toISOString();
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            checkedAt: staleCheckedAt,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: pinnedPbsSource({ remoteVerifiedAt: staleCheckedAt }),
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          const stale = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: pinnedPbsSource(),
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          return stale.status === "FAIL" && stale.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:source-contract-pinned");
+        })(),
+        "fixture rejects stale pinned PBS source remote proof"
       ],
       [
         "cutover-bundle:self-test-prereq-self-test-rejected",

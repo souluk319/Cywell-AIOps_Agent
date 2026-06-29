@@ -440,6 +440,12 @@ expectText(
   "knowledge route clears URL-created selected document scope when upload reports have no repair target"
 );
 expectText(
+  "console-knowledge:full-corpus-clears-query-document",
+  knowledgeRouteSource,
+  "clearSelectedDocumentScope(customerIdRef.current)",
+  "knowledge route clears document/note query pins when operators switch to full-corpus scope"
+);
+expectText(
   "console-knowledge:wiki-selected-document",
   knowledgeRouteSource,
   "body: JSON.stringify({ customer_id: customerId, document_id: requestDocumentId || undefined })",

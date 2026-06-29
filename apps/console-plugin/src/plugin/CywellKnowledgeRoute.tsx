@@ -2470,6 +2470,15 @@ export default function CywellKnowledgeRoute() {
 
   const changeScopeMode = React.useCallback(
     (mode: "all" | "selected") => {
+      if (mode === "all") {
+        if (mode !== scopeMode) {
+          invalidateScope();
+          setIsRunning(false);
+          setActionResult(null);
+        }
+        clearSelectedDocumentScope(customerIdRef.current);
+        return;
+      }
       if (mode !== scopeMode) {
         invalidateScope();
         setIsRunning(false);
@@ -2477,7 +2486,7 @@ export default function CywellKnowledgeRoute() {
       }
       setScopeMode(mode);
     },
-    [invalidateScope, scopeMode]
+    [clearSelectedDocumentScope, invalidateScope, scopeMode]
   );
 
   React.useEffect(() => {

@@ -16,7 +16,8 @@ const requireCleanSource = args.has("--require-clean-source") || /^(1|true|yes|y
 const requireExpectedHead = args.has("--require-expected-head") || /^(1|true|yes|y|on)$/i.test(process.env.CAS_PBS_REQUIRE_SOURCE_HEAD || "");
 const expectedSourceHead = String(process.env.CAS_PBS_SOURCE_HEAD || "").trim();
 const selfTest = args.has("--self-test");
-const defaultApprovedRemotePattern = "github\\.com[:/]souluk319/PBS_DEV_Part3(?:\\.git)?$";
+const strictApprovedRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/PBS_DEV_Part3(?:\.git)?$/i;
+const defaultApprovedRemotePattern = "^(?:git@github\\.com:|https://github\\.com/|ssh://git@github\\.com/)souluk319/PBS_DEV_Part3(?:\\.git)?$";
 const approvedRemotePatterns = (process.env.CAS_PBS_APPROVED_REMOTE_PATTERN || defaultApprovedRemotePattern)
   .split(",")
   .map((pattern) => pattern.trim())
@@ -111,6 +112,7 @@ function fullGitSha(value) {
 
 function approvedRemoteUrl(value) {
   const remote = String(value ?? "").trim();
+  if (requireCleanSource && requireExpectedHead) return strictApprovedRemotePattern.test(remote);
   return Boolean(remote && approvedRemotePatterns.some((pattern) => pattern.test(remote)));
 }
 
@@ -126,10 +128,10 @@ function remoteRefsContainingExpectedHead(root, expectedHead) {
     proof.remoteVerificationError = "expected PBS head is not a full 40-character SHA";
     return proof;
   }
-  const fetch = runGitResult(["fetch", "--quiet", "origin"], root, 60000);
+  const fetch = runGitResult(["fetch", "--quiet", "--prune", "origin"], root, 60000);
   proof.remoteFetchOk = fetch.ok;
   if (!fetch.ok) {
-    proof.remoteVerificationError = fetch.stderr || "git fetch origin failed";
+    proof.remoteVerificationError = fetch.stderr || "git fetch --prune origin failed";
     return proof;
   }
   const contains = runGitResult(["branch", "-r", "--contains", expectedHead], root, 20000);

@@ -244,6 +244,63 @@ async function run() {
       "CAS launcher suppresses a pre-existing OpenShift Lightspeed launcher",
       JSON.stringify(lightspeedStyle)
     );
+    await page.evaluate(() => {
+      const unrelatedControls = document.createElement("button");
+      unrelatedControls.setAttribute("data-test", "tools-controls-toolbar");
+      unrelatedControls.textContent = "Tools";
+      document.body.appendChild(unrelatedControls);
+
+      const childTitleButton = document.createElement("button");
+      childTitleButton.setAttribute("data-test", "late-child-title-root");
+      childTitleButton.setAttribute("style", "position: fixed; right: 24px; bottom: 84px;");
+      const child = document.createElement("span");
+      child.setAttribute("title", "OpenShift Lightspeed Assistant");
+      child.textContent = "OLS";
+      childTitleButton.appendChild(child);
+      document.body.appendChild(childTitleButton);
+
+      const classVariant = document.createElement("button");
+      classVariant.setAttribute("data-test", "late-class-variant-root");
+      classVariant.setAttribute("class", "pf-v6-c-button ols-chatbot-button-extra");
+      classVariant.setAttribute("style", "position: fixed; right: 24px; bottom: 144px;");
+      classVariant.textContent = "Ask Lightspeed";
+      document.body.appendChild(classVariant);
+    });
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-test="late-child-title-root"]')?.getAttribute("data-cas-suppressed-lightspeed") === "true" &&
+        document.querySelector('[data-test="late-class-variant-root"]')?.getAttribute("data-cas-suppressed-lightspeed") === "true",
+      undefined,
+      { timeout: 15000 }
+    );
+    const unrelatedStyle = await page.locator('[data-test="tools-controls-toolbar"]').evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return { display: style.display, ariaHidden: element.getAttribute("aria-hidden"), suppressed: element.getAttribute("data-cas-suppressed-lightspeed") };
+    });
+    expect(
+      "console-launcher-dom:unrelated-controls-not-suppressed",
+      unrelatedStyle.display !== "none" && unrelatedStyle.ariaHidden !== "true" && unrelatedStyle.suppressed !== "true",
+      "CAS launcher does not suppress unrelated data-test values containing tools/controls",
+      JSON.stringify(unrelatedStyle)
+    );
+    const lateSuppression = await page.evaluate(() =>
+      ["late-child-title-root", "late-class-variant-root"].map((testId) => {
+        const element = document.querySelector(`[data-test="${testId}"]`);
+        const style = element ? window.getComputedStyle(element) : null;
+        return {
+          testId,
+          display: style?.display,
+          ariaHidden: element?.getAttribute("aria-hidden"),
+          suppressed: element?.getAttribute("data-cas-suppressed-lightspeed")
+        };
+      })
+    );
+    expect(
+      "console-launcher-dom:native-lightspeed-variants-suppressed",
+      lateSuppression.every((item) => item.display === "none" && item.ariaHidden === "true" && item.suppressed === "true"),
+      "CAS launcher suppresses late native Lightspeed variants even when only child title or class variants match",
+      JSON.stringify(lateSuppression)
+    );
     const buttonStyle = await page.locator('[data-test="cas-launcher-button"]').evaluate((element) => {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -335,4 +392,4 @@ if (failures.length > 0) {
   console.error(`Console launcher DOM verification failed with ${failures.length} failures.`);
   process.exit(1);
 }
-console.log("Console launcher DOM verification passed with 9 checks.");
+console.log("Console launcher DOM verification passed with 10 checks.");

@@ -858,6 +858,26 @@ try {
       "late selected-document RAG responses cannot render after switching to full-corpus scope",
       JSON.stringify({ staleRagScopeText, staleRagResultText })
     );
+    const fullCorpusUrl = page.url();
+    expect(
+      "console-topology-dom:full-corpus-url-unpinned",
+      !fullCorpusUrl.includes("document_id=") &&
+        !fullCorpusUrl.includes("documentId=") &&
+        !fullCorpusUrl.includes("note_id=") &&
+        !fullCorpusUrl.includes("noteId="),
+      "switching to full-corpus scope removes document and note pins from the URL",
+      fullCorpusUrl
+    );
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-rag"]', { timeout: 15000 });
+    await page.waitForFunction(() => document.querySelector('[data-test="cas-knowledge-scope-bar"]')?.textContent?.includes("Full corpus"));
+    const reloadedFullCorpusScopeText = await page.locator('[data-test="cas-knowledge-scope-bar"]').innerText();
+    expect(
+      "console-topology-dom:full-corpus-reload-stays-unpinned",
+      reloadedFullCorpusScopeText.includes("Full corpus") && !reloadedFullCorpusScopeText.includes("workflow-doc-1"),
+      "reloading a full-corpus URL does not restore stale selected-document scope",
+      JSON.stringify({ url: page.url(), reloadedFullCorpusScopeText })
+    );
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
       page.locator('[data-test="cas-knowledge-rag-query"]').click()
