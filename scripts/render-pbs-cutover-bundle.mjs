@@ -192,6 +192,11 @@ function readEvidence(baseDir, [key, fileName, label]) {
           head: json.pbsSource.head,
           fullHead: json.pbsSource.fullHead,
           remoteOriginUrl: json.pbsSource.remoteOriginUrl,
+          remoteContainsExpectedHead: json.pbsSource.remoteContainsExpectedHead,
+          remoteRefsContainingExpectedHead: json.pbsSource.remoteRefsContainingExpectedHead,
+          remoteVerifiedAt: json.pbsSource.remoteVerifiedAt,
+          remoteFetchOk: json.pbsSource.remoteFetchOk,
+          remoteVerificationError: json.pbsSource.remoteVerificationError,
           treeStatus: json.pbsSource.treeStatus,
           requireCleanSource: json.pbsSource.requireCleanSource,
           expectedHead: json.pbsSource.expectedHead,
@@ -213,7 +218,7 @@ function blockerAction(blocker) {
   const detail = blocker.detail || "";
   if (id.includes("livePrereqsRender") || id.includes("live-prereqs")) return "Regenerate real live prereq evidence with npm run render:pbs:live-prereqs after approved Secret/ACL/Postgres inputs are supplied.";
   if (id.includes("live-runtime-source-revision")) return "Stamp every ready PBS runtime pod with the approved PBS full SHA using an accepted annotation, label, or env value, then rerun live-site preapply.";
-  if (id.includes("source-contract-pinned")) return "Regenerate pinned source evidence with CAS_PBS_SOURCE_HEAD on the approved clean PBS checkout, verify the approved remote, and resolve any exact contract-file hash-set drift.";
+  if (id.includes("source-contract-pinned")) return "Regenerate pinned source evidence with CAS_PBS_SOURCE_HEAD on the approved clean PBS checkout, verify the approved remote ref contains that SHA, and resolve any exact contract-file hash-set drift.";
   if (id.includes("pbs-namespace")) return "Deploy or grant access to the real playbookstudio namespace.";
   if (id.includes("pbs-runtime-service")) return "Expose playbookstudio-runtime on port 8765 with the required runtime labels and ready Endpoints.";
   if (id.includes("pbs-auth-secret")) return "Create cas-pbs-auth/bearer-token from approved secret material outside git.";
@@ -432,6 +437,10 @@ function sourceContractPinned(evidence) {
       /^[a-f0-9]{40}$/i.test(String(pbsSource?.fullHead ?? "")) &&
       pbsSource.fullHead === pbsSource.expectedHead &&
       approvedPbsRemoteUrl(pbsSource?.remoteOriginUrl) &&
+      pbsSource.remoteContainsExpectedHead === true &&
+      Array.isArray(pbsSource.remoteRefsContainingExpectedHead) &&
+      pbsSource.remoteRefsContainingExpectedHead.some((ref) => typeof ref === "string" && ref.startsWith("origin/")) &&
+      typeof pbsSource.remoteVerifiedAt === "string" &&
       exactHashSet
   );
 }
@@ -495,7 +504,7 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
   if (sourceContract?.exists && !sourceContractPinned(sourceContract)) {
     localGateFailures.push({
       id: "cutover-bundle:source-contract-pinned",
-      detail: "cas-pbs-source-contract-pinned.json must come from verify:release:source-pinning with clean PBS source and CAS_PBS_SOURCE_HEAD"
+      detail: "cas-pbs-source-contract-pinned.json must come from verify:release:source-pinning with clean PBS source, CAS_PBS_SOURCE_HEAD, approved remote identity, and approved remote ref containment proof"
     });
   }
 
@@ -644,6 +653,20 @@ async function runSelfTest() {
     const pbsShortHead = pbsFullHead.slice(0, 7);
     const contractFileSha256 = Object.fromEntries(requiredPbsContractFiles.map((file) => [file, sha256Text(file)]));
     const approvedPbsRemote = "git@github.com:souluk319/PBS_DEV_Part3.git";
+    const pinnedPbsSource = (overrides = {}) => ({
+      branch: "main",
+      head: pbsShortHead,
+      fullHead: pbsFullHead,
+      remoteOriginUrl: approvedPbsRemote,
+      remoteContainsExpectedHead: true,
+      remoteRefsContainingExpectedHead: ["origin/main"],
+      remoteVerifiedAt: checkedAt,
+      treeStatus: "clean",
+      requireCleanSource: true,
+      expectedHead: pbsFullHead,
+      contractFileSha256,
+      ...overrides
+    });
     const tempEvidencePath = (recordedPath) => join(tempRoot, normalizePath(recordedPath).replace(/^test-results\//, ""));
     const writeTempEvidenceFile = (recordedPath, content) => {
       const actualPath = tempEvidencePath(recordedPath);
@@ -719,7 +742,7 @@ async function runSelfTest() {
       requireSource: true,
       requireCleanSource: true,
       requireExpectedHead: true,
-      pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256 },
+      pbsSource: pinnedPbsSource(),
       checks: [{ status: "PASS", id: "ok", detail: "ok" }]
     });
     writeLivePreapplyEvidence();
@@ -826,7 +849,7 @@ async function runSelfTest() {
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "dirty", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256 },
+            pbsSource: pinnedPbsSource({ treeStatus: "dirty" }),
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
@@ -841,7 +864,7 @@ async function runSelfTest() {
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: "0".repeat(40), contractFileSha256 },
+            pbsSource: pinnedPbsSource({ expectedHead: "0".repeat(40) }),
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
@@ -858,7 +881,7 @@ async function runSelfTest() {
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256: missingHashSet },
+            pbsSource: pinnedPbsSource({ contractFileSha256: missingHashSet }),
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           const missing = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
@@ -867,16 +890,7 @@ async function runSelfTest() {
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: {
-              branch: "main",
-              head: pbsShortHead,
-              fullHead: pbsFullHead,
-              remoteOriginUrl: approvedPbsRemote,
-              treeStatus: "clean",
-              requireCleanSource: true,
-              expectedHead: pbsFullHead,
-              contractFileSha256: { ...contractFileSha256, "unexpected.py": sha256Text("unexpected.py") }
-            },
+            pbsSource: pinnedPbsSource({ contractFileSha256: { ...contractFileSha256, "unexpected.py": sha256Text("unexpected.py") } }),
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           const extra = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
@@ -885,16 +899,7 @@ async function runSelfTest() {
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: {
-              branch: "main",
-              head: pbsShortHead,
-              fullHead: pbsFullHead,
-              remoteOriginUrl: approvedPbsRemote,
-              treeStatus: "clean",
-              requireCleanSource: true,
-              expectedHead: pbsFullHead,
-              contractFileSha256: { ...contractFileSha256, "deploy/Dockerfile": "short-hash" }
-            },
+            pbsSource: pinnedPbsSource({ contractFileSha256: { ...contractFileSha256, "deploy/Dockerfile": "short-hash" } }),
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           const short = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
@@ -903,7 +908,7 @@ async function runSelfTest() {
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256 },
+            pbsSource: pinnedPbsSource(),
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           return [missing, extra, short].every(
@@ -913,6 +918,34 @@ async function runSelfTest() {
         "fixture rejects missing, extra, or short PBS source contract hashes"
       ],
       [
+        "cutover-bundle:self-test-source-remote-proof-rejected",
+        (() => {
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: pinnedPbsSource({
+              remoteContainsExpectedHead: false,
+              remoteRefsContainingExpectedHead: [],
+              remoteVerificationError: "no fetched origin branch contains the expected PBS SHA"
+            }),
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          const unproven = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: pinnedPbsSource(),
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          return unproven.status === "FAIL" && unproven.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:source-contract-pinned");
+        })(),
+        "fixture rejects pinned PBS source evidence without approved remote ref containment proof"
+      ],
+      [
         "cutover-bundle:self-test-prereq-self-test-rejected",
         (() => {
           write("cas-pbs-source-contract-pinned.json", {
@@ -920,7 +953,7 @@ async function runSelfTest() {
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256 },
+            pbsSource: pinnedPbsSource(),
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           write("cas-pbs-live-prereqs-render.json", { ...base, mode: "self-test" });
@@ -936,7 +969,7 @@ async function runSelfTest() {
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256 },
+            pbsSource: pinnedPbsSource(),
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           writeLivePrereqEvidence({ keys: ["pbsAuthSecret", "postgresSecret", "liveConfig", "summary"] });
@@ -986,15 +1019,17 @@ const bundle = buildBundle();
 mkdirSync(outDir, { recursive: true });
 const jsonPath = join(outDir, "cutover-bundle.json");
 const markdownPath = join(outDir, "README.md");
+const compatibilityJsonPath = join("test-results", "cas-pbs-cutover-bundle.json");
 writeFileSync(jsonPath, `${JSON.stringify(bundle, null, 2)}\n`);
 writeFileSync(markdownPath, markdownSummary(bundle));
-mkdirSync(dirname(join("test-results", "cas-pbs-cutover-bundle.json")), { recursive: true });
-writeFileSync(join("test-results", "cas-pbs-cutover-bundle.json"), `${JSON.stringify(bundle, null, 2)}\n`);
+mkdirSync(dirname(compatibilityJsonPath), { recursive: true });
+writeFileSync(compatibilityJsonPath, `${JSON.stringify(bundle, null, 2)}\n`);
 
 console.log(`PBS cutover bundle final status: ${bundle.status}`);
 console.log(`Phase: ${bundle.phase}`);
 console.log(`Evidence bundle: ${jsonPath}`);
 console.log(`Summary: ${markdownPath}`);
+console.log(`Compatibility copy: ${compatibilityJsonPath}`);
 if (bundle.blockers.length > 0) {
   console.log("Blockers:");
   for (const blocker of bundle.blockers) console.log(`- ${blocker.id}: ${blocker.detail}`);

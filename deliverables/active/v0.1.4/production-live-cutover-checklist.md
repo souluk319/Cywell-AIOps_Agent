@@ -11,8 +11,8 @@ This checklist is the release gate for moving from verified CRC/dev mode to a pr
   - `npm run verify`
   - `npm run verify:knowledge-engine`
   - `npm run verify:console:launcher-dom:built`
-  - `npm run verify:console:topology-dom`
-  - `npm run verify:console:integration`
+  - `npm run verify:console:topology-dom:built`
+  - `npm run verify:console:integration:built`
   - `npm run verify:pbs:live-prereqs`
   - `npm run verify:pbs:cutover-bundle`
   - `npm run verify:deploy:manifests`
@@ -36,7 +36,7 @@ These values must come from the target environment. Do not commit any secret val
 - Pinned PBS source revision for release evidence:
   - `CAS_PBS_SOURCE_HEAD=<approved full 40-character PBS git commit>`
   - `npm run verify:release:source-pinning` must write `test-results/cas-pbs-source-contract-pinned.json`
-  - the PBS checkout must be clean, its `remote.origin.url` must match the approved PBS repository pattern, and the pinned contract file hash set must match the expected PBS runtime/API contract files
+  - the PBS checkout must be clean, its `remote.origin.url` must match the approved PBS repository pattern, `git fetch origin` must succeed, at least one fetched `origin/*` branch must contain the pinned SHA, and the pinned contract file hash set must match the expected PBS runtime/API contract files
 - PBS runtime pods must expose the same approved source revision through an accepted annotation, label, or env value:
   - `cywell.ai/pbs-source-head`
   - `playbookstudio.io/source-revision`
@@ -149,11 +149,11 @@ Required result:
 - `verify:deploy:manifests` passes.
 - `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags. Run it normally when publishing empty or already-matching tags. If `v0.1.4` tags already exist and must intentionally move, rerun as `$env:CAS_RELEASE_FORCE="true"; npm run release:crc:v0.1.4` and capture the old/new image evidence.
 - `verify:pbs:preflight:live:site:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
-- `render-pbs-cutover-bundle.mjs --require-live-ready` writes `test-results/cas-pbs-cutover-bundle.json` with `status=PASS` and `phase=live-preapply-ready`.
+- `render-pbs-cutover-bundle.mjs --require-live-ready` writes canonical evidence to `test-results/pbs-cutover-bundle/cutover-bundle.json` with `status=PASS` and `phase=live-preapply-ready`; it also writes `test-results/cas-pbs-cutover-bundle.json` as a compatibility copy.
 - `render-pbs-cutover-bundle.mjs --require-live-ready` confirms CRC deployment, release-image, and generated-site preapply evidence share the same cluster identity.
 - `render-pbs-cutover-bundle.mjs --require-live-ready` confirms generated-site preapply evidence is fresh, newer than the release/prereq evidence it depends on, and not older than the configured live preapply freshness window.
 - `render-pbs-cutover-bundle.mjs --require-live-ready` recomputes the current generated live-prereq file hashes, generated `pbs-live-site` render hash, and redacted-summary hash before accepting the evidence.
-- `render-pbs-cutover-bundle.mjs --require-live-ready` accepts PBS source evidence only from `test-results/cas-pbs-source-contract-pinned.json`, where `CAS_PBS_SOURCE_HEAD` is a full 40-character approved SHA, the PBS checkout is clean, the PBS remote is approved, and every required PBS contract file has a 64-character SHA-256 hash.
+- `render-pbs-cutover-bundle.mjs --require-live-ready` accepts PBS source evidence only from `test-results/cas-pbs-source-contract-pinned.json`, where `CAS_PBS_SOURCE_HEAD` is a full 40-character approved SHA, the PBS checkout is clean, the PBS remote is approved, at least one fetched `origin/*` branch contains the pinned SHA, and every required PBS contract file has a 64-character SHA-256 hash.
 - `render-pbs-cutover-bundle.mjs --require-live-ready` confirms every ready PBS runtime pod in live preapply evidence is stamped with the same approved PBS source SHA.
 - `verify:pbs:preflight:live:site:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
 - `verify:pbs:preflight:live:site:preapply` confirms release-image evidence is current-head and sourced from non-stale CRC deployment evidence.
@@ -244,8 +244,9 @@ Save command output or JSON artifacts for the release record:
 - `test-results/cas-pbs-live-prereqs-render.json`
 - `test-results/cas-pbs-source-contract.json`, optional source/API contract evidence from the default verifier
 - `test-results/cas-pbs-source-contract-required.json`, required source/API contract evidence
-- `test-results/cas-pbs-source-contract-pinned.json`, strict release pinning evidence including `pbsSource.expectedHead`, `pbsSource.fullHead`, approved `pbsSource.remoteOriginUrl`, clean `pbsSource.treeStatus`, and the exact `pbsSource.contractFileSha256` set
-- `test-results/cas-pbs-cutover-bundle.json`, with `status=PASS` and `phase=live-preapply-ready`
+- `test-results/cas-pbs-source-contract-pinned.json`, strict release pinning evidence including `pbsSource.expectedHead`, `pbsSource.fullHead`, approved `pbsSource.remoteOriginUrl`, `pbsSource.remoteContainsExpectedHead=true`, `pbsSource.remoteRefsContainingExpectedHead`, clean `pbsSource.treeStatus`, and the exact `pbsSource.contractFileSha256` set
+- `test-results/pbs-cutover-bundle/cutover-bundle.json`, canonical cutover bundle evidence with `status=PASS` and `phase=live-preapply-ready`
+- `test-results/cas-pbs-cutover-bundle.json`, compatibility copy of the same bundle for older handoff paths
 
 ## Completion Definition
 

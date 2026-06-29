@@ -1365,15 +1365,18 @@ for (const file of files) {
           text.includes("fullGitSha") &&
           text.includes("remoteOriginUrl") &&
           text.includes("approvedRemoteUrl") &&
+          text.includes("remoteRefsContainingExpectedHead") &&
+          text.includes("remoteContainsExpectedHead") &&
           text.includes("git-remote-approved") &&
+          text.includes("git-head-expected-remote-ref") &&
           text.includes("git-head-expected-full-sha") &&
           text.includes("contractFileSha256") &&
           text.includes("--require-source") &&
           text.includes("--require-clean-source") &&
           text.includes("--require-expected-head") &&
           text.includes("--self-test"),
-        "PBS source contract verifier writes optional/required/pinned evidence and verifies approved PBS remote identity for strict source pinning",
-        "PBS source contract verifier must write PBS source git/hash/remote evidence and support explicit source/self-test modes"
+        "PBS source contract verifier writes optional/required/pinned evidence and verifies approved PBS remote identity plus remote ref containment for strict source pinning",
+        "PBS source contract verifier must write PBS source git/hash/remote evidence, prove strict source heads are contained in approved remote refs, and support explicit source/self-test modes"
       );
     }
     if (file.includes("render-pbs-cutover-bundle")) {
@@ -1404,6 +1407,8 @@ for (const file of files) {
           text.includes("git-tree-clean") &&
           text.includes("sourceContractPinned") &&
           text.includes("approvedPbsRemoteUrl") &&
+          text.includes("remoteContainsExpectedHead") &&
+          text.includes("remoteRefsContainingExpectedHead") &&
           text.includes("allow-dirty-live-ready") &&
           text.includes(":clean-source") &&
           text.includes("requiredPbsContractFiles") &&
@@ -1431,9 +1436,11 @@ for (const file of files) {
           text.includes("uniqueBlockers") &&
           text.includes("artifactSummary") &&
           text.includes("sha256File") &&
+          text.includes("pbs-cutover-bundle") &&
+          text.includes("Compatibility copy") &&
           text.includes("cas-pbs-cutover-bundle.json") &&
           text.includes("--require-live-ready"),
-        "PBS cutover bundle renderer checks current-head clean evidence, approved PBS remote/source pinning, runtime source stamps, real-render hashes, artifact hashes, and live-ready enforcement",
+        "PBS cutover bundle renderer checks current-head clean evidence, approved PBS remote/source pinning, runtime source stamps, real-render hashes, artifact hashes, canonical bundle output, compatibility copy output, and live-ready enforcement",
         "PBS cutover bundle renderer must bind bundle evidence to current clean source, reject dirty/unpinned PBS source evidence, reject self-test prereq evidence, and support strict live-ready mode"
       );
       expect(
@@ -1452,11 +1459,12 @@ for (const file of files) {
           text.includes("self-test-dirty-local-evidence-rejected") &&
           text.includes("self-test-dirty-source-rejected") &&
           text.includes("self-test-source-contract-hash-set-rejected") &&
+          text.includes("self-test-source-remote-proof-rejected") &&
           text.includes("self-test-prereq-self-test-rejected") &&
           text.includes("self-test-prereq-output-dir-rejected") &&
           text.includes("self-test-fail-retains-external-blockers"),
-        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding/freshness, runtime source revision binding, source hash shape, cluster mismatch rejection, dirty local/source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention",
-        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding/freshness, runtime source revision binding, source hash shape, cluster mismatch rejection, dirty local/source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention"
+        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding/freshness, runtime source revision binding, source hash shape, remote ref proof, cluster mismatch rejection, dirty local/source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention",
+        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding/freshness, runtime source revision binding, source hash shape, remote ref proof, cluster mismatch rejection, dirty local/source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention"
       );
     }
     if (file.includes("verify-console-launcher-dom")) {

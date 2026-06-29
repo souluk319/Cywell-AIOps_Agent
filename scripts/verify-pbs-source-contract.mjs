@@ -38,13 +38,23 @@ const contractFiles = [
   "src/play_book_studio/wiki_loop.py"
 ];
 
-function runGit(gitArgs, cwd = process.cwd()) {
+function runGitResult(gitArgs, cwd = process.cwd(), timeoutMs = 10000) {
   const result = spawnSync("git", gitArgs, {
     cwd,
     encoding: "utf8",
-    timeout: 10000,
+    timeout: timeoutMs,
     windowsHide: true
   });
+  return {
+    status: result.status ?? 1,
+    ok: result.status === 0,
+    stdout: result.stdout?.trim() ?? "",
+    stderr: (result.stderr ?? result.error?.message ?? "").trim()
+  };
+}
+
+function runGit(gitArgs, cwd = process.cwd()) {
+  const result = runGitResult(gitArgs, cwd);
   return result.status === 0 ? result.stdout.trim() : "";
 }
 
@@ -102,6 +112,41 @@ function fullGitSha(value) {
 function approvedRemoteUrl(value) {
   const remote = String(value ?? "").trim();
   return Boolean(remote && approvedRemotePatterns.some((pattern) => pattern.test(remote)));
+}
+
+function remoteRefsContainingExpectedHead(root, expectedHead) {
+  const proof = {
+    remoteContainsExpectedHead: false,
+    remoteRefsContainingExpectedHead: [],
+    remoteVerifiedAt: checkedAt,
+    remoteFetchOk: false,
+    remoteVerificationError: ""
+  };
+  if (!fullGitSha(expectedHead)) {
+    proof.remoteVerificationError = "expected PBS head is not a full 40-character SHA";
+    return proof;
+  }
+  const fetch = runGitResult(["fetch", "--quiet", "origin"], root, 60000);
+  proof.remoteFetchOk = fetch.ok;
+  if (!fetch.ok) {
+    proof.remoteVerificationError = fetch.stderr || "git fetch origin failed";
+    return proof;
+  }
+  const contains = runGitResult(["branch", "-r", "--contains", expectedHead], root, 20000);
+  if (!contains.ok) {
+    proof.remoteVerificationError = contains.stderr || `git branch -r --contains ${expectedHead} failed`;
+    return proof;
+  }
+  const refs = contains.stdout
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\*\s*/, "").trim())
+    .filter((line) => line.startsWith("origin/") && !line.includes(" -> "));
+  proof.remoteRefsContainingExpectedHead = refs;
+  proof.remoteContainsExpectedHead = refs.length > 0;
+  if (!proof.remoteContainsExpectedHead) {
+    proof.remoteVerificationError = `no fetched origin branch contains ${expectedHead}`;
+  }
+  return proof;
 }
 
 function readRequired(root, relativePath) {
@@ -311,14 +356,46 @@ if parsed_request.path == "/api/wiki-loop/run": pass
 
 async function runSelfTest() {
   const root = await createSelfTestSource();
+  const remoteRoot = await createSelfTestSource();
+  const bareRemote = await mkdtemp(join(tmpdir(), "cywell-pbs-source-remote-"));
   try {
     const before = checks.length;
     sourceContractChecks(root);
     const selfFailures = checks.slice(before).filter((check) => check.status === "FAIL");
     if (selfFailures.length === 0) pass("pbs-source:self-test", "synthetic PBS source contract fixture passes");
     else fail("pbs-source:self-test", `synthetic PBS source contract fixture failed: ${selfFailures.map((check) => check.id).join(", ")}`);
+
+    runGitResult(["init", "-b", "main"], remoteRoot);
+    runGitResult(["config", "user.email", "cywell-selftest@example.invalid"], remoteRoot);
+    runGitResult(["config", "user.name", "Cywell Self Test"], remoteRoot);
+    runGitResult(["add", "."], remoteRoot);
+    runGitResult(["commit", "-m", "initial PBS contract fixture"], remoteRoot);
+    runGitResult(["init", "--bare"], bareRemote);
+    runGitResult(["remote", "add", "origin", bareRemote], remoteRoot);
+    runGitResult(["push", "-u", "origin", "main"], remoteRoot, 60000);
+    const pushedHead = runGit(["rev-parse", "HEAD"], remoteRoot);
+    const pushedProof = remoteRefsContainingExpectedHead(remoteRoot, pushedHead);
+    await writeFile(join(remoteRoot, "local-only-change.txt"), "not pushed\n");
+    runGitResult(["add", "local-only-change.txt"], remoteRoot);
+    runGitResult(["commit", "-m", "local only fixture change"], remoteRoot);
+    const localOnlyHead = runGit(["rev-parse", "HEAD"], remoteRoot);
+    const localOnlyProof = remoteRefsContainingExpectedHead(remoteRoot, localOnlyHead);
+    expect(
+      "pbs-source:self-test-remote-head-contained",
+      pushedProof.remoteContainsExpectedHead === true && pushedProof.remoteRefsContainingExpectedHead.includes("origin/main"),
+      "synthetic approved remote branch contains the pushed PBS source SHA",
+      `expected pushed fixture SHA to be contained in origin/main: ${JSON.stringify(pushedProof)}`
+    );
+    expect(
+      "pbs-source:self-test-local-only-head-rejected",
+      localOnlyProof.remoteContainsExpectedHead === false,
+      "synthetic local-only PBS source SHA is rejected because no origin branch contains it",
+      `expected local-only fixture SHA to be rejected: ${JSON.stringify(localOnlyProof)}`
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
+    await rm(remoteRoot, { recursive: true, force: true });
+    await rm(bareRemote, { recursive: true, force: true });
   }
 }
 
@@ -326,6 +403,7 @@ if (selfTest) {
   await runSelfTest();
 }
 
+let remoteHeadProof = null;
 if (!existsSync(sourceDir)) {
   const detail = `PBS source directory not found at ${sourceDir}; set CAS_PBS_SOURCE_DIR or pass --source-dir`;
   if (requireSource) fail("pbs-source:source-dir", detail);
@@ -360,6 +438,15 @@ if (!existsSync(sourceDir)) {
         `PBS source head ${metadata.fullHead || metadata.head} does not match CAS_PBS_SOURCE_HEAD ${expectedSourceHead}`
       );
     }
+    if (requireCleanSource && requireExpectedHead && fullGitSha(expectedSourceHead) && approvedRemoteUrl(metadata.remoteOriginUrl)) {
+      remoteHeadProof = remoteRefsContainingExpectedHead(sourceDir, expectedSourceHead);
+      expect(
+        "pbs-source:git-head-expected-remote-ref",
+        remoteHeadProof.remoteContainsExpectedHead === true,
+        `CAS_PBS_SOURCE_HEAD is contained in approved remote ref ${remoteHeadProof.remoteRefsContainingExpectedHead[0]}`,
+        `CAS_PBS_SOURCE_HEAD ${expectedSourceHead} must be contained in at least one fetched approved origin branch ref: ${remoteHeadProof.remoteVerificationError || "no remote proof"}`
+      );
+    }
     if (requireCleanSource) {
       expect(
         "pbs-source:git-tree-clean",
@@ -388,6 +475,7 @@ const summary = {
 };
 const status = summary.failed ? "FAIL" : "PASS";
 const cywellGit = gitMetadata(process.cwd());
+const pbsSourceGit = existsSync(sourceDir) ? gitMetadata(sourceDir) : null;
 writeFileSync(
   evidencePath,
   JSON.stringify(
@@ -402,7 +490,8 @@ writeFileSync(
       sourceDir,
       pbsSource: existsSync(sourceDir)
         ? {
-            ...gitMetadata(sourceDir),
+            ...pbsSourceGit,
+            ...(typeof remoteHeadProof === "object" && remoteHeadProof ? remoteHeadProof : {}),
             expectedHead: expectedSourceHead || null,
             requireCleanSource,
             contractFileSha256: contractFileHashes(sourceDir)
