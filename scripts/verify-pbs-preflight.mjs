@@ -33,8 +33,16 @@ const strictApprovedPbsRemotePattern = /^(?:git@github\.com:|https:\/\/github\.c
 const approvedCywellRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/Cywell-AIOps_Agent(?:\.git)?$/i;
 const requiredPbsContractFiles = [
   "deploy/Dockerfile",
+  "deploy/openshift-cywell-v014/kustomization.yaml",
+  "deploy/openshift-cywell-v014/runtime-service.yaml",
+  "deploy/openshift-cywell-v014/runtime-contract-patch.yaml",
+  "deploy/openshift-cywell-v014/runtime-tls-patch.yaml",
+  "deploy/openshift-cywell-v014/configmap-runtime-patch.yaml",
+  "deploy/openshift-cywell-v014/lightspeed-networkpolicy-patch.yaml",
+  "deploy/openshift-cywell-v014/terminal-broker-subject-patch.yaml",
   "docker-compose.yml",
   "src/play_book_studio/config/settings.py",
+  "src/play_book_studio/http/server.py",
   "src/play_book_studio/http/public_chat_gateway.py",
   "src/play_book_studio/http/server_handler_factory.py",
   "src/play_book_studio/http/server_handler_base.py",
