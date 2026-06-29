@@ -105,6 +105,19 @@ function denseTopologyGraph() {
 }
 
 function topologyResponse(customerId) {
+  if (customerId === "empty-topology") {
+    return {
+      status: "ok",
+      customer_id: customerId,
+      topology: {
+        graph: {
+          counts: { nodes: 0, edges: 0, documents: 0, notes: 0 },
+          nodes: [],
+          links: []
+        }
+      }
+    };
+  }
   const graph =
     customerId === "dense-topology"
       ? denseTopologyGraph()
@@ -250,6 +263,10 @@ function createHarnessServer() {
         return;
       }
       if (request.method === "GET" && knowledgePath === "/api/knowledge/topology") {
+        if (url.searchParams.get("customer_id") === "broken-topology") {
+          sendJson(response, 500, { status: "error", code: "topology-fixture-failure", error: "forced topology failure" });
+          return;
+        }
         sendJson(response, 200, topologyResponse(url.searchParams.get("customer_id") || "default"));
         return;
       }
@@ -493,6 +510,17 @@ try {
         (await page.getByRole("button", { name: "Docs" }).getAttribute("aria-pressed")) === "true",
       "node type filter narrows visible graph nodes"
     );
+    await page.locator('[data-test="cas-topology-node-search"]').fill("ACME Router Wiki");
+    const filteredIndexText = await page.locator('[data-test="cas-topology-node-index"]').innerText();
+    expect(
+      "console-topology-dom:filter-scoped-node-index-empty",
+      (await page.locator('[data-test="cas-topology-node-index-item"]').count()) === 0 &&
+        filteredIndexText.includes("No matching nodes.") &&
+        (await page.locator('[data-test="cas-topology-node"]').count()) === 1,
+      "node index search is explicitly scoped to the current node-type filter",
+      filteredIndexText
+    );
+    await page.locator('[data-test="cas-topology-node-search"]').fill("");
     await page.getByRole("button", { name: "All" }).click();
     expect(
       "console-topology-dom:filter-all",
@@ -517,6 +545,40 @@ try {
       "topology inspector RAG action posts a node-derived question while preserving the dashboard",
       JSON.stringify({ ragCall, resultText })
     );
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=empty-topology") && response.status() === 200),
+      page.getByLabel("Customer ID").fill("empty-topology")
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 0);
+    const emptyTopologyText = await page.locator('[data-test="cas-topology-dashboard"]').innerText();
+    expect(
+      "console-topology-dom:empty-topology-no-stale-nodes",
+      emptyTopologyText.includes("No topology nodes are available") &&
+        !emptyTopologyText.includes("ACME Router Wiki") &&
+        (await page.locator('[data-test="cas-topology-edge"]').count()) === 0,
+      "empty topology clears previous graph nodes and edges",
+      emptyTopologyText
+    );
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=acme-topology") && response.status() === 200),
+      page.getByLabel("Customer ID").fill("acme-topology")
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 4);
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=broken-topology") && response.status() === 500),
+      page.getByLabel("Customer ID").fill("broken-topology")
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 0);
+    const failedTopologyText = await page.locator('[data-test="cas-topology-dashboard"]').innerText();
+    const failedResultText = await page.locator('[data-test="cas-knowledge-result"]').innerText();
+    expect(
+      "console-topology-dom:failed-reload-clears-stale-graph",
+      failedTopologyText.includes("No topology nodes are available") &&
+        !failedTopologyText.includes("ACME Router Wiki") &&
+        failedResultText.includes("forced topology failure"),
+      "failed topology reload clears stale graph and exposes the load error",
+      JSON.stringify({ failedTopologyText, failedResultText })
+    );
     await assertViewportLayout(page, { width: 1024, height: 768 }, "dense-topology");
     expect(
       "console-topology-dom:dense-visible-cap",
@@ -535,11 +597,14 @@ try {
     );
     await assertViewportLayout(page, { width: 390, height: 844 }, "dense-topology");
 
+    const unexpectedConsoleErrors = consoleErrors.filter(
+      (message) => !message.includes("Failed to load resource: the server responded with a status of 500")
+    );
     expect(
       "console-topology-dom:browser-errors",
-      consoleErrors.length === 0 && pageErrors.length === 0,
+      unexpectedConsoleErrors.length === 0 && pageErrors.length === 0,
       "browser reports no console errors or uncaught page errors",
-      JSON.stringify({ consoleErrors, pageErrors })
+      JSON.stringify({ consoleErrors, unexpectedConsoleErrors, pageErrors })
     );
   }
 } catch (error) {

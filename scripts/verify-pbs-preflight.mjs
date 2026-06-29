@@ -461,7 +461,7 @@ if (authSecret) {
 if (overlay === "pbs-live") {
   let liveDatabaseUrl = "";
   if (requireCluster) {
-    for (const imageName of ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine"]) {
+    for (const imageName of ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine", "cas-knowledge-postgres"]) {
       const imageTag = getJson(`cluster:release-image:${imageName}`, ["get", "imagestreamtag", "-n", namespace, `${imageName}:v0.1.4`]);
       if (imageTag) pass(`cluster:release-image:${imageName}:v0.1.4`, `${imageName}:v0.1.4 ImageStreamTag exists`);
     }

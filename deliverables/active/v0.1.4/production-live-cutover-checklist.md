@@ -38,7 +38,8 @@ These values must come from the target environment. Do not commit any secret val
   - `cas-gateway`
   - `cas-console-plugin`
   - `cas-knowledge-engine`
-- Approved production Postgres/pgvector image pinned by digest or internal `v0.1.4` release tag. Do not use the mutable CRC/dev `pgvector/pgvector:pg16` image for live cutover.
+  - `cas-knowledge-postgres`
+- Approved production Postgres/pgvector image pinned by digest or internal `v0.1.4` release tag. Do not use the mutable CRC/dev `pgvector/pgvector:pg16` image directly for live cutover.
 - Decision on live DB handling:
   - rotate credentials on the existing PVC only if the initialized Postgres password and Secret match
   - otherwise use a fresh PVC or perform a planned DB migration
@@ -70,6 +71,7 @@ Run these before applying live manifests:
 ```powershell
 npm run verify
 npm run verify:deploy:manifests
+npm run release:crc:v0.1.4
 npm run verify:pbs:preflight:live:preapply
 ```
 
@@ -77,6 +79,7 @@ Required result:
 
 - `verify` passes.
 - `verify:deploy:manifests` passes.
+- `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags.
 - `verify:pbs:preflight:live:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
 
 Stop immediately if any gate fails.
@@ -112,7 +115,7 @@ npm run verify:pbs:cutover:cluster
 Required result:
 
 - Applied workloads use `v0.1.4` release image tags.
-- Postgres/pgvector uses an approved pinned production image.
+- Postgres/pgvector uses the approved internal `cas-knowledge-postgres:v0.1.4` release image or an equivalent digest-pinned production image.
 - Knowledge Engine provider is `pbs-http-live`.
 - `CAS_PBS_BEARER_TOKEN` comes from required `cas-pbs-auth/bearer-token`.
 - `DATABASE_URL` and Postgres credentials come from required `cas-knowledge-postgres-live`.
@@ -145,6 +148,7 @@ Save command output or JSON artifacts for the release record:
 - `oc get svc,pods -n playbookstudio --show-labels`
 - `test-results/cas-pbs-preflight.json`
 - `test-results/cas-pbs-live-smoke.json`
+- `test-results/cas-release-images.json`
 
 ## Completion Definition
 

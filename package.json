@@ -35,6 +35,7 @@
     "verify:pbs:cutover": "node ./scripts/verify-pbs-live-smoke.mjs --cutover",
     "verify:pbs:cutover:cluster": "npm run verify:pbs:preflight:live && node ./scripts/verify-pbs-live-smoke.mjs --cutover --cluster",
     "deploy:crc": "node ./scripts/deploy-crc-dev.mjs",
+    "release:crc:v0.1.4": "node ./scripts/promote-crc-release-images.mjs",
     "verify:deploy:manifests": "node ./scripts/verify-deploy-manifests.mjs"
   },
   "dependencies": {

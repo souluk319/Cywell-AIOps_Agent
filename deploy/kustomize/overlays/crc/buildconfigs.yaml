@@ -67,6 +67,16 @@ spec:
 apiVersion: image.openshift.io/v1
 kind: ImageStream
 metadata:
+  name: cas-knowledge-postgres
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: knowledge-postgres
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
   name: cas-knowledge-engine
   namespace: cywell-ai-sentinel
   labels:

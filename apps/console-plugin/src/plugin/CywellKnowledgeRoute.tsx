@@ -114,6 +114,16 @@ const fallbackCapabilities: KnowledgeCapability[] = [
   }
 ];
 
+function emptyTopology(customerId: string): TopologyPayload {
+  return {
+    status: "empty",
+    customer_id: customerId,
+    counts: { nodes: 0, edges: 0, documents: 0, notes: 0 },
+    nodes: [],
+    edges: []
+  };
+}
+
 const styles = `
 .cas-knowledge-route {
   --cas-knowledge-ink: #18202a;
@@ -1358,9 +1368,10 @@ export default function CywellKnowledgeRoute() {
   const loadTopology = React.useCallback(
     () =>
       runAction(async () => {
+        setTopologyData(emptyTopology(customerId));
         const result = await requestJson(`/api/knowledge/topology?customer_id=${encodeURIComponent(customerId)}`);
         const topology = topologyPayload(result);
-        setTopologyData(topology);
+        setTopologyData(topology ?? emptyTopology(customerId));
         return result;
       }),
     [customerId, runAction]

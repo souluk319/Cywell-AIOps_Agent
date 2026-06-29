@@ -9,6 +9,9 @@ images:
     newTag: v0.1.4
   - name: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-knowledge-engine
     newTag: v0.1.4
+  - name: pgvector/pgvector
+    newName: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-knowledge-postgres
+    newTag: v0.1.4
 configMapGenerator:
   - name: cas-knowledge-live-config
     namespace: cywell-ai-sentinel

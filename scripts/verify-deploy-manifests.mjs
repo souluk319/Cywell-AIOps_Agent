@@ -26,6 +26,7 @@ const files = [
   "deploy/kustomize/overlays/pbs-live/knowledge-postgres-live-secretrefs-patch.yaml",
   "package.json",
   "scripts/deploy-crc-dev.mjs",
+  "scripts/promote-crc-release-images.mjs",
   "scripts/verify-pbs-live-smoke.mjs",
   "scripts/verify-pbs-preflight.mjs",
   "apps/console-plugin/console-extensions.json"
@@ -529,8 +530,14 @@ function runRenderedChecks() {
     !/image:\s*\S+:dev\b/.test(live) &&
       live.includes("cas-gateway:v0.1.4") &&
       live.includes("cas-console-plugin:v0.1.4") &&
-      live.includes("cas-knowledge-engine:v0.1.4"),
+      live.includes("cas-knowledge-engine:v0.1.4") &&
+      live.includes("cas-knowledge-postgres:v0.1.4"),
     "PBS live render uses v0.1.4 release image tags, not mutable dev tags"
+  );
+  expect(
+    "render:pbs-live:postgres-release-image",
+    /image:\s*image-registry\.openshift-image-registry\.svc:5000\/cywell-ai-sentinel\/cas-knowledge-postgres:v0\.1\.4/.test(livePostgres),
+    "PBS live Postgres uses the internal v0.1.4 release image tag"
   );
   expect("render:pbs-live:no-pbs-secret-material", noPbsSecretMaterial(live), "PBS live render contains no literal PBS token material");
   assertKnowledgeIngress("pbs-live", live);
@@ -902,6 +909,28 @@ for (const file of files) {
       } else {
         fail("package:pbs-cutover-cluster-script", "package.json must run strict preflight before in-cluster PBS cutover smoke");
       }
+      if (text.includes('"release:crc:v0.1.4"') && text.includes("promote-crc-release-images.mjs")) {
+        pass("package:release-crc-script", "package.json exposes CRC release image promotion");
+      } else {
+        fail("package:release-crc-script", "package.json must expose CRC release image promotion");
+      }
+    }
+    if (file.includes("promote-crc-release-images")) {
+      expect(
+        "release-crc:app-tags",
+        text.includes("cas-gateway") &&
+          text.includes("cas-console-plugin") &&
+          text.includes("cas-knowledge-engine") &&
+          text.includes("cas-knowledge-postgres") &&
+          text.includes("v0.1.4") &&
+          text.includes("reference-policy=local"),
+        "CRC release promotion script tags app and Postgres images as local v0.1.4 ImageStreamTags"
+      );
+      expect(
+        "release-crc:postgres-digest",
+        text.includes("imageID") && text.includes("@sha256:") && text.includes("--source=docker"),
+        "CRC release promotion script pins Postgres release tag from the running digest imageID"
+      );
     }
     if (file.includes("verify-pbs-live-smoke")) {
       if (text.includes("--cutover") && text.includes("CAS_PBS_LIVE_CUTOVER") && text.includes("write-smoke-required")) {
@@ -1144,12 +1173,18 @@ for (const file of files) {
           `BuildConfig ${name} is declared for clean CRC binary builds`
         );
       }
+      expect(
+        "buildconfig:imagestream:cas-knowledge-postgres",
+        Boolean(renderedDoc(text, "ImageStream", "cas-knowledge-postgres")),
+        "ImageStream cas-knowledge-postgres is declared for CRC release-image promotion"
+      );
       for (const expected of [
         "kind: ImageStream",
         "kind: BuildConfig",
         "name: cas-gateway",
         "name: cas-console-plugin",
         "name: cas-knowledge-engine",
+        "name: cas-knowledge-postgres",
         "dockerfilePath: apps/gateway/Dockerfile",
         "dockerfilePath: apps/console-plugin/Dockerfile",
         "dockerfilePath: apps/knowledge-engine/Dockerfile"

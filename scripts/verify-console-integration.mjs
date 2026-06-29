@@ -124,6 +124,24 @@ expectText(
   "/cywell/topology",
   "built plugin registers the topology route"
 );
+const topologyNavExtension = (manifestJson.extensions ?? []).find((extension) => {
+  const startsWith = extension?.properties?.startsWith;
+  return (
+    extension?.type === "console.navigation/href" &&
+    extension?.properties?.id === "cywell-topology" &&
+    extension?.properties?.section === "cywell" &&
+    extension?.properties?.name === "Topology" &&
+    extension?.properties?.href === "/cywell/topology" &&
+    Array.isArray(startsWith) &&
+    startsWith.includes("/cywell/topology")
+  );
+});
+expectText(
+  "console-nav:topology-structural",
+  topologyNavExtension ? JSON.stringify(topologyNavExtension) : "",
+  "/cywell/topology",
+  "built manifest structurally registers the Topology navigation item"
+);
 expectText(
   "console-route:registered",
   manifest,
