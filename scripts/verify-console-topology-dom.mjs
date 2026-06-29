@@ -824,6 +824,23 @@ try {
         (await page.locator('[data-test="cas-topology-dashboard"]').innerText()).includes("HAProxy"),
       "PBS wikilink nodes can be filtered independently from generic terms"
     );
+    await page.locator('[data-test="cas-topology-node"]').filter({ hasText: "HAProxy" }).click();
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
+      page.locator('[data-test="cas-topology-rag-action"]').click()
+    ]);
+    const richSignalRagCall = calls.findLast?.(
+      (call) => call.method === "POST" && call.path === "/api/knowledge/rag/query" && call.body?.customer_id === "pbs-rich-topology"
+    );
+    expect(
+      "console-topology-dom:pbs-rich-signal-rag-scope",
+      richSignalRagCall?.body?.active_document_id === "pbs-rich-upload" &&
+        Array.isArray(richSignalRagCall?.body?.enabled_upload_document_ids) &&
+        richSignalRagCall.body.enabled_upload_document_ids.includes("pbs-rich-upload") &&
+        richSignalRagCall?.body?.restrict_uploaded_sources === true,
+      "PBS-rich signal nodes derive RAG document scope from selected Wiki context/upload lineage",
+      JSON.stringify(richSignalRagCall?.body)
+    );
     await page.getByRole("button", { name: "All" }).click();
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=vault-empty-topology") && response.status() === 200),

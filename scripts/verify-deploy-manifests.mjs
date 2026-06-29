@@ -33,6 +33,7 @@ const files = [
   "scripts/verify-pbs-live-smoke.mjs",
   "scripts/verify-pbs-preflight.mjs",
   "scripts/render-pbs-live-prereqs.mjs",
+  "scripts/render-pbs-cutover-bundle.mjs",
   "scripts/verify-pbs-source-contract.mjs",
   "apps/gateway/src/server.mjs",
   "apps/knowledge-engine/src/cas_knowledge_engine/engine.py",
@@ -698,9 +699,21 @@ for (const file of files) {
           text.includes("source_scope=user_upload") &&
           text.includes("visibility=private_user") &&
           text.includes("PRIVATE_RAG_SOURCE_SCOPES") &&
+          text.includes("PRIVATE_RAG_DEFAULT_SOURCE_SCOPES") &&
+          text.includes("RESERVED_SOURCE_METADATA_KEYS") &&
           text.includes("private RAG source scopes are not allowed"),
-        "knowledge engine rejects privileged PBS source lanes for private ingest and RAG requests",
-        "knowledge engine must reject caller-controlled official/study source lanes before private ingest, retrieval, or PBS outbound calls"
+        "knowledge engine rejects privileged PBS source lanes, defaults private RAG scopes, and strips reserved nested metadata",
+        "knowledge engine must reject caller-controlled official/study source lanes, default private RAG scopes, and strip reserved nested metadata before private ingest, retrieval, or PBS outbound calls"
+      );
+      expect(
+        "knowledge-engine:pbs-rag-scope-proof",
+        text.includes("_pbs_missing_scope_proof") &&
+          text.includes("_pbs_scope_proof_present") &&
+          text.includes("scope_proof") &&
+          text.includes("$.citations") &&
+          text.includes("source_collection"),
+        "knowledge engine rejects PBS live RAG citations without customer or owner scope proof",
+        "knowledge engine must reject PBS live RAG citations without customer or owner scope proof"
       );
       expect(
         "knowledge-engine:wiki-loop-staged-contract",
@@ -1139,7 +1152,7 @@ for (const file of files) {
         text.includes("render-pbs-live-prereqs.mjs") &&
         text.includes('"verify:pbs:live-prereqs"') &&
         text.includes("--self-test") &&
-        text.includes("verify:pbs:live-prereqs && npm run verify:pbs:source-contract && npm run verify:deploy:manifests")
+        text.includes("verify:pbs:live-prereqs && npm run verify:pbs:cutover-bundle && npm run verify:pbs:source-contract")
       ) {
         pass("package:pbs-live-prereqs-renderer", "package.json exposes PBS live prerequisite renderer and includes its self-test in verify");
       } else {
@@ -1186,12 +1199,25 @@ for (const file of files) {
       }
       if (
         text.includes('"verify:release:pbs-live"') &&
+        text.includes("verify:release:source-pinning") &&
+        text.includes("verify:pbs:preflight:live:site:preapply") &&
+        text.includes("render-pbs-cutover-bundle.mjs --require-live-ready") &&
         text.includes("verify:pbs:preflight:live:site") &&
         text.includes("--cutover --cluster")
       ) {
-        pass("package:pbs-live-release-script", "package.json exposes non-skipping PBS live release gate");
+        pass("package:pbs-live-release-script", "package.json exposes non-skipping PBS live release gate with source pinning and live-ready bundle proof");
       } else {
-        fail("package:pbs-live-release-script", "package.json must expose non-skipping PBS live release gate through the generated live site overlay");
+        fail("package:pbs-live-release-script", "package.json must expose non-skipping PBS live release gate through source pinning, generated-site preapply, live-ready bundle proof, and cluster cutover smoke");
+      }
+      if (
+        text.includes('"verify:release:source-pinning"') &&
+        text.includes("--require-source") &&
+        text.includes("--require-clean-source") &&
+        text.includes("--require-expected-head")
+      ) {
+        pass("package:release-source-pinning-script", "package.json exposes strict PBS source pinning gate");
+      } else {
+        fail("package:release-source-pinning-script", "package.json must expose strict PBS source pinning gate");
       }
       if (
         text.includes('"verify:pbs:preflight:live:site:preapply"') &&
@@ -1211,6 +1237,17 @@ for (const file of files) {
         pass("package:pbs-source-contract-script", "package.json exposes PBS source contract verification");
       } else {
         fail("package:pbs-source-contract-script", "package.json must expose PBS source contract verification");
+      }
+      if (
+        text.includes('"render:pbs:cutover-bundle"') &&
+        text.includes("render-pbs-cutover-bundle.mjs") &&
+        text.includes('"verify:pbs:cutover-bundle"') &&
+        text.includes("--self-test") &&
+        text.includes("verify:pbs:cutover-bundle")
+      ) {
+        pass("package:pbs-cutover-bundle-script", "package.json exposes PBS cutover bundle renderer and self-test");
+      } else {
+        fail("package:pbs-cutover-bundle-script", "package.json must expose PBS cutover bundle renderer and self-test");
       }
     }
     if (file.includes("render-pbs-live-prereqs")) {
@@ -1245,9 +1282,16 @@ for (const file of files) {
           text.includes("sha256(inputs.ownerHmacSecret)") &&
           text.includes("passwordSha256") &&
           text.includes("cas-pbs-live-prereqs-render.json") &&
-          text.includes("runGit([\"rev-parse\", \"--short\", \"HEAD\"])"),
-        "PBS live prerequisite renderer records redacted evidence with git head",
-        "PBS live prerequisite renderer must write redacted evidence with git head and no raw Secret material"
+          text.includes("fullHead") &&
+          text.includes("treeStatus") &&
+          text.includes("outputFileSha256") &&
+          text.includes("renderedSiteOverlaySha256") &&
+          text.includes("redactedSummarySha256") &&
+          text.includes("real-render") &&
+          text.includes("recordRenderEvidence") &&
+          text.includes("cas-pbs-live-prereqs-self-test.json"),
+        "PBS live prerequisite renderer records real-render redacted evidence with git/source and output hashes",
+        "PBS live prerequisite renderer must write real-render redacted evidence with git source, output hashes, rendered overlay hash, and no raw Secret material while keeping self-test evidence separate"
       );
       expect(
         "pbs-live-prereqs:self-test",
@@ -1294,13 +1338,65 @@ for (const file of files) {
         text.includes("cas-pbs-source-contract.json") &&
           text.includes("CAS_PBS_SOURCE_DIR") &&
           text.includes("CAS_PBS_SOURCE_HEAD") &&
+          text.includes("CAS_PBS_REQUIRE_SOURCE_HEAD") &&
           text.includes("gitMetadata") &&
           text.includes("contractFileSha256") &&
           text.includes("--require-source") &&
           text.includes("--require-clean-source") &&
+          text.includes("--require-expected-head") &&
           text.includes("--self-test"),
         "PBS source contract verifier writes pinned source evidence and supports explicit source/self-test modes",
         "PBS source contract verifier must write PBS source git/hash evidence and support explicit source/self-test modes"
+      );
+    }
+    if (file.includes("render-pbs-cutover-bundle")) {
+      expect(
+        "pbs-cutover-bundle:artifacts",
+        text.includes("cas-crc-deployment.json") &&
+          text.includes("cas-release-images.json") &&
+          text.includes("cas-deploy-manifests.json") &&
+          text.includes("cas-pbs-live-prereqs-render.json") &&
+          text.includes("cas-pbs-source-contract.json") &&
+          text.includes("cas-pbs-preflight-pbs-live-preapply-cluster-required-secrets.json"),
+        "PBS cutover bundle renderer collects CRC, release, manifest, prereq, source-contract, and live preapply evidence",
+        "PBS cutover bundle renderer must collect the release evidence set needed for live cutover handoff"
+      );
+      expect(
+        "pbs-cutover-bundle:blockers",
+        text.includes("BLOCKED") &&
+          text.includes("external-live-prerequisites-missing") &&
+          text.includes("blockerAction") &&
+          text.includes("pbs-namespace") &&
+          text.includes("legacy-postgres-secret"),
+        "PBS cutover bundle renderer turns live preapply failures into explicit external blocker actions",
+        "PBS cutover bundle renderer must classify external live blockers instead of leaving operators to parse raw JSON"
+      );
+      expect(
+        "pbs-cutover-bundle:current-evidence",
+          text.includes("currentHeadMatches") &&
+          text.includes("git-tree-clean") &&
+          text.includes("sourceContractPinned") &&
+          text.includes("hasRealRenderHashes") &&
+          text.includes("live-prereqs-real-render") &&
+          text.includes("source-contract-pinned") &&
+          text.includes("artifactSummary") &&
+          text.includes("sha256File") &&
+          text.includes("cas-pbs-cutover-bundle.json") &&
+          text.includes("--require-live-ready"),
+        "PBS cutover bundle renderer checks current-head evidence, clean source, strict PBS source pinning, real-render hashes, artifact hashes, and live-ready enforcement",
+        "PBS cutover bundle renderer must bind bundle evidence to current source, reject dirty/unpinned PBS source evidence, reject self-test prereq evidence, and support strict live-ready mode"
+      );
+      expect(
+        "pbs-cutover-bundle:self-test",
+        text.includes("--self-test") &&
+          text.includes("self-test-status") &&
+          text.includes("self-test-blockers") &&
+          text.includes("self-test-redaction") &&
+          text.includes("self-test-artifact-hashes") &&
+          text.includes("self-test-dirty-source-rejected") &&
+          text.includes("self-test-prereq-self-test-rejected"),
+        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, dirty source rejection, and self-test evidence rejection",
+        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, dirty source rejection, and self-test evidence rejection"
       );
     }
     if (file.includes("promote-crc-release-images")) {

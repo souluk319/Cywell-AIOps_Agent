@@ -296,6 +296,24 @@ expectText(
   "knowledge route supports document deep-link query params"
 );
 expectText(
+  "console-knowledge:scope-bar",
+  knowledgeRouteSource,
+  "data-test=\"cas-knowledge-scope-bar\"",
+  "knowledge route renders explicit corpus scope bar"
+);
+expectText(
+  "console-knowledge:scope-all-selected",
+  knowledgeRouteSource,
+  "cas-knowledge-scope-all",
+  "knowledge route exposes all-corpus and selected-document scope controls"
+);
+expectText(
+  "console-knowledge:url-ingest-selects-corpus",
+  knowledgeRouteSource,
+  "selectCorpusDocument(targets[0])",
+  "URL ingest joins the selected customer corpus workflow"
+);
+expectText(
   "console-knowledge:rag-action",
   knowledgeRouteSource,
   "data-test=\"cas-knowledge-rag-query\"",
@@ -392,6 +410,42 @@ expectText(
   "knowledge route sends selected corpus document into wiki loop requests"
 );
 expectText(
+  "console-knowledge:note-selected-document",
+  knowledgeRouteSource,
+  "target_ref: activeDocumentId",
+  "knowledge route links saved wiki notes to the selected document"
+);
+expectText(
+  "console-knowledge:note-selected-document-dependency",
+  knowledgeRouteSource,
+  "[activeDocumentId, customerId, noteBody, noteTitle, runAction]",
+  "knowledge route note save callback refreshes when selected document changes"
+);
+expectText(
+  "console-knowledge:url-ingest-pbs-pages",
+  knowledgeRouteSource,
+  "addRecordList(value.pages, \"document\")",
+  "knowledge route collects PBS URL ingest pages into the customer corpus workflow"
+);
+expectText(
+  "console-knowledge:url-ingest-pbs-upload-results",
+  knowledgeRouteSource,
+  "addRecordList(value.upload_results, \"document\")",
+  "knowledge route collects PBS URL ingest upload_results into the customer corpus workflow"
+);
+expectText(
+  "console-knowledge:topology-edge-derived-scope",
+  knowledgeRouteSource,
+  "connectedDocumentIds",
+  "knowledge route derives topology signal-node RAG scope from connected edge lineage"
+);
+expectText(
+  "console-knowledge:topology-selected-context-scope",
+  knowledgeRouteSource,
+  "contextById",
+  "knowledge route derives topology signal-node RAG scope from selected Wiki context lineage"
+);
+expectText(
   "console-knowledge:topology-nested-graph",
   knowledgeRouteSource,
   "topologyGraph",
@@ -464,6 +518,18 @@ expectText(
   "knowledge route renders API result surface"
 );
 expectText(
+  "console-knowledge:result-summary",
+  knowledgeRouteSource,
+  "data-test=\"cas-knowledge-result-summary\"",
+  "knowledge route renders product result summary before debug JSON"
+);
+expectText(
+  "console-knowledge:result-citations",
+  knowledgeRouteSource,
+  "data-test=\"cas-knowledge-result-citations\"",
+  "knowledge route renders first-class citation result panels"
+);
+expectText(
   "console-knowledge:bundle-healthz",
   knowledgeRouteBundle,
   "/api/knowledge/healthz",
@@ -510,6 +576,18 @@ expectText(
   knowledgeRouteBundle,
   "cas-knowledge-viewer-link",
   "built knowledge route bundle contains viewer deep links"
+);
+expectText(
+  "console-knowledge:bundle-scope-bar",
+  knowledgeRouteBundle,
+  "cas-knowledge-scope-bar",
+  "built knowledge route bundle contains explicit corpus scope controls"
+);
+expectText(
+  "console-knowledge:bundle-result-summary",
+  knowledgeRouteBundle,
+  "cas-knowledge-result-summary",
+  "built knowledge route bundle contains product result summary panels"
 );
 expectText(
   "console-knowledge:bundle-rag",

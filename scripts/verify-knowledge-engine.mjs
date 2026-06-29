@@ -248,9 +248,33 @@ function startFakePbsServer(port) {
         });
         return;
       }
+      if (String(body.query ?? "").includes("scope-missing-citation")) {
+        sendFakePbsJson(response, 200, {
+          answer: "PBS unlabeled citation answer",
+          citations: [{ id: "pbs-unlabeled-citation", title: "Unlabeled PBS Citation", snippet: "PBS evidence without scope proof" }]
+        });
+        return;
+      }
+      if (String(body.query ?? "").includes("scope-primitive-citation")) {
+        sendFakePbsJson(response, 200, {
+          answer: "PBS primitive citation answer",
+          sources: ["unscoped leaked citation text"]
+        });
+        return;
+      }
       sendFakePbsJson(response, 200, {
         answer: `PBS answer for ${body.query}`,
-        citations: [{ id: "pbs-citation-1", title: "PBS Citation", snippet: "PBS evidence" }],
+        citations: [
+          {
+            id: "pbs-citation-1",
+            title: "PBS Citation",
+            snippet: "PBS evidence",
+            customer_id: body.customer_id,
+            owner_user_id: body.owner_user_id,
+            document_source_id: "pbs-live-doc-1",
+            source_collection: body.customer_id
+          }
+        ],
         pipeline_trace: { retrieval_summary: { hit_count: 1 } },
         wiki_vault_context_attached: true
       });
@@ -1053,6 +1077,15 @@ try {
       ),
     "gateway RAG cites the uploaded customer document",
     JSON.stringify({ uploadedDocumentId, citations: ragCitations })
+  );
+  expect(
+    "knowledge:rag-default-private-source-scopes",
+    Array.isArray(rag.body.trace?.enabled_source_scopes) &&
+      rag.body.trace.enabled_source_scopes.includes("user_upload") &&
+      rag.body.trace.enabled_source_scopes.includes("wiki_vault") &&
+      ragCitations.every((citation) => ["user_upload", "wiki_vault"].includes(String(citation.source_scope ?? ""))),
+    "gateway RAG defaults unscoped private queries to user_upload and wiki_vault source lanes",
+    JSON.stringify(rag.body.trace)
   );
   const scopedRag = await fetchJson(`${gatewayBase}/api/knowledge/rag/query`, {
     method: "POST",
@@ -1914,7 +1947,25 @@ try {
       filename: "live-runbook.txt",
       content_base64: Buffer.from("PBS live upload response should be normalized.", "utf8").toString("base64"),
       index: true,
-      force_reingest: false
+      force_reingest: false,
+      source_metadata: {
+        customer_id: "live",
+        customerId: "other-live-camel",
+        tenant_id: "other-tenant",
+        sourceCollection: "other-source-collection",
+        source_scope: "official_docs",
+        sourceKind: "official",
+        visibility: "shared",
+        owner_user_id: "attacker-owner",
+        user_id: "attacker-user",
+        created_by: "attacker-created-by",
+        harmless_label: "kept"
+      },
+      sourceMetadata: {
+        customerId: "camel-other-customer",
+        source_scope: "official_docs",
+        owner_user_id: "camel-attacker-owner"
+      }
     })
   });
   expect(
@@ -1980,7 +2031,19 @@ try {
       url: "https://93.184.216.34/pbs-live-runbook",
       index: true,
       force_reingest: false,
-      auto_compile_wiki: true
+      auto_compile_wiki: true,
+      source_metadata: {
+        customer_id: "live",
+        customerId: "url-other-customer",
+        source_scope: "official_docs",
+        owner_user_id: "url-attacker-owner",
+        harmless_url_label: "kept-url"
+      },
+      sourceMetadata: {
+        customerId: "url-camel-other-customer",
+        source_scope: "official_docs",
+        owner_user_id: "url-camel-attacker-owner"
+      }
     })
   });
   expect(
@@ -2051,6 +2114,15 @@ try {
     "PBS live chat response is normalized into CAS RAG shape",
     JSON.stringify(liveRag.body)
   );
+  const liveDefaultChatRecord = liveRecord("POST", "/api/chat", (record) => record.body?.query === "router latency evidence");
+  expect(
+    "knowledge:pbs-live-rag-default-private-source-scopes",
+    Array.isArray(liveDefaultChatRecord?.body?.enabled_source_scopes) &&
+      liveDefaultChatRecord.body.enabled_source_scopes.includes("user_upload") &&
+      liveDefaultChatRecord.body.enabled_source_scopes.includes("wiki_vault"),
+    "PBS live RAG sends private source-scope allowlist by default",
+    JSON.stringify(liveDefaultChatRecord?.body)
+  );
   const liveChatRecordCountBeforeScopeReject = fakePbs.records.filter((record) => record.path === "/api/chat").length;
   const liveRejectedScopeRag = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
     method: "POST",
@@ -2083,6 +2155,34 @@ try {
       liveLeakedRagCitation.body.pbs?.scope_mismatches?.some((item) => String(item.path ?? "").includes("citations")),
     "PBS live RAG rejects citation rows outside the requested customer/workspace scope",
     JSON.stringify(liveLeakedRagCitation.body)
+  );
+  const liveUnscopedRagCitation = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({ customer_id: "live", question: "scope-missing-citation" })
+  });
+  expect(
+    "knowledge:pbs-live-rag-citation-missing-scope-blocked",
+    liveUnscopedRagCitation.response.status === 502 &&
+      liveUnscopedRagCitation.body.status === "error" &&
+      liveUnscopedRagCitation.body.code === "pbs-scope-mismatch" &&
+      liveUnscopedRagCitation.body.pbs?.scope_mismatches?.some((item) => String(item.scope ?? "") === "scope_proof"),
+    "PBS live RAG rejects citation rows that lack any customer or owner scope proof",
+    JSON.stringify(liveUnscopedRagCitation.body)
+  );
+  const livePrimitiveRagCitation = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({ customer_id: "live", question: "scope-primitive-citation" })
+  });
+  expect(
+    "knowledge:pbs-live-rag-citation-primitive-blocked",
+    livePrimitiveRagCitation.response.status === 502 &&
+      livePrimitiveRagCitation.body.status === "error" &&
+      livePrimitiveRagCitation.body.code === "pbs-scope-mismatch" &&
+      livePrimitiveRagCitation.body.pbs?.scope_mismatches?.some((item) => String(item.scope ?? "") === "scope_proof"),
+    "PBS live RAG rejects primitive citation/source rows without object scope proof",
+    JSON.stringify(livePrimitiveRagCitation.body)
   );
   const liveRagFailure = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
     method: "POST",
@@ -2242,6 +2342,23 @@ try {
       liveUploadRecord?.body?.user_id === liveOwnerHash,
     "PBS live upload sends raw owner header and hashed owner payload"
   );
+  expect(
+    "knowledge:pbs-live-upload-strips-reserved-source-metadata",
+    liveUploadRecord?.body?.source_metadata?.customer_id === "live" &&
+      liveUploadRecord?.body?.source_metadata?.harmless_label === "kept" &&
+      liveUploadRecord?.body?.sourceMetadata === undefined &&
+      liveUploadRecord?.body?.source_metadata?.customerId === undefined &&
+      liveUploadRecord?.body?.source_metadata?.tenant_id === undefined &&
+      liveUploadRecord?.body?.source_metadata?.sourceCollection === undefined &&
+      liveUploadRecord?.body?.source_metadata?.source_scope === undefined &&
+      liveUploadRecord?.body?.source_metadata?.sourceKind === undefined &&
+      liveUploadRecord?.body?.source_metadata?.visibility === undefined &&
+      liveUploadRecord?.body?.source_metadata?.owner_user_id === undefined &&
+      liveUploadRecord?.body?.source_metadata?.user_id === undefined &&
+      liveUploadRecord?.body?.source_metadata?.created_by === undefined,
+    "PBS live upload strips reserved nested source_metadata keys before outbound calls",
+    JSON.stringify(liveUploadRecord?.body?.source_metadata)
+  );
   const liveUrlRecord = liveRecord("POST", "/api/uploads/url-ingest", (record) => record.body?.url === "https://93.184.216.34/pbs-live-runbook");
   expect(
     "knowledge:pbs-live-url-owner-contract",
@@ -2249,6 +2366,17 @@ try {
       liveUrlRecord?.body?.owner_user_id === liveOwnerHash &&
       liveUrlRecord?.body?.user_id === liveOwnerHash,
     "PBS live URL ingest sends raw owner header and hashed owner payload"
+  );
+  expect(
+    "knowledge:pbs-live-url-strips-reserved-source-metadata",
+    liveUrlRecord?.body?.source_metadata?.customer_id === "live" &&
+      liveUrlRecord?.body?.source_metadata?.harmless_url_label === "kept-url" &&
+      liveUrlRecord?.body?.sourceMetadata === undefined &&
+      liveUrlRecord?.body?.source_metadata?.customerId === undefined &&
+      liveUrlRecord?.body?.source_metadata?.source_scope === undefined &&
+      liveUrlRecord?.body?.source_metadata?.owner_user_id === undefined,
+    "PBS live URL ingest strips reserved nested source_metadata/sourceMetadata keys before outbound calls",
+    JSON.stringify({ source_metadata: liveUrlRecord?.body?.source_metadata, sourceMetadata: liveUrlRecord?.body?.sourceMetadata })
   );
   const liveReportsRecord = liveRecord("GET", "/api/uploads/reports");
   expect(

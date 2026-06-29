@@ -330,6 +330,27 @@ def pbs_common_payload(payload: dict[str, Any], *, customer_id: str, owner_id: s
 PRIVATE_INGEST_SOURCE_SCOPE = "user_upload"
 PRIVATE_INGEST_VISIBILITY = "private_user"
 PRIVATE_RAG_SOURCE_SCOPES = {"user_upload", "wiki_vault"}
+PRIVATE_RAG_DEFAULT_SOURCE_SCOPES = ["user_upload", "wiki_vault"]
+PBS_OWNER_SCOPE_KEYS = {"owner_id", "ownerId", "owner_user_id", "ownerUserId", "user_id", "userId", "created_by", "createdBy"}
+PBS_CUSTOMER_SCOPE_KEYS = {
+    "customer_id",
+    "customerId",
+    "customer_workspace_id",
+    "customerWorkspaceId",
+    "tenant_id",
+    "tenantId",
+    "workspace_id",
+    "workspaceId",
+    "source_collection",
+    "sourceCollection",
+}
+RESERVED_SOURCE_METADATA_KEYS = {
+    "source_scope",
+    "sourceScope",
+    "visibility",
+    "source_kind",
+    "sourceKind",
+} | PBS_OWNER_SCOPE_KEYS | PBS_CUSTOMER_SCOPE_KEYS
 
 
 def canonical_private_ingest_payload(payload: dict[str, Any], *, customer_id: str, source_kind: str) -> dict[str, Any]:
@@ -345,10 +366,13 @@ def canonical_private_ingest_payload(payload: dict[str, Any], *, customer_id: st
     normalized = dict(payload)
     normalized.pop("sourceScope", None)
     normalized.pop("sourceKind", None)
+    normalized.pop("sourceMetadata", None)
     normalized["source_scope"] = PRIVATE_INGEST_SOURCE_SCOPE
     normalized["visibility"] = PRIVATE_INGEST_VISIBILITY
     normalized["source_kind"] = source_kind
     metadata = source_metadata(normalized, customer_id)
+    for reserved_key in RESERVED_SOURCE_METADATA_KEYS:
+        metadata.pop(reserved_key, None)
     metadata["customer_id"] = customer_id
     normalized["source_metadata"] = metadata
     return normalized
@@ -370,13 +394,14 @@ def source_scope_list(payload: dict[str, Any], *keys: str) -> list[str]:
 
 def canonical_private_rag_payload(payload: dict[str, Any]) -> dict[str, Any]:
     requested_scopes = source_scope_list(payload, "enabled_source_scopes", "enabledSourceScopes")
+    if not requested_scopes:
+        requested_scopes = list(PRIVATE_RAG_DEFAULT_SOURCE_SCOPES)
     disallowed = sorted({scope for scope in requested_scopes if scope not in PRIVATE_RAG_SOURCE_SCOPES})
     if disallowed:
         raise ValueError(f"private RAG source scopes are not allowed: {', '.join(disallowed)}")
     normalized = dict(payload)
     normalized.pop("enabledSourceScopes", None)
-    if requested_scopes:
-        normalized["enabled_source_scopes"] = requested_scopes
+    normalized["enabled_source_scopes"] = requested_scopes
     return normalized
 
 
@@ -524,17 +549,6 @@ class KnowledgeEngine:
             self._pbs_scope_value(owner_id),
             self._pbs_scope_value(self.pbs.owner_id(owner_id)),
         }
-        owner_keys = {"owner_id", "ownerId", "owner_user_id", "ownerUserId", "user_id", "userId", "created_by", "createdBy"}
-        customer_keys = {
-            "customer_id",
-            "customerId",
-            "customer_workspace_id",
-            "customerWorkspaceId",
-            "tenant_id",
-            "tenantId",
-            "workspace_id",
-            "workspaceId",
-        }
         mismatches: list[dict[str, str]] = []
 
         def walk(candidate: Any, current_path: str) -> None:
@@ -542,11 +556,11 @@ class KnowledgeEngine:
                 for key, item in candidate.items():
                     item_path = f"{current_path}.{key}"
                     observed = self._pbs_scope_value(item)
-                    if key in customer_keys and observed and expected_customer_id and observed != expected_customer_id:
+                    if key in PBS_CUSTOMER_SCOPE_KEYS and observed and expected_customer_id and observed != expected_customer_id:
                         mismatches.append(
                             {"path": item_path, "expected": expected_customer_id, "observed": observed, "scope": "customer_id"}
                         )
-                    if key in owner_keys and observed and observed not in expected_owner_values:
+                    if key in PBS_OWNER_SCOPE_KEYS and observed and observed not in expected_owner_values:
                         mismatches.append(
                             {
                                 "path": item_path,
@@ -563,6 +577,52 @@ class KnowledgeEngine:
 
         walk(value, path)
         return mismatches
+
+    def _pbs_scope_proof_present(self, value: Any) -> bool:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in PBS_CUSTOMER_SCOPE_KEYS | PBS_OWNER_SCOPE_KEYS and self._pbs_scope_value(item):
+                    return True
+                if isinstance(item, (dict, list)) and self._pbs_scope_proof_present(item):
+                    return True
+        elif isinstance(value, list):
+            return any(self._pbs_scope_proof_present(item) for item in value)
+        return False
+
+    def _pbs_missing_scope_proof(self, value: Any, *, path: str = "$") -> list[dict[str, str]]:
+        missing: list[dict[str, str]] = []
+
+        def walk(candidate: Any, current_path: str) -> None:
+            if isinstance(candidate, list):
+                for index, item in enumerate(candidate):
+                    item_path = f"{current_path}[{index}]"
+                    if isinstance(item, dict) and not self._pbs_scope_proof_present(item):
+                        missing.append(
+                            {
+                                "path": item_path,
+                                "expected": "customer_id or owner scope proof",
+                                "observed": "missing",
+                                "scope": "scope_proof",
+                            }
+                        )
+                    elif not isinstance(item, (dict, list)):
+                        missing.append(
+                            {
+                                "path": item_path,
+                                "expected": "object citation with customer_id or owner scope proof",
+                                "observed": type(item).__name__,
+                                "scope": "scope_proof",
+                            }
+                        )
+                    elif isinstance(item, (dict, list)):
+                        walk(item, item_path)
+            elif isinstance(candidate, dict):
+                for key, item in candidate.items():
+                    if isinstance(item, (dict, list)):
+                        walk(item, f"{current_path}.{key}")
+
+        walk(value, path)
+        return missing
 
     def _pbs_scope_error_payload(self, operation: str, pbs_result: Any, mismatches: list[dict[str, str]]) -> dict[str, Any]:
         payload = self._pbs_error_payload(operation, pbs_result)
@@ -615,6 +675,9 @@ class KnowledgeEngine:
         body.setdefault("question", question)
         body.setdefault("answer", body.get("response") or body.get("message") or "")
         body.setdefault("citations", body.get("sources") if isinstance(body.get("sources"), list) else [])
+        missing_scope_proof = self._pbs_missing_scope_proof(body.get("citations"), path="$.citations")
+        if missing_scope_proof:
+            return self._pbs_scope_error_payload("chat", pbs_result, missing_scope_proof)
         trace = body.get("trace") if isinstance(body.get("trace"), dict) else {}
         trace["retriever"] = "pbs-http"
         trace["pbs"] = body["pbs"]

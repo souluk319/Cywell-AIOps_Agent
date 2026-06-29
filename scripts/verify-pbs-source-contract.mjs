@@ -14,6 +14,7 @@ const repoDefaultSourceDir = resolve(process.cwd(), "..", "PBS-Dev3");
 const sourceDir = resolve(sourceDirArg || process.env.CAS_PBS_SOURCE_DIR || repoDefaultSourceDir);
 const requireSource = args.has("--require-source");
 const requireCleanSource = args.has("--require-clean-source") || /^(1|true|yes|y|on)$/i.test(process.env.CAS_PBS_REQUIRE_CLEAN_SOURCE || "");
+const requireExpectedHead = args.has("--require-expected-head") || /^(1|true|yes|y|on)$/i.test(process.env.CAS_PBS_REQUIRE_SOURCE_HEAD || "");
 const expectedSourceHead = String(process.env.CAS_PBS_SOURCE_HEAD || "").trim();
 const selfTest = args.has("--self-test");
 const checks = [];
@@ -313,6 +314,9 @@ if (!existsSync(sourceDir)) {
 } else {
   pass("pbs-source:source-dir", `using PBS source directory ${sourceDir}`);
   const metadata = gitMetadata(sourceDir);
+  if (requireExpectedHead && !expectedSourceHead) {
+    fail("pbs-source:git-head-expected-required", "CAS_PBS_SOURCE_HEAD is required when --require-expected-head is set");
+  }
   if (metadata.available) {
     pass("pbs-source:git-head", `PBS source git head ${metadata.head} on ${metadata.branch || "detached"}`);
     if (expectedSourceHead) {
@@ -337,6 +341,7 @@ if (!existsSync(sourceDir)) {
     }
   } else {
     warn("pbs-source:git-metadata", "PBS source directory is not a git worktree; evidence records file hashes only");
+    if (requireExpectedHead) fail("pbs-source:git-head-expected", "PBS source must be a git worktree when --require-expected-head is set");
   }
   sourceContractChecks(sourceDir);
 }
@@ -368,6 +373,7 @@ writeFileSync(
         : null,
       requireSource,
       requireCleanSource,
+      requireExpectedHead,
       selfTest,
       summary,
       checks

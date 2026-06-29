@@ -15,6 +15,10 @@ function sha256(value) {
   return createHash("sha256").update(String(value)).digest("hex");
 }
 
+function sha256File(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
 function runGit(args) {
   const result = spawnSync("git", args, {
     cwd: process.cwd(),
@@ -383,22 +387,112 @@ function sampleEnv() {
   };
 }
 
-function recordEvidence(status, checks) {
+function gitEvidence() {
+  const status = runGit(["status", "--short"]);
+  return {
+    branch: runGit(["branch", "--show-current"]) || process.env.GITHUB_REF_NAME || "",
+    head: runGit(["rev-parse", "--short", "HEAD"]),
+    fullHead: runGit(["rev-parse", "HEAD"]),
+    treeStatus: status ? "dirty" : "clean",
+    statusShort: status
+  };
+}
+
+function recordEvidence(status, checks, extra = {}, evidencePath = "test-results/cas-pbs-live-prereqs-render.json") {
+  const git = gitEvidence();
   mkdirSync("test-results", { recursive: true });
   writeFileSync(
-    "test-results/cas-pbs-live-prereqs-render.json",
+    evidencePath,
     JSON.stringify(
       {
         checkedAt,
-        branch: runGit(["branch", "--show-current"]) || process.env.GITHUB_REF_NAME || "",
-        head: runGit(["rev-parse", "--short", "HEAD"]),
+        branch: git.branch,
+        head: git.head,
+        fullHead: git.fullHead,
+        treeStatus: git.treeStatus,
         status,
+        ...extra,
         checks
       },
       null,
       2
     )
   );
+}
+
+function siteRenderCommand(siteOverlay) {
+  const attempts = [
+    ["oc", ["kustomize", siteOverlay]],
+    ["kubectl", ["kustomize", siteOverlay]]
+  ];
+  for (const [command, commandArgs] of attempts) {
+    const result = runCommand(command, commandArgs, { timeoutMs: 90000 });
+    if (result.ok && result.stdout.trim()) return { ...result, command, commandArgs };
+  }
+  return { ok: false, command: "oc/kubectl", commandArgs: ["kustomize", siteOverlay], stdout: "", stderr: "unable to render generated site overlay" };
+}
+
+function outputFileEvidence(files, rootDir) {
+  const outputFiles = [
+    "pbsAuthSecret",
+    "ownerAuthSecret",
+    "postgresSecret",
+    "liveConfig",
+    "customerAccessJson",
+    "siteKustomization",
+    "siteCustomerAccessJson",
+    "summary"
+  ];
+  return Object.fromEntries(
+    outputFiles.map((key) => [
+      key,
+      {
+        path: relative(process.cwd(), files[key]),
+        sha256: existsSync(files[key]) ? sha256File(files[key]) : "",
+        underOutputDir: relative(rootDir, files[key]).startsWith("..") === false
+      }
+    ])
+  );
+}
+
+function recordRenderEvidence(inputs, result, outputDir, mode = "real-render") {
+  const checks = [];
+  const record = (status, id, detail) => {
+    checks.push({ status, id, detail });
+    console.log(`[${status}] ${id}: ${detail}`);
+  };
+  record("PASS", "pbs-live-prereqs:real-render", "real PBS live prerequisite manifests rendered");
+  const summary = JSON.parse(readFileSync(result.files.summary, "utf8"));
+  const summaryText = JSON.stringify(summary);
+  record(
+    summary?.casPbsAuth?.bearerTokenSha256 &&
+      summary?.casKnowledgeInternalAuth?.ownerHmacSecretSha256 &&
+      !summaryText.includes(inputs.token) &&
+      !summaryText.includes(inputs.ownerHmacSecret) &&
+      !summaryText.includes(inputs.postgresValues.password)
+      ? "PASS"
+      : "FAIL",
+    "pbs-live-prereqs:real-redacted-summary",
+    "real render summary records hashes and metadata without raw Secret material"
+  );
+  const siteRender = siteRenderCommand(result.files.siteOverlay);
+  record(
+    siteRender.ok && siteRender.stdout.includes("name: cas-knowledge-live-config") ? "PASS" : "FAIL",
+    "pbs-live-prereqs:real-site-overlay-render",
+    siteRender.ok ? "generated pbs-live site overlay renders" : siteRender.stderr
+  );
+  const status = checks.some((check) => check.status === "FAIL") ? "FAIL" : "PASS";
+  recordEvidence(status, checks, {
+    mode,
+    namespace: inputs.namespace,
+    outputDir: relative(process.cwd(), outputDir),
+    outputFileSha256: outputFileEvidence(result.files, outputDir),
+    renderedSiteOverlaySha256: siteRender.ok ? sha256(siteRender.stdout) : "",
+    renderedSiteOverlayCommand: `${siteRender.command} ${siteRender.commandArgs.join(" ")}`,
+    redactedSummarySha256: sha256File(result.files.summary),
+    customerAccessEntryCount: customerPolicyEntries(inputs.customerAccess).length
+  });
+  if (status === "FAIL") process.exitCode = 1;
 }
 
 function selfTest() {
@@ -444,7 +538,7 @@ function selfTest() {
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   }
   const status = checks.some((check) => check.status === "FAIL") ? "FAIL" : "PASS";
-  recordEvidence(status, checks);
+  recordEvidence(status, checks, { mode: "self-test" }, "test-results/cas-pbs-live-prereqs-self-test.json");
   if (status === "FAIL") process.exitCode = 1;
 }
 
@@ -462,6 +556,7 @@ if (args.has("--self-test")) {
   } else {
     console.log("[PASS] PBS live prerequisite manifests rendered");
     console.log(`Output directory: ${outDir}`);
+    recordRenderEvidence(inputs, result, outDir);
     console.log("Review with:");
     console.log(`  oc diff -f ${result.files.pbsAuthSecret}`);
     console.log(`  oc diff -f ${result.files.ownerAuthSecret}`);
