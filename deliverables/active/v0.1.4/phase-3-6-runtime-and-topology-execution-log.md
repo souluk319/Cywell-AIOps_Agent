@@ -23,6 +23,7 @@ Implemented after the parallel console/cutover/evidence review pass:
 - Strict preflight parses rendered Kubernetes objects for the live generated-site overlay and checks the exact NetworkPolicy shape for PBS egress and Knowledge Engine ingress instead of relying on string presence.
 - Strict preflight now treats only real Kubernetes NotFound responses as proof that the legacy `cas-knowledge-postgres` Secret is absent; RBAC/API errors no longer pass the absence check.
 - The tracked pbs-live overlay now fails closed with `customer-access-json={}`; production mappings must come from `render:pbs:live-prereqs` generated site overlay.
+- The v0.1.4 PBS source baseline is now pinned through a clean clone at `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`, branch `kugnus/cywell-v0.1.4-source-contract`, commit `9fdbe01814f4cb59cce84af953eef744f394ce54`, pushed to approved remote `https://github.com/souluk319/PBS_DEV_Part3.git`.
 
 Proof captured in this pass:
 
@@ -32,10 +33,11 @@ Proof captured in this pass:
 - `npm run verify:console:topology-dom:built`: PASS, 53 browser-backed checks.
 - `npm run verify:console:integration:built`: PASS, 113 checks.
 - `npm run verify:pbs:cutover-bundle`: PASS, 21 self-test checks.
-- `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`, until this tree is committed/clean, real live prereq render evidence is regenerated from the current clean HEAD, generated-site preapply evidence is fresh and hash-bound to that render, `cas-pbs-source-contract-pinned.json` is produced by strict full-SHA source pinning from an approved clean PBS checkout whose successful fresh fetch proves a fetched `origin/*` ref contains the pinned SHA, and live preapply records PBS runtime pods stamped with that same SHA. External live preapply blockers are retained in the active blocker list even when local evidence is invalid.
+- `$env:CAS_PBS_SOURCE_HEAD="9fdbe01814f4cb59cce84af953eef744f394ce54"; $env:CAS_PBS_SOURCE_DIR="F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone"; npm run verify:release:source-pinning`: PASS, 34 checks; strict source pin evidence is now clean, full-SHA, approved-remote, and remote-ref-contained.
+- `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`. Source pinning is no longer the blocker for the current evidence set. Remaining local blockers are stale/dirty `cas-pbs-live-prereqs-render.json` from old head `7e12aad`, missing current real-render/hash-bound generated-site preapply evidence, and missing ready PBS runtime pod source stamps for `9fdbe01814f4cb59cce84af953eef744f394ce54`. External live preapply blockers are retained in the active blocker list even when local evidence is invalid.
 - `npm run verify:deploy:manifests`: PASS, 286 checks.
 - `npm run verify:pbs:source-contract:required`: PASS, 32 total checks: 31 PASS / 1 WARN for dirty `F:\AI_Projects\PBS-Dev3`; the checked PBS remote is `git@github.com:souluk319/PBS_DEV_Part3.git`.
-- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL until the external `playbookstudio` namespace/service/runtime pods, `cas-pbs-auth`, `cas-knowledge-postgres-live`, legacy dev Secret cleanup, current release image evidence with Cywell remote proof, strict pinned PBS source evidence, and pinned PBS runtime source revision evidence are all present.
+- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, 48 PASS / 7 FAIL. Current release image evidence and strict pinned PBS source evidence pass; remaining failures are the missing external `playbookstudio` namespace/service, missing `cas-pbs-auth`, missing `cas-knowledge-postgres-live`, legacy dev Secret cleanup, and ready PBS runtime source revision evidence once the Service exists.
 - `npm run render:pbs:live-prereqs`: blocked in the current shell until approved non-placeholder PBS bearer token, owner HMAC, service owner, concrete customer ACL JSON, and live Postgres DB credentials/URL are supplied.
 - `npm run verify:pbs:live-prereqs`: PASS, 12 self-test checks.
 - `npm run verify`: PASS.
@@ -91,7 +93,7 @@ Proof captured in this pass:
 - `npm run verify:pbs:live-prereqs`: PASS, 11 checks in the current renderer self-test.
 - `npm run verify:knowledge-engine`: PASS, 87 checks.
 - `npm run verify:deploy:manifests`: PASS, 274 checks.
-- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `47 PASS / 7 FAIL`; failures remain external PBS namespace/service, required live Secrets, and legacy CRC dev Secret cleanup. The rendered wildcard ACL blocker is closed, owner-HMAC Secret checks pass in generated prereq evidence, and release evidence cluster identity matches the current cluster.
+- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `48 PASS / 7 FAIL`; failures remain external PBS namespace/service, required live Secrets, and legacy CRC dev Secret cleanup. The rendered wildcard ACL blocker is closed, owner-HMAC Secret checks pass in generated prereq evidence, release evidence cluster identity matches the current cluster, and strict PBS source pin evidence passes.
 
 ## Previous Update - Live Cutover Gate Hardening
 
@@ -111,7 +113,7 @@ Proof captured in this pass:
 - `node --check` passed for changed verification and preflight scripts.
 - `npm run verify:knowledge-engine`: PASS, 83 checks.
 - `npm run verify:deploy:manifests`: PASS, 260 checks.
-- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `47 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `48 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
 - `npm run verify`: PASS.
 
 ## Previous Update - Wiki Vault Side-Channels, Staged Wiki Loop, and Structural API Egress
@@ -132,7 +134,7 @@ Proof captured in that pass:
 - `npm run verify:console:topology-dom`: PASS, 32 browser-backed checks.
 - `npm run verify:console:integration`: PASS, 77 checks.
 - `npm run verify:deploy:manifests`: PASS, 260 checks.
-- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `47 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `48 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
 
 ## Previous Update - PBS Upload/RAG Scope Contract and Non-Stale Release Evidence
 
@@ -178,7 +180,7 @@ Proof captured in that pass:
 - `npm run verify`: PASS.
 - `npm run deploy:crc`: PASS, 68 runtime checks.
 - `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4`: PASS, 21 release checks.
-- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `47 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `48 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
 
 Latest CRC `v0.1.4` release image references are intentionally not duplicated in this tracked document. The source of truth is ignored evidence under `test-results/cas-release-images.json`, specifically `branch`, `head`, `status`, and `promotedImages`.
 
@@ -204,7 +206,7 @@ Proof captured in that pass:
 - `npm run verify`: PASS.
 - `npm run deploy:crc`: PASS, 68 runtime checks.
 - `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4`: PASS, 21 release checks.
-- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `47 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL in older evidence; current generated-site preapply evidence is `48 PASS / 7 FAIL` with only external namespace/service/Secret cleanup blockers.
 
 Latest CRC `v0.1.4` release image references are intentionally not duplicated in this tracked document. The source of truth is ignored evidence under `test-results/cas-release-images.json`, specifically `branch`, `head`, `status`, and `promotedImages`.
 
@@ -380,7 +382,7 @@ Latest PBS preflight evidence:
 - `test-results/cas-pbs-preflight-pbs-shadow-diagnostic-local-optional-secrets.json`
 - `test-results/cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json`
 - shadow diagnostic status: `PASS/WARN` in the local CRC environment because the real `playbookstudio` namespace/service and optional `cas-pbs-auth` Secret are absent
-- live preapply status: expected `FAIL`, `47 PASS / 7 FAIL`
+- live preapply status: expected `FAIL`, `48 PASS / 7 FAIL`
 - rendered live overlay checks pass for provider, ConfigMap env refs, required token Secret ref, live Postgres Secret refs, no literal Secret material, no dev defaults, HTTPS PBS service-token transport, PBS base URL shape, timeout/response bounds, labeled PBS egress, knowledge ingress, runtime readiness gate, corpus readiness gate, and disabled shadow writes
 - WARNs/failures are expected in local CRC until the real `playbookstudio` namespace/service, required `cas-pbs-auth` Secret, required `cas-knowledge-postgres-live` Secret, and cleanup of legacy `cas-knowledge-postgres` Secret are handled
 
