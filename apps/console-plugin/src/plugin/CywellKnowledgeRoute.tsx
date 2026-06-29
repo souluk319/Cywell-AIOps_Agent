@@ -995,7 +995,8 @@ function viewerTargetFromParams(params: URLSearchParams, viewerPath?: string): V
       id: noteId,
       title: noteId,
       document_source_id: documentId || undefined,
-      viewer_path: viewerPath
+      viewer_path: viewerPath,
+      metadata: { from_query_params: true }
     };
   }
   if (documentId) {
@@ -1004,7 +1005,8 @@ function viewerTargetFromParams(params: URLSearchParams, viewerPath?: string): V
       id: documentId,
       title: documentId,
       document_source_id: documentId,
-      viewer_path: viewerPath
+      viewer_path: viewerPath,
+      metadata: { from_query_params: true }
     };
   }
   return null;
@@ -2444,6 +2446,28 @@ export default function CywellKnowledgeRoute() {
     [openViewer]
   );
 
+  const clearSelectedDocumentScope = React.useCallback((scopeCustomerId = customerIdRef.current) => {
+    activeDocumentIdRef.current = "";
+    activeSourceScopesRef.current = ["user_upload", "wiki_vault"];
+    scopeModeRef.current = "all";
+    activeScopeKeyRef.current = `${scopeCustomerId}:all::${activeSourceScopesRef.current.join("|")}`;
+    selectedViewerTargetRef.current = null;
+    setSelectedViewerTarget(null);
+    setSelectedDocumentId("");
+    setScopeMode("all");
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      params.set("customer_id", scopeCustomerId);
+      params.delete("document_id");
+      params.delete("documentId");
+      params.delete("note_id");
+      params.delete("noteId");
+      const query = params.toString();
+      window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+      setLocationState(currentLocationSnapshot());
+    }
+  }, []);
+
   const changeScopeMode = React.useCallback(
     (mode: "all" | "selected") => {
       if (mode !== scopeMode) {
@@ -2625,10 +2649,13 @@ export default function CywellKnowledgeRoute() {
         const selectedViewerDocumentId =
           selectedViewerTargetRef.current?.document_source_id ||
           (selectedViewerTargetRef.current?.kind === "document" ? selectedViewerTargetRef.current.id : "");
+        const selectedViewerKeepsDocumentLineage =
+          selectedViewerDocumentId === selectedDocumentId &&
+          selectedViewerTargetRef.current?.metadata?.from_query_params !== true;
         if (
           targets.length > 0 &&
           selectedDocumentId &&
-          selectedViewerDocumentId !== selectedDocumentId &&
+          !selectedViewerKeepsDocumentLineage &&
           !targets.some((target) => (target.document_source_id || target.id) === selectedDocumentId)
         ) {
           const replacementDocumentId = targets[0].document_source_id || targets[0].id;
@@ -2647,10 +2674,12 @@ export default function CywellKnowledgeRoute() {
             window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
             setLocationState(currentLocationSnapshot());
           }
+        } else if (targets.length === 0 && selectedDocumentId && selectedViewerTargetRef.current?.metadata?.from_query_params === true) {
+          clearSelectedDocumentScope(scope.customerId);
         }
         return result;
       }, { allowResultScopeChange: true }),
-    [customerId, runAction, selectedDocumentId]
+    [clearSelectedDocumentScope, customerId, runAction, selectedDocumentId]
   );
 
   React.useEffect(() => {

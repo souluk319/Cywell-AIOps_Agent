@@ -10,8 +10,11 @@ This checklist is the release gate for moving from verified CRC/dev mode to a pr
 - Local verification passed:
   - `npm run verify`
   - `npm run verify:knowledge-engine`
+  - `npm run verify:console:launcher-dom:built`
   - `npm run verify:console:topology-dom`
   - `npm run verify:console:integration`
+  - `npm run verify:pbs:live-prereqs`
+  - `npm run verify:pbs:cutover-bundle`
   - `npm run verify:deploy:manifests`
 - Production PBS live cutover is not proven yet.
 
@@ -31,8 +34,18 @@ These values must come from the target environment. Do not commit any secret val
 - Live PBS API base URL for smoke tests:
   - `CAS_PBS_BASE_URL=https://playbookstudio-runtime.playbookstudio.svc.cluster.local:8765`
 - Pinned PBS source revision for release evidence:
-  - `CAS_PBS_SOURCE_HEAD=<expected PBS git commit>`
-  - optional strict clean checkout gate: `CAS_PBS_REQUIRE_CLEAN_SOURCE=true`
+  - `CAS_PBS_SOURCE_HEAD=<approved full 40-character PBS git commit>`
+  - `npm run verify:release:source-pinning` must write `test-results/cas-pbs-source-contract-pinned.json`
+  - the PBS checkout must be clean, its `remote.origin.url` must match the approved PBS repository pattern, and the pinned contract file hash set must match the expected PBS runtime/API contract files
+- PBS runtime pods must expose the same approved source revision through an accepted annotation, label, or env value:
+  - `cywell.ai/pbs-source-head`
+  - `playbookstudio.io/source-revision`
+  - `app.kubernetes.io/revision`
+  - `org.opencontainers.image.revision`
+  - `PBS_SOURCE_REVISION`
+  - `PLAYBOOKSTUDIO_SOURCE_HEAD`
+  - `SOURCE_REVISION`
+  - `GIT_COMMIT`
 - Local cutover smoke PBS auth material:
   - `CAS_PBS_BEARER_TOKEN`, `CAS_PBS_API_KEY`, or `CAS_PBS_BEARER_TOKEN_FILE`
 - PBS bearer token material for:
@@ -138,12 +151,14 @@ Required result:
 - `verify:pbs:preflight:live:site:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
 - `render-pbs-cutover-bundle.mjs --require-live-ready` writes `test-results/cas-pbs-cutover-bundle.json` with `status=PASS` and `phase=live-preapply-ready`.
 - `render-pbs-cutover-bundle.mjs --require-live-ready` confirms CRC deployment, release-image, and generated-site preapply evidence share the same cluster identity.
+- `render-pbs-cutover-bundle.mjs --require-live-ready` confirms generated-site preapply evidence is fresh, newer than the release/prereq evidence it depends on, and not older than the configured live preapply freshness window.
 - `render-pbs-cutover-bundle.mjs --require-live-ready` recomputes the current generated live-prereq file hashes, generated `pbs-live-site` render hash, and redacted-summary hash before accepting the evidence.
-- `render-pbs-cutover-bundle.mjs --require-live-ready` accepts PBS source evidence only when `CAS_PBS_SOURCE_HEAD` is a full 40-character approved SHA and the PBS checkout is clean.
+- `render-pbs-cutover-bundle.mjs --require-live-ready` accepts PBS source evidence only from `test-results/cas-pbs-source-contract-pinned.json`, where `CAS_PBS_SOURCE_HEAD` is a full 40-character approved SHA, the PBS checkout is clean, the PBS remote is approved, and every required PBS contract file has a 64-character SHA-256 hash.
+- `render-pbs-cutover-bundle.mjs --require-live-ready` confirms every ready PBS runtime pod in live preapply evidence is stamped with the same approved PBS source SHA.
 - `verify:pbs:preflight:live:site:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
 - `verify:pbs:preflight:live:site:preapply` confirms release-image evidence is current-head and sourced from non-stale CRC deployment evidence.
 - `verify:pbs:preflight:live:site:preapply` confirms the Gateway Kubernetes API NetworkPolicy allows the API IP and port in the same egress rule.
-- `verify:pbs:preflight:live:site:preapply` confirms `playbookstudio-runtime` has ready Endpoints on port `8765` once the PBS namespace/service exists.
+- `verify:pbs:preflight:live:site:preapply` confirms `CAS_PBS_BASE_URL` targets the `playbookstudio-runtime` Service DNS on port `8765`, the Service exposes port `8765`, ready Endpoints exist on port `8765`, and `/api/health` reports DB, pgvector, corpus/index, compiled wiki, and `official_docs,study_docs` readiness once the PBS namespace/service exists.
 - `verify:pbs:preflight:live:site:preapply` confirms `cas-pbs-auth`, `cas-knowledge-internal-auth`, and `cas-knowledge-postgres-live` contain usable non-placeholder values; the Postgres `database-url` credentials/database must match the individual Secret keys.
 
 Stop immediately if any gate fails.
@@ -227,7 +242,9 @@ Save command output or JSON artifacts for the release record:
 - `test-results/cas-pbs-live-smoke-cluster-cutover.json`
 - `test-results/cas-release-images.json`
 - `test-results/cas-pbs-live-prereqs-render.json`
-- `test-results/cas-pbs-source-contract.json`, including `pbsSource.head`, `pbsSource.treeStatus`, and `pbsSource.contractFileSha256`
+- `test-results/cas-pbs-source-contract.json`, optional source/API contract evidence from the default verifier
+- `test-results/cas-pbs-source-contract-required.json`, required source/API contract evidence
+- `test-results/cas-pbs-source-contract-pinned.json`, strict release pinning evidence including `pbsSource.expectedHead`, `pbsSource.fullHead`, approved `pbsSource.remoteOriginUrl`, clean `pbsSource.treeStatus`, and the exact `pbsSource.contractFileSha256` set
 - `test-results/cas-pbs-cutover-bundle.json`, with `status=PASS` and `phase=live-preapply-ready`
 
 ## Completion Definition

@@ -1,12 +1,19 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - Scope Reset, Input Template, Cutover Evidence, and Deep-Link Scope Hardening
+## Latest Update - Launcher DOM Proof, Source Pinning, and Live Cutover Gate Hardening
 
 Implemented after the parallel console/cutover/evidence review pass:
 
+- The CAS launcher now has a browser-backed DOM harness that mounts the real console context-provider hook, suppresses a pre-existing OpenShift Lightspeed launcher, proves exactly one bottom-right `cas-launcher-button` is rendered in the real corner, opens the CAS panel, calls Gateway brain readiness, posts read-only query bodies through `/api/aiops/query`, preserves `conversation_id`, and reports browser/page errors.
+- Invalid bare `document_id` query params under `/cywell/rag` now get repaired to the loaded upload-report document instead of preserving a missing URL-created viewer target; if reports are empty, the URL-created selected-document scope is cleared before RAG runs. Topology/wiki viewer lineage is still preserved when it originates from an actual selected viewer target.
+- PBS source-contract evidence is split into optional, required, and strict pinned files: `cas-pbs-source-contract.json`, `cas-pbs-source-contract-required.json`, and `cas-pbs-source-contract-pinned.json`. Strict pinning records and validates the approved PBS git remote; the cutover bundle accepts only the strict pinned evidence produced by `verify:release:source-pinning`.
+- PBS live preflight now requires the live PBS base URL to target `playbookstudio-runtime.playbookstudio.svc.cluster.local:8765` or the equivalent short service DNS on port `8765`, and requires the Service `port` itself to be `8765`, not only `targetPort`.
+- PBS live preflight records ready runtime pod source revisions and, in live cluster-required mode, requires every ready PBS runtime pod to be stamped with the approved pinned PBS source SHA. When the runtime Service exists, it also probes `/api/health` through Service DNS from a runtime pod and requires DB, pgvector, corpus/index, compiled wiki, and `official_docs,study_docs` ready scopes.
+- The cutover bundle now rejects stale generated-site preapply evidence, dirty required local evidence, runtime pods whose source revision does not match the pinned PBS source SHA, unapproved PBS source remotes, and weak PBS source-contract hash sets that do not contain the exact expected contract files with 64-character SHA-256 hashes.
+- Live prerequisite rendering now rejects malformed ACL grant tables such as string grants under named owners/users/groups; only concrete arrays of customer IDs are accepted.
 - Console Knowledge customer changes now clear selected corpus document, viewer state, previous action result, topology state, and document/note query params before the next RAG/Wiki/topology action, while scope revision guards ignore late upload/RAG/wiki/topology responses from the previous customer.
 - Knowledge route navigation preserves the active customer/document query context across customer data, RAG, LLM Wiki, and topology pages. Wiki-note deep links now include source `document_id` when present, deep-linked notes use that selected-document scope before upload reports load, and browser back/forward reconciles URL state back into React state.
-- The browser DOM gate now proves that switching from `workflow-customer` to `workflow-switched` clears stale `workflow-doc-1` selected-document RAG scope before sending `/api/knowledge/rag/query`, that late upload/RAG/topology responses cannot restore stale scope/results, that Wiki-note deep links carry `pbs-rich-upload` into LLM Wiki requests, and that a viewer deep-link back navigation restores route state.
+- The topology browser DOM gate now proves that switching from `workflow-customer` to `workflow-switched` clears stale `workflow-doc-1` selected-document RAG scope before sending `/api/knowledge/rag/query`, that late upload/RAG/topology responses cannot restore stale scope/results, that Wiki-note deep links carry `pbs-rich-upload` into LLM Wiki requests, that invalid query-document deep links are repaired, and that a viewer deep-link back navigation restores route state.
 - PBS preflight evidence for generated-site live checks now writes `test-results/cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json`, preventing generated `pbs-live-site` evidence from overwriting default pbs-live evidence.
 - `render:pbs:live-prereqs:template` now writes non-secret handoff templates under `test-results/pbs-live-prereqs-input-template/`; operators copy them outside the repo before filling approved token, owner-HMAC, ACL, and Postgres values.
 - The cutover bundle now requires current clean `fullHead/treeStatus` evidence, generated-site preapply flags/path, matching CRC/release/preapply cluster identity, exact live prereq output hash keys, recomputed generated-file/site-overlay/redacted-summary hashes, clean real-render prereq evidence bound to `test-results/pbs-live-prereqs`, and strict full-SHA PBS source pinning.
@@ -18,15 +25,16 @@ Proof captured in this pass:
 
 - `node --check` passed for changed verifier/release/cutover scripts.
 - `npm run verify:console-plugin`: PASS.
-- `npm run verify:console:topology-dom:built`: PASS, 49 browser-backed checks.
-- `npm run verify:console:integration:built`: PASS, 109 checks.
-- `npm run verify:pbs:cutover-bundle`: PASS, 14 self-test checks.
-- `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`, until the git tree is committed, live prereqs are regenerated from the current clean HEAD, generated-site preapply evidence is clean/current, and PBS source evidence is strictly full-SHA pinned.
-- `npm run verify:deploy:manifests`: PASS, 283 checks.
-- `npm run verify:pbs:source-contract:required`: PASS, 31 total checks: 30 PASS / 1 WARN for dirty `F:\AI_Projects\PBS-Dev3`.
-- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, `47 PASS / 7 FAIL`; failures remain missing external `playbookstudio` namespace/service, missing `cas-pbs-auth`, missing `cas-knowledge-postgres-live`, and existing legacy `cas-knowledge-postgres` dev Secret.
+- `npm run verify:console:launcher-dom:built`: PASS, 9 browser-backed checks.
+- `npm run verify:console:topology-dom:built`: PASS, 51 browser-backed checks.
+- `npm run verify:console:integration:built`: PASS, 112 checks.
+- `npm run verify:pbs:cutover-bundle`: PASS, 18 self-test checks.
+- `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`, until this tree is committed/clean, real live prereq render evidence is regenerated from the current clean HEAD, generated-site preapply evidence is fresh and hash-bound to that render, `cas-pbs-source-contract-pinned.json` is produced by strict full-SHA source pinning from an approved clean PBS checkout, and live preapply records PBS runtime pods stamped with that same SHA. External live preapply blockers are retained in the active blocker list even when local evidence is invalid.
+- `npm run verify:deploy:manifests`: PASS, 286 checks.
+- `npm run verify:pbs:source-contract:required`: PASS, 32 total checks: 31 PASS / 1 WARN for dirty `F:\AI_Projects\PBS-Dev3`; the checked PBS remote is `git@github.com:souluk319/PBS_DEV_Part3.git`.
+- `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL until the external `playbookstudio` namespace/service/runtime pods, `cas-pbs-auth`, `cas-knowledge-postgres-live`, legacy dev Secret cleanup, release image evidence, and pinned PBS runtime source revision evidence are all present.
 - `npm run render:pbs:live-prereqs`: blocked in the current shell until approved non-placeholder PBS bearer token, owner HMAC, service owner, concrete customer ACL JSON, and live Postgres DB credentials/URL are supplied.
-- `npm run verify:pbs:live-prereqs`: PASS, 11 self-test checks.
+- `npm run verify:pbs:live-prereqs`: PASS, 12 self-test checks.
 - `npm run verify`: PASS.
 
 ## Historical Update - Customer Corpus Workbench and Source-Lane Hardening

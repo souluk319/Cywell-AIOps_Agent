@@ -274,6 +274,7 @@ function topologyResponse(customerId) {
 }
 
 function workflowReportItems(customerId) {
+  if (customerId === "empty-reports") return [];
   return [
     {
       id: "workflow-doc-1",
@@ -809,6 +810,35 @@ try {
       "RAG result answer and citation render outside debug JSON",
       JSON.stringify({ selectedRagAnswer, selectedRagCitationText })
     );
+    const invalidDocumentReports = page.waitForResponse(
+      (response) => response.url().includes("/api/knowledge/uploads/reports?customer_id=workflow-customer") && response.status() === 200
+    );
+    await page.goto(`${serverHandle.url}/cywell/rag?customer_id=workflow-customer&document_id=missing-doc`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-rag"]', { timeout: 15000 });
+    await invalidDocumentReports;
+    await page.waitForFunction(() => document.querySelector('[data-test="cas-knowledge-scope-bar"]')?.textContent?.includes("Workflow Router Report"));
+    const repairedScopeText = await page.locator('[data-test="cas-knowledge-scope-bar"]').innerText();
+    const repairedUrl = page.url();
+    const invalidDocumentCallStart = calls.length;
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-rag-query"]').click()
+    ]);
+    const repairedRagCall = calls
+      .slice(invalidDocumentCallStart)
+      .find((call) => call.method === "POST" && call.path === "/api/knowledge/rag/query" && call.body?.customer_id === "workflow-customer");
+    expect(
+      "console-topology-dom:invalid-document-deeplink-repairs-scope",
+      repairedScopeText.includes("workflow-doc-1") &&
+        !repairedScopeText.includes("missing-doc") &&
+        repairedUrl.includes("document_id=workflow-doc-1") &&
+        repairedRagCall?.body?.active_document_id === "workflow-doc-1" &&
+        repairedRagCall?.body?.document_source_id === "workflow-doc-1" &&
+        Array.isArray(repairedRagCall?.body?.enabled_upload_document_ids) &&
+        repairedRagCall.body.enabled_upload_document_ids.includes("workflow-doc-1"),
+      "invalid document_id deep links are repaired to a real customer corpus document before RAG runs",
+      JSON.stringify({ repairedScopeText, repairedUrl, body: repairedRagCall?.body })
+    );
     await page.getByLabel("RAG question").fill("slow-selected-rag");
     const slowSelectedRagResponse = page.waitForResponse(
       (response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200
@@ -872,6 +902,35 @@ try {
         switchedCustomerRagCall.body.enabled_source_scopes.includes("wiki_vault"),
       "changing customers clears stale selected-document retrieval scope before the next RAG query",
       JSON.stringify({ switchedScopeText, body: switchedCustomerRagCall?.body })
+    );
+
+    const emptyReportsLoad = page.waitForResponse(
+      (response) => response.url().includes("/api/knowledge/uploads/reports?customer_id=empty-reports") && response.status() === 200
+    );
+    await page.goto(`${serverHandle.url}/cywell/rag?customer_id=empty-reports&document_id=ghost-doc`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-rag"]', { timeout: 15000 });
+    await emptyReportsLoad;
+    await page.waitForFunction(() => document.querySelector('[data-test="cas-knowledge-scope-bar"]')?.textContent?.includes("Full corpus"));
+    const emptyReportsScopeText = await page.locator('[data-test="cas-knowledge-scope-bar"]').innerText();
+    const emptyReportsUrl = page.url();
+    const emptyReportsCallStart = calls.length;
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/rag/query") && response.status() === 200),
+      page.locator('[data-test="cas-knowledge-rag-query"]').click()
+    ]);
+    const emptyReportsRagCall = calls
+      .slice(emptyReportsCallStart)
+      .find((call) => call.method === "POST" && call.path === "/api/knowledge/rag/query" && call.body?.customer_id === "empty-reports");
+    expect(
+      "console-topology-dom:invalid-document-deeplink-clears-empty-reports-scope",
+      emptyReportsScopeText.includes("Full corpus") &&
+        !emptyReportsScopeText.includes("ghost-doc") &&
+        !emptyReportsUrl.includes("document_id=ghost-doc") &&
+        !emptyReportsRagCall?.body?.active_document_id &&
+        !emptyReportsRagCall?.body?.document_source_id &&
+        !emptyReportsRagCall?.body?.enabled_upload_document_ids,
+      "invalid document_id deep links are cleared when reports contain no repair target",
+      JSON.stringify({ emptyReportsScopeText, emptyReportsUrl, body: emptyReportsRagCall?.body })
     );
 
     const noteReports = page.waitForResponse(

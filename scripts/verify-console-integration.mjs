@@ -83,6 +83,12 @@ expectText(
   "launcher copy states CAS is the Lightspeed replacement"
 );
 expectText(
+  "console-chat:native-lightspeed-suppressed",
+  launcherSource,
+  "data-cas-suppressed-lightspeed",
+  "launcher suppresses the native OpenShift Lightspeed floating launcher while CAS is mounted"
+);
+expectText(
   "console-chat:usertoken-copy",
   launcherSource,
   "UserToken proxy",
@@ -418,8 +424,20 @@ expectText(
 expectText(
   "console-knowledge:upload-report-repair-preserves-viewer-lineage",
   knowledgeRouteSource,
-  "selectedViewerDocumentId !== selectedDocumentId",
+  "selectedViewerKeepsDocumentLineage",
   "knowledge route does not replace topology/wiki viewer document lineage just because upload reports omit that document"
+);
+expectText(
+  "console-knowledge:invalid-query-document-repair",
+  knowledgeRouteSource,
+  "metadata?.from_query_params !== true",
+  "knowledge route repairs bare invalid document_id query params instead of preserving a non-existent selected document"
+);
+expectText(
+  "console-knowledge:invalid-query-empty-reports-clear",
+  knowledgeRouteSource,
+  "clearSelectedDocumentScope(scope.customerId)",
+  "knowledge route clears URL-created selected document scope when upload reports have no repair target"
 );
 expectText(
   "console-knowledge:wiki-selected-document",

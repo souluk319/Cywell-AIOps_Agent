@@ -16,13 +16,21 @@ const requireLiveReady = args.has("--require-live-ready") || /^(1|true|yes|y|on)
 const allowDirty = args.has("--allow-dirty") || /^(1|true|yes|y|on)$/i.test(process.env.CAS_PBS_CUTOVER_BUNDLE_ALLOW_DIRTY || "");
 const selfTest = args.has("--self-test");
 const checkedAt = new Date().toISOString();
+const maxLivePreapplyAgeMinutesInput = Number(process.env.CAS_PBS_CUTOVER_MAX_PREAPPLY_AGE_MINUTES || 120);
+const maxLivePreapplyAgeMinutes = Number.isFinite(maxLivePreapplyAgeMinutesInput) && maxLivePreapplyAgeMinutesInput > 0 ? maxLivePreapplyAgeMinutesInput : 120;
+const defaultApprovedPbsRemotePattern = "github\\.com[:/]souluk319/PBS_DEV_Part3(?:\\.git)?$";
+const approvedPbsRemotePatterns = (process.env.CAS_PBS_APPROVED_REMOTE_PATTERN || defaultApprovedPbsRemotePattern)
+  .split(",")
+  .map((pattern) => pattern.trim())
+  .filter(Boolean)
+  .map((pattern) => new RegExp(pattern, "i"));
 
 const requiredLocalEvidence = [
   ["crcDeployment", "cas-crc-deployment.json", "CRC deployment evidence"],
   ["releaseImages", "cas-release-images.json", "CRC release image promotion evidence"],
   ["deployManifests", "cas-deploy-manifests.json", "deployment manifest verification evidence"],
   ["livePrereqsRender", "cas-pbs-live-prereqs-render.json", "PBS live prerequisite real-render evidence"],
-  ["sourceContract", "cas-pbs-source-contract.json", "PBS source contract evidence"]
+  ["sourceContract", "cas-pbs-source-contract-pinned.json", "strict pinned PBS source contract evidence"]
 ];
 
 const livePreapplyEvidence = [
@@ -42,6 +50,16 @@ const requiredLivePrereqOutputFileKeys = [
   "siteKustomization",
   "siteCustomerAccessJson",
   "summary"
+];
+const requiredPbsContractFiles = [
+  "deploy/Dockerfile",
+  "docker-compose.yml",
+  "src/play_book_studio/http/server_handler_factory.py",
+  "src/play_book_studio/http/upload_api.py",
+  "src/play_book_studio/http/url_ingest_api.py",
+  "src/play_book_studio/http/server_chat.py",
+  "src/play_book_studio/http/wiki_vault.py",
+  "src/play_book_studio/wiki_loop.py"
 ];
 
 function runGit(gitArgs) {
@@ -161,6 +179,8 @@ function readEvidence(baseDir, [key, fileName, label]) {
     outputFileSha256: json.outputFileSha256,
     renderedSiteOverlaySha256: json.renderedSiteOverlaySha256,
     redactedSummarySha256: json.redactedSummarySha256,
+    pbsPinnedSourceEvidencePath: json.pbsPinnedSourceEvidencePath,
+    pbsRuntimeSourceEvidence: json.pbsRuntimeSourceEvidence,
     requireSource: json.requireSource,
     requireCleanSource: json.requireCleanSource,
     requireExpectedHead: json.requireExpectedHead,
@@ -171,6 +191,7 @@ function readEvidence(baseDir, [key, fileName, label]) {
           branch: json.pbsSource.branch,
           head: json.pbsSource.head,
           fullHead: json.pbsSource.fullHead,
+          remoteOriginUrl: json.pbsSource.remoteOriginUrl,
           treeStatus: json.pbsSource.treeStatus,
           requireCleanSource: json.pbsSource.requireCleanSource,
           expectedHead: json.pbsSource.expectedHead,
@@ -191,7 +212,8 @@ function blockerAction(blocker) {
   const id = blocker.id || "";
   const detail = blocker.detail || "";
   if (id.includes("livePrereqsRender") || id.includes("live-prereqs")) return "Regenerate real live prereq evidence with npm run render:pbs:live-prereqs after approved Secret/ACL/Postgres inputs are supplied.";
-  if (id.includes("source-contract-pinned")) return "Set CAS_PBS_SOURCE_HEAD to the approved PBS full SHA, clean the PBS checkout, then run npm run verify:release:source-pinning.";
+  if (id.includes("live-runtime-source-revision")) return "Stamp every ready PBS runtime pod with the approved PBS full SHA using an accepted annotation, label, or env value, then rerun live-site preapply.";
+  if (id.includes("source-contract-pinned")) return "Regenerate pinned source evidence with CAS_PBS_SOURCE_HEAD on the approved clean PBS checkout, verify the approved remote, and resolve any exact contract-file hash-set drift.";
   if (id.includes("pbs-namespace")) return "Deploy or grant access to the real playbookstudio namespace.";
   if (id.includes("pbs-runtime-service")) return "Expose playbookstudio-runtime on port 8765 with the required runtime labels and ready Endpoints.";
   if (id.includes("pbs-auth-secret")) return "Create cas-pbs-auth/bearer-token from approved secret material outside git.";
@@ -204,6 +226,16 @@ function blockerAction(blocker) {
 
 function uniqueActions(blockers) {
   return [...new Set(blockers.map(blockerAction).filter(Boolean))];
+}
+
+function uniqueBlockers(blockers) {
+  const seen = new Set();
+  return blockers.filter((blocker) => {
+    const key = `${blocker.id || ""}\n${blocker.detail || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function commandPlan() {
@@ -237,6 +269,20 @@ function clusterIdentityMatches(expected = {}, actual = {}) {
 
 function clusterIdentitySummary(identity = {}) {
   return clusterIdentityFields.map((field) => `${field}=${identity[field] ?? "missing"}`).join(", ");
+}
+
+function evidenceTimeMs(evidence) {
+  const value = Date.parse(String(evidence?.checkedAt ?? ""));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function livePreapplyTimingValid(livePreapply, livePrereqsRender, releaseImages) {
+  const preapplyTime = evidenceTimeMs(livePreapply);
+  if (!preapplyTime) return false;
+  const maxAgeMs = Math.max(1, maxLivePreapplyAgeMinutes) * 60 * 1000;
+  if (Date.parse(checkedAt) - preapplyTime > maxAgeMs) return false;
+  const prerequisiteTimes = [livePrereqsRender, releaseImages].map(evidenceTimeMs).filter(Boolean);
+  return prerequisiteTimes.every((time) => preapplyTime >= time);
 }
 
 function clusterEvidenceFailures(artifacts) {
@@ -370,6 +416,12 @@ function isStrictGeneratedSitePreapply(evidence, meta, livePrereqsRender, baseDi
 
 function sourceContractPinned(evidence) {
   const pbsSource = evidence.pbsSource;
+  const hashes = pbsSource?.contractFileSha256 ?? {};
+  const hashKeys = Object.keys(hashes).sort();
+  const expectedKeys = [...requiredPbsContractFiles].sort();
+  const exactHashSet =
+    hashKeys.length === expectedKeys.length &&
+    expectedKeys.every((key, index) => hashKeys[index] === key && /^[a-f0-9]{64}$/i.test(String(hashes[key] ?? "")));
   return Boolean(
     evidence.requireSource &&
       evidence.requireCleanSource &&
@@ -379,8 +431,23 @@ function sourceContractPinned(evidence) {
       /^[a-f0-9]{40}$/i.test(String(pbsSource?.expectedHead ?? "")) &&
       /^[a-f0-9]{40}$/i.test(String(pbsSource?.fullHead ?? "")) &&
       pbsSource.fullHead === pbsSource.expectedHead &&
-      pbsSource?.contractFileSha256 &&
-      Object.values(pbsSource.contractFileSha256).every(Boolean)
+      approvedPbsRemoteUrl(pbsSource?.remoteOriginUrl) &&
+      exactHashSet
+  );
+}
+
+function approvedPbsRemoteUrl(value) {
+  const remote = String(value ?? "").trim();
+  return Boolean(remote && approvedPbsRemotePatterns.some((pattern) => pattern.test(remote)));
+}
+
+function livePreapplyRuntimeSourceMatches(livePreapply, sourceContract) {
+  const expectedHead = sourceContract?.pbsSource?.expectedHead;
+  const runtimeSources = Array.isArray(livePreapply?.pbsRuntimeSourceEvidence) ? livePreapply.pbsRuntimeSourceEvidence : [];
+  return Boolean(
+    /^[a-f0-9]{40}$/i.test(String(expectedHead ?? "")) &&
+      runtimeSources.length > 0 &&
+      runtimeSources.every((source) => source?.revision === expectedHead)
   );
 }
 
@@ -396,10 +463,16 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
   if (meta.treeStatus !== "clean" && !allowDirty) {
     localGateFailures.push({ id: "cutover-bundle:git-tree-clean", detail: "current git tree is dirty; commit and rerun release evidence before bundling cutover proof" });
   }
+  if (requireLiveReady && allowDirty) {
+    localGateFailures.push({ id: "cutover-bundle:allow-dirty-live-ready", detail: "live-ready cutover bundles cannot be rendered with --allow-dirty or CAS_PBS_CUTOVER_BUNDLE_ALLOW_DIRTY" });
+  }
   for (const [key] of requiredLocalEvidence) {
     const evidence = artifacts[key];
     if (!evidence.exists) localGateFailures.push({ id: `cutover-bundle:${key}:missing`, detail: `${evidence.fileName} is missing` });
     else if (evidence.status !== "PASS") localGateFailures.push({ id: `cutover-bundle:${key}:status`, detail: `${evidence.fileName} status is ${evidence.status}, expected PASS` });
+    if (evidence.exists && evidence.treeStatus !== "clean") {
+      localGateFailures.push({ id: `cutover-bundle:${key}:clean-source`, detail: `${evidence.fileName} must be produced from a clean git tree; found ${evidence.treeStatus || "missing"}` });
+    }
     if (!currentHeadMatches(evidence, meta)) {
       localGateFailures.push({ id: `cutover-bundle:${key}:head`, detail: `${evidence.fileName} head ${evidence.head || evidence.fullHead || "missing"} does not match current HEAD ${meta.head}` });
     }
@@ -422,15 +495,27 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
   if (sourceContract?.exists && !sourceContractPinned(sourceContract)) {
     localGateFailures.push({
       id: "cutover-bundle:source-contract-pinned",
-      detail: "cas-pbs-source-contract.json must come from verify:release:source-pinning with clean PBS source and CAS_PBS_SOURCE_HEAD"
+      detail: "cas-pbs-source-contract-pinned.json must come from verify:release:source-pinning with clean PBS source and CAS_PBS_SOURCE_HEAD"
     });
   }
 
   const livePreapply = artifacts.livePreapply;
+  if (livePreapply?.exists && sourceContract?.exists && !livePreapplyRuntimeSourceMatches(livePreapply, sourceContract)) {
+    localGateFailures.push({
+      id: "cutover-bundle:live-runtime-source-revision",
+      detail: `${livePreapply.fileName} must record ready PBS runtime pods stamped with the same full SHA as ${sourceContract.fileName}`
+    });
+  }
   if (livePreapply?.exists && !isStrictGeneratedSitePreapply(livePreapply, meta, livePrereqsRender, baseDir)) {
     localGateFailures.push({
       id: "cutover-bundle:live-preapply-generated-site",
       detail: `${livePreapply.fileName} must be current clean generated-site preapply evidence for ${expectedGeneratedSiteOverlayPath} with cluster, required-secret, skip-applied flags, and the same rendered site-overlay hash as current live prerequisite evidence`
+    });
+  }
+  if (livePreapply?.exists && !livePreapplyTimingValid(livePreapply, livePrereqsRender, artifacts.releaseImages)) {
+    localGateFailures.push({
+      id: "cutover-bundle:live-preapply-fresh",
+      detail: `${livePreapply.fileName} must be newer than release/prereq evidence and no older than ${maxLivePreapplyAgeMinutes} minutes`
     });
   }
   const liveBlockers = livePreapply.failedChecks ?? [];
@@ -452,7 +537,7 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
     phase = "external-live-prerequisites-missing";
   }
 
-  const blockers = status === "FAIL" ? localGateFailures : liveBlockers;
+  const blockers = uniqueBlockers([...localGateFailures, ...liveBlockers]);
   const artifactSummary = Object.values(artifacts).map((artifact) => ({
     key: artifact.key,
     path: artifact.path,
@@ -557,6 +642,8 @@ async function runSelfTest() {
     };
     const pbsFullHead = "d".repeat(40);
     const pbsShortHead = pbsFullHead.slice(0, 7);
+    const contractFileSha256 = Object.fromEntries(requiredPbsContractFiles.map((file) => [file, sha256Text(file)]));
+    const approvedPbsRemote = "git@github.com:souluk319/PBS_DEV_Part3.git";
     const tempEvidencePath = (recordedPath) => join(tempRoot, normalizePath(recordedPath).replace(/^test-results\//, ""));
     const writeTempEvidenceFile = (recordedPath, content) => {
       const actualPath = tempEvidencePath(recordedPath);
@@ -613,6 +700,7 @@ async function runSelfTest() {
         overlay: "pbs-live",
         overlayPath: expectedGeneratedSiteOverlayPath,
         renderedSiteOverlaySha256: renderedSiteOverlayHash(tempRoot),
+        pbsRuntimeSourceEvidence: [{ name: "playbookstudio-runtime-abc", revisionKey: "org.opencontainers.image.revision", revision: pbsFullHead, imageIDs: ["image@example@sha256:abc"] }],
         requireCluster: true,
         requireSecret: true,
         skipApplied: true,
@@ -626,12 +714,12 @@ async function runSelfTest() {
       });
     for (const [, fileName] of requiredLocalEvidence) write(fileName, base);
     writeLivePrereqEvidence();
-    write("cas-pbs-source-contract.json", {
+    write("cas-pbs-source-contract-pinned.json", {
       ...base,
       requireSource: true,
       requireCleanSource: true,
       requireExpectedHead: true,
-      pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256: { "deploy/Dockerfile": "hash" } },
+      pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256 },
       checks: [{ status: "PASS", id: "ok", detail: "ok" }]
     });
     writeLivePreapplyEvidence();
@@ -688,6 +776,17 @@ async function runSelfTest() {
         "fixture rejects preapply evidence that rendered a different generated site overlay hash"
       ],
       [
+        "cutover-bundle:self-test-aged-preapply-rejected",
+        (() => {
+          const staleCheckedAt = new Date(Date.parse(checkedAt) - (maxLivePreapplyAgeMinutes + 5) * 60 * 1000).toISOString();
+          writeLivePreapplyEvidence({ checkedAt: staleCheckedAt });
+          const stale = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          writeLivePreapplyEvidence();
+          return stale.status === "FAIL" && stale.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:live-preapply-fresh");
+        })(),
+        "fixture rejects generated-site preapply evidence older than the cutover freshness window"
+      ],
+      [
         "cutover-bundle:self-test-cluster-mismatch-rejected",
         (() => {
           writeLivePreapplyEvidence({ clusterIdentity: { ...clusterIdentity, namespaceUid: "other-namespace" } });
@@ -698,14 +797,36 @@ async function runSelfTest() {
         "fixture rejects live preapply evidence from a different cluster identity"
       ],
       [
+        "cutover-bundle:self-test-runtime-source-mismatch-rejected",
+        (() => {
+          writeLivePreapplyEvidence({
+            pbsRuntimeSourceEvidence: [{ name: "playbookstudio-runtime-abc", revisionKey: "org.opencontainers.image.revision", revision: "e".repeat(40), imageIDs: ["image@example@sha256:abc"] }]
+          });
+          const mismatched = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          writeLivePreapplyEvidence();
+          return mismatched.status === "FAIL" && mismatched.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:live-runtime-source-revision");
+        })(),
+        "fixture rejects live runtime pods that are not stamped with the pinned PBS source revision"
+      ],
+      [
+        "cutover-bundle:self-test-dirty-local-evidence-rejected",
+        (() => {
+          write("cas-deploy-manifests.json", { ...base, treeStatus: "dirty" });
+          const dirtyEvidence = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          write("cas-deploy-manifests.json", base);
+          return dirtyEvidence.status === "FAIL" && dirtyEvidence.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:deployManifests:clean-source");
+        })(),
+        "fixture rejects required local evidence generated from a dirty git tree"
+      ],
+      [
         "cutover-bundle:self-test-dirty-source-rejected",
         (() => {
-          write("cas-pbs-source-contract.json", {
+          write("cas-pbs-source-contract-pinned.json", {
             ...base,
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, treeStatus: "dirty", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256: { "deploy/Dockerfile": "hash" } },
+            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "dirty", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256 },
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
@@ -715,12 +836,12 @@ async function runSelfTest() {
       [
         "cutover-bundle:self-test-source-full-head-mismatch-rejected",
         (() => {
-          write("cas-pbs-source-contract.json", {
+          write("cas-pbs-source-contract-pinned.json", {
             ...base,
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, treeStatus: "clean", requireCleanSource: true, expectedHead: "0".repeat(40), contractFileSha256: { "deploy/Dockerfile": "hash" } },
+            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: "0".repeat(40), contractFileSha256 },
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
@@ -728,14 +849,78 @@ async function runSelfTest() {
         "fixture rejects PBS source-contract evidence when fullHead differs from expectedHead"
       ],
       [
-        "cutover-bundle:self-test-prereq-self-test-rejected",
+        "cutover-bundle:self-test-source-contract-hash-set-rejected",
         (() => {
-          write("cas-pbs-source-contract.json", {
+          const missingHashSet = { ...contractFileSha256 };
+          delete missingHashSet["src/play_book_studio/wiki_loop.py"];
+          write("cas-pbs-source-contract-pinned.json", {
             ...base,
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256: { "deploy/Dockerfile": "hash" } },
+            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256: missingHashSet },
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          const missing = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: {
+              branch: "main",
+              head: pbsShortHead,
+              fullHead: pbsFullHead,
+              remoteOriginUrl: approvedPbsRemote,
+              treeStatus: "clean",
+              requireCleanSource: true,
+              expectedHead: pbsFullHead,
+              contractFileSha256: { ...contractFileSha256, "unexpected.py": sha256Text("unexpected.py") }
+            },
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          const extra = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: {
+              branch: "main",
+              head: pbsShortHead,
+              fullHead: pbsFullHead,
+              remoteOriginUrl: approvedPbsRemote,
+              treeStatus: "clean",
+              requireCleanSource: true,
+              expectedHead: pbsFullHead,
+              contractFileSha256: { ...contractFileSha256, "deploy/Dockerfile": "short-hash" }
+            },
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          const short = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256 },
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          return [missing, extra, short].every(
+            (bundle) => bundle.status === "FAIL" && bundle.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:source-contract-pinned")
+          );
+        })(),
+        "fixture rejects missing, extra, or short PBS source contract hashes"
+      ],
+      [
+        "cutover-bundle:self-test-prereq-self-test-rejected",
+        (() => {
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256 },
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           write("cas-pbs-live-prereqs-render.json", { ...base, mode: "self-test" });
@@ -746,12 +931,12 @@ async function runSelfTest() {
       [
         "cutover-bundle:self-test-missing-prereq-output-rejected",
         (() => {
-          write("cas-pbs-source-contract.json", {
+          write("cas-pbs-source-contract-pinned.json", {
             ...base,
             requireSource: true,
             requireCleanSource: true,
             requireExpectedHead: true,
-            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256: { "deploy/Dockerfile": "hash" } },
+            pbsSource: { branch: "main", head: pbsShortHead, fullHead: pbsFullHead, remoteOriginUrl: approvedPbsRemote, treeStatus: "clean", requireCleanSource: true, expectedHead: pbsFullHead, contractFileSha256 },
             checks: [{ status: "PASS", id: "ok", detail: "ok" }]
           });
           writeLivePrereqEvidence({ keys: ["pbsAuthSecret", "postgresSecret", "liveConfig", "summary"] });
@@ -775,10 +960,11 @@ async function runSelfTest() {
             failedBundle.status === "FAIL" &&
             failedBundle.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:live-prereqs-real-render") &&
             failedBundle.externalLiveBlockers.some((blocker) => blocker.id === "cluster:pbs-namespace") &&
+            failedBundle.blockers.some((blocker) => blocker.id === "cluster:pbs-namespace") &&
             failedBundle.nextActions.some((action) => action.includes("playbookstudio namespace"))
           );
         })(),
-        "fixture preserves external live preapply blockers even when local evidence is invalid"
+        "fixture preserves external live preapply blockers in active blockers even when local evidence is invalid"
       ]
     ];
     for (const [id, ok, detail] of checks) {

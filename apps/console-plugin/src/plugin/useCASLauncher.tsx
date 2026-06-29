@@ -56,6 +56,17 @@ type ChatMessage = {
 };
 
 const initialQuestion = "ClusterVersion 상태를 한 문장으로 요약해줘.";
+const lightspeedLauncherSelectors = [
+  '[data-test="lightspeed-launcher-button"]',
+  '[data-test="lightspeed-chat-button"]',
+  '[data-test="ols-chatbot-button"]',
+  '[aria-label="OpenShift Lightspeed"]',
+  '[aria-label="Lightspeed"]',
+  '[title="OpenShift Lightspeed"]',
+  '[title="Lightspeed"]',
+  ".ols-chatbot-button",
+  "#ols-chatbot-button"
+];
 
 const styles = `
 .cas-launcher-root {
@@ -437,6 +448,38 @@ function CASLauncher() {
       content: "CAS가 OpenShift Lightspeed 기능을 내부 뇌로 사용해 읽기 전용 분석을 수행합니다."
     }
   ]);
+
+  React.useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const suppressed = new Map<HTMLElement, { display: string; ariaHidden: string | null }>();
+    const suppressLightspeedLaunchers = () => {
+      for (const selector of lightspeedLauncherSelectors) {
+        document.querySelectorAll<HTMLElement>(selector).forEach((element) => {
+          if (element.closest(".cas-launcher-root") || suppressed.has(element)) return;
+          suppressed.set(element, {
+            display: element.style.getPropertyValue("display"),
+            ariaHidden: element.getAttribute("aria-hidden")
+          });
+          element.style.setProperty("display", "none", "important");
+          element.setAttribute("aria-hidden", "true");
+          element.setAttribute("data-cas-suppressed-lightspeed", "true");
+        });
+      }
+    };
+    suppressLightspeedLaunchers();
+    const observer = new MutationObserver(suppressLightspeedLaunchers);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      suppressed.forEach((previous, element) => {
+        if (previous.display) element.style.setProperty("display", previous.display);
+        else element.style.removeProperty("display");
+        if (previous.ariaHidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", previous.ariaHidden);
+        element.removeAttribute("data-cas-suppressed-lightspeed");
+      });
+    };
+  }, []);
 
   const refreshBrainStatus = React.useCallback(async () => {
     setBrainStatus((current) => ({ ...current, state: "checking", detail: "연결 확인 중" }));

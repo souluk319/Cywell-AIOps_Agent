@@ -137,6 +137,13 @@ function broadPrincipal(table, principal) {
   );
 }
 
+function customerAccessTableIsConcrete(policy, table) {
+  const value = policy?.[table];
+  if (!value) return true;
+  if (typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.values(value).every((grants) => Array.isArray(grants));
+}
+
 function customerAccessPolicyIsConcrete(policy) {
   const entries = customerPolicyEntries(policy);
   const allowedTopLevelKeys = new Set(["default", "owners", "users", "groups"]);
@@ -147,7 +154,7 @@ function customerAccessPolicyIsConcrete(policy) {
     !hasDefaultGrant &&
     unknownTopLevelKeys.length === 0 &&
     !containsWildcard(policy) &&
-    ["owners", "users", "groups"].every((table) => !policy?.[table] || (typeof policy[table] === "object" && !Array.isArray(policy[table]))) &&
+    ["owners", "users", "groups"].every((table) => customerAccessTableIsConcrete(policy, table)) &&
     entries.every((entry) => Array.isArray(policy?.[entry.table]?.[entry.principal])) &&
     entries.every(
       (entry) =>
@@ -607,6 +614,8 @@ function selfTest() {
     record(validateInputs(wildcard).some((error) => error.includes("customer access policy")) ? "PASS" : "FAIL", "pbs-live-prereqs:wildcard-acl-rejected", "wildcard/default ACL policy is rejected");
     const stringWildcard = buildInputs({ ...sampleEnv(), CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({ owners: { "alice@example.com": ["customer-a"], "bob@example.com": "customer-*" } }) });
     record(validateInputs(stringWildcard).some((error) => error.includes("customer access policy")) ? "PASS" : "FAIL", "pbs-live-prereqs:string-wildcard-acl-rejected", "string wildcard ACL policy is rejected");
+    const stringGrant = buildInputs({ ...sampleEnv(), CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({ users: { "alice@example.com": ["customer-a"] }, groups: { "customer-a-ops": "customer-a" } }) });
+    record(validateInputs(stringGrant).some((error) => error.includes("customer access policy")) ? "PASS" : "FAIL", "pbs-live-prereqs:string-grant-acl-rejected", "non-wildcard string ACL grants are rejected");
     const broadGroup = buildInputs({ ...sampleEnv(), CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({ groups: { "system:authenticated": ["customer-a"] } }) });
     record(validateInputs(broadGroup).some((error) => error.includes("customer access policy")) ? "PASS" : "FAIL", "pbs-live-prereqs:broad-group-acl-rejected", "broad Kubernetes system groups are rejected");
     const nonStringAcl = buildInputs({ ...sampleEnv(), CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({ groups: { "customer-a-ops": ["customer-a", { id: "customer-b" }, 42] } }) });

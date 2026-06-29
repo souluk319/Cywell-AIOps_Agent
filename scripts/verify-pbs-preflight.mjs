@@ -16,11 +16,16 @@ const skipApplied = process.argv.includes("--skip-applied") || envBool("CAS_PBS_
 const checkedAt = new Date().toISOString();
 const checks = [];
 const releaseImagesEvidencePath = process.env.CAS_RELEASE_IMAGES_EVIDENCE || "test-results/cas-release-images.json";
+const pbsPinnedSourceEvidencePath = process.env.CAS_PBS_SOURCE_EVIDENCE || "test-results/cas-pbs-source-contract-pinned.json";
 const evidencePhase = skipApplied ? "preapply" : overlay === "pbs-shadow" && !requireCluster ? "diagnostic" : "applied";
 const evidenceScope = requireCluster ? "cluster" : "local";
 const evidenceOverlay = overlayPathArg ? evidenceToken(lastPathSegment(overlayPath) || `${overlay}-custom`) : overlay;
 const evidenceSuffix = [evidenceOverlay, evidencePhase, evidenceScope, requireSecret ? "required-secrets" : "optional-secrets"].join("-");
 const evidencePath = `test-results/cas-pbs-preflight-${evidenceSuffix}.json`;
+const pbsRuntimeSourceEvidence = [];
+const pbsRuntimeHealthEvidence = [];
+let pbsRuntimeProbePodName = "";
+let pbsRuntimeServicePresent = false;
 
 function envBool(name, defaultValue = false) {
   const raw = process.env[name];
@@ -654,6 +659,9 @@ function writeEvidence(status) {
         requireSecret,
         skipApplied,
         releaseImagesEvidencePath,
+        pbsPinnedSourceEvidencePath,
+        pbsRuntimeSourceEvidence,
+        pbsRuntimeHealthEvidence,
         summary: {
           total: checks.length,
           passed: checks.filter((check) => check.status === "PASS").length,
@@ -904,6 +912,144 @@ function runtimeServiceEndpointsReady(endpoints) {
   });
 }
 
+function pbsBaseUrlTargetsRuntimeService(value) {
+  try {
+    const url = new URL(String(value ?? ""));
+    return (
+      ["http:", "https:"].includes(url.protocol) &&
+      url.port === "8765" &&
+      [
+        "playbookstudio-runtime.playbookstudio.svc.cluster.local",
+        "playbookstudio-runtime.playbookstudio.svc",
+        "playbookstudio-runtime.playbookstudio"
+      ].includes(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function readPinnedPbsSourceHead() {
+  const envHead = String(process.env.CAS_PBS_SOURCE_HEAD || "").trim();
+  if (/^[a-f0-9]{40}$/i.test(envHead)) return envHead;
+  if (!existsSync(pbsPinnedSourceEvidencePath)) return "";
+  try {
+    const evidence = JSON.parse(readFileSync(pbsPinnedSourceEvidencePath, "utf8"));
+    const source = evidence.pbsSource ?? {};
+    if (
+      evidence.status === "PASS" &&
+      evidence.requireSource === true &&
+      evidence.requireCleanSource === true &&
+      evidence.requireExpectedHead === true &&
+      source.treeStatus === "clean" &&
+      source.fullHead === source.expectedHead &&
+      /^[a-f0-9]{40}$/i.test(String(source.expectedHead ?? ""))
+    ) {
+      return source.expectedHead;
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+const runtimeRevisionKeys = [
+  "cywell.ai/pbs-source-head",
+  "playbookstudio.io/source-revision",
+  "app.kubernetes.io/revision",
+  "org.opencontainers.image.revision"
+];
+const runtimeRevisionEnvNames = ["PBS_SOURCE_REVISION", "PLAYBOOKSTUDIO_SOURCE_HEAD", "SOURCE_REVISION", "GIT_COMMIT"];
+
+function firstRuntimeRevision(pod) {
+  const labels = pod.metadata?.labels ?? {};
+  const annotations = pod.metadata?.annotations ?? {};
+  for (const key of runtimeRevisionKeys) {
+    const value = String(annotations[key] || labels[key] || "").trim();
+    if (value) return { key, value };
+  }
+  for (const container of pod.spec?.containers ?? []) {
+    for (const env of container.env ?? []) {
+      if (runtimeRevisionEnvNames.includes(env.name) && env.value) return { key: `env:${env.name}`, value: String(env.value).trim() };
+    }
+  }
+  return { key: "", value: "" };
+}
+
+function runtimePodSourceSummary(pod) {
+  const revision = firstRuntimeRevision(pod);
+  return {
+    name: pod.metadata?.name,
+    revisionKey: revision.key,
+    revision: revision.value,
+    imageIDs: (pod.status?.containerStatuses ?? []).map((container) => container.imageID).filter(Boolean)
+  };
+}
+
+function pbsRuntimeHealthReadiness(body) {
+  return body?.provider_config?.pbs_http?.readiness ?? body?.readiness ?? body?.runtime?.readiness ?? body ?? {};
+}
+
+function pbsRuntimeHealthReady(body) {
+  const readiness = pbsRuntimeHealthReadiness(body);
+  const readyScopes = Array.isArray(readiness.ready_scopes) ? readiness.ready_scopes.map(String) : [];
+  return (
+    readiness.database_runtime === true &&
+    readiness.db_ready === true &&
+    readiness.pgvector_ready === true &&
+    readiness.embedding_index_parity === true &&
+    readiness.compiled_wiki_ready === true &&
+    ["official_docs", "study_docs"].every((scope) => readyScopes.includes(scope))
+  );
+}
+
+function runPbsRuntimeHealthProbe(podName, bearerToken) {
+  const probeUrl = `${String(pbsBaseUrl).replace(/\/+$/, "")}/api/health`;
+  const script = [
+    "import json, os, sys, urllib.request",
+    "url=os.environ.get('CAS_PBS_PROBE_URL')",
+    "headers={'Accept':'application/json'}",
+    "token=os.environ.get('CAS_PBS_PROBE_BEARER_TOKEN','')",
+    "headers.update({'Authorization':'Bearer '+token} if token else {})",
+    "request=urllib.request.Request(url,headers=headers)",
+    "try:",
+    "    response=urllib.request.urlopen(request,timeout=10)",
+    "    text=response.read(1048576).decode('utf-8','replace')",
+    "    body=json.loads(text) if text else {}",
+    "    print(json.dumps({'ok':200 <= response.status < 300,'status':response.status,'body':body}))",
+    "except Exception as error:",
+    "    print(json.dumps({'ok':False,'error':str(error)}))",
+    "    sys.exit(2)"
+  ].join("\n");
+  for (const python of ["python", "python3"]) {
+    const result = run(
+      "oc",
+      [
+        "exec",
+        "-n",
+        "playbookstudio",
+        podName,
+        "--",
+        "env",
+        `CAS_PBS_PROBE_URL=${probeUrl}`,
+        `CAS_PBS_PROBE_BEARER_TOKEN=${bearerToken || ""}`,
+        python,
+        "-c",
+        script
+      ],
+      { timeoutMs: 30000 }
+    );
+    if (!result.ok && /executable file not found|not found|No such file/i.test(result.stderr)) continue;
+    try {
+      const parsed = JSON.parse(result.stdout.trim().split(/\r?\n/).pop() || "{}");
+      return { ...parsed, python, stderr: result.stderr };
+    } catch {
+      return { ok: false, python, error: result.stderr || result.stdout || "runtime health probe did not return JSON" };
+    }
+  }
+  return { ok: false, error: "no python executable available in the PBS runtime pod" };
+}
+
 function firstContainerImage(workload) {
   return workload.match(/^\s*image:\s*([^\s]+)\s*$/m)?.[1] ?? "";
 }
@@ -1108,8 +1254,8 @@ const pbsBaseUrl = configValue(configMap, "base-url");
 const pbsAuthMode = configValue(configMap, "auth-mode");
 expect(
   "preflight:base-url-shape",
-  /^https?:\/\//.test(pbsBaseUrl) && pbsBaseUrl.includes(":8765"),
-  "cas-pbs-config base-url is an HTTP(S) PBS backend URL on port 8765",
+  pbsBaseUrlTargetsRuntimeService(pbsBaseUrl),
+  "cas-pbs-config base-url targets playbookstudio-runtime Service DNS on port 8765",
   `unexpected base-url: ${pbsBaseUrl || "<missing>"}`
 );
 expect(
@@ -1209,11 +1355,13 @@ const runtimeNamespace = getJson("cluster:pbs-namespace", ["get", "namespace", "
 if (runtimeNamespace) pass("cluster:pbs-namespace", "playbookstudio namespace exists");
 const runtimeService = getJson("cluster:pbs-runtime-service", ["get", "service", "-n", "playbookstudio", "playbookstudio-runtime"]);
 if (runtimeService) {
+  pbsRuntimeServicePresent = true;
   const ports = runtimeService.spec?.ports ?? [];
   expect(
     "cluster:pbs-runtime-service-port",
-    ports.some((port) => Number(port.port) === 8765 || Number(port.targetPort) === 8765),
-    "playbookstudio-runtime exposes PBS backend port 8765"
+    ports.some((port) => Number(port.port) === 8765),
+    "playbookstudio-runtime Service exposes PBS backend service port 8765",
+    `playbookstudio-runtime Service must expose spec.ports[].port=8765 because CAS calls the Service DNS on :8765: ${JSON.stringify(ports)}`
   );
   const selector = runtimeService.spec?.selector ?? {};
   expect(
@@ -1243,6 +1391,27 @@ if (runtimeService) {
         "playbookstudio-runtime selects ready pods carrying the labels allowed by PBS egress",
         `selected pods must be Ready and labeled for PBS egress: ${JSON.stringify((runtimePods.items ?? []).map((pod) => ({ name: pod.metadata?.name, labels: pod.metadata?.labels, phase: pod.status?.phase })))}`
       );
+      const readyPodSource = readyPods.map(runtimePodSourceSummary);
+      pbsRuntimeProbePodName = readyPods[0]?.metadata?.name || pbsRuntimeProbePodName;
+      pbsRuntimeSourceEvidence.push(...readyPodSource);
+      if (overlay === "pbs-live" && requireCluster) {
+        const expectedPbsSourceHead = readPinnedPbsSourceHead();
+        expect(
+          "cluster:pbs-runtime-source-head-required",
+          /^[a-f0-9]{40}$/i.test(expectedPbsSourceHead),
+          "approved PBS full source SHA is available for runtime pod verification",
+          `set CAS_PBS_SOURCE_HEAD or run verify:release:source-pinning to create ${pbsPinnedSourceEvidencePath} before live cutover`
+        );
+        if (/^[a-f0-9]{40}$/i.test(expectedPbsSourceHead)) {
+          expect(
+            "cluster:pbs-runtime-source-revision",
+            readyPodSource.length > 0 && readyPodSource.every((pod) => pod.revision === expectedPbsSourceHead),
+            "ready PBS runtime pods are stamped with the approved PBS source revision",
+            `ready PBS runtime pods must expose one of ${runtimeRevisionKeys.join(", ")} or ${runtimeRevisionEnvNames.join(", ")} equal to ${expectedPbsSourceHead}: ${JSON.stringify(readyPodSource)}`,
+            { expectedPbsSourceHead, pbsRuntimeSourceEvidence: readyPodSource }
+          );
+        }
+      }
     }
     const runtimeEndpoints = getJson("cluster:pbs-runtime-service-endpoints", ["get", "endpoints", "-n", "playbookstudio", "playbookstudio-runtime"]);
     if (runtimeEndpoints) {
@@ -1257,11 +1426,13 @@ if (runtimeService) {
     fail("cluster:pbs-runtime-service-selector-empty", "playbookstudio-runtime Service must have a selector so egress label checks are enforceable");
   }
 }
+let pbsBearerToken = "";
 const authSecret = getJson("cluster:pbs-auth-secret", ["get", "secret", "-n", namespace, "cas-pbs-auth"]);
 if (authSecret) {
   const hasBearer = Boolean(authSecret.data?.["bearer-token"]);
   expect("cluster:pbs-auth-secret-key", hasBearer, "cas-pbs-auth Secret contains bearer-token key");
   const bearerToken = decodeSecretValue(authSecret, "bearer-token");
+  pbsBearerToken = bearerToken;
   expect(
     "cluster:pbs-auth-secret-content",
     bearerTokenLooksUsable(bearerToken),
@@ -1272,6 +1443,24 @@ if (authSecret) {
   fail("cluster:pbs-auth-secret-required", "cas-pbs-auth Secret is required for this preflight run");
 } else {
   warn("cluster:pbs-auth-secret-optional", "cas-pbs-auth Secret is absent in the current cluster; live cutover must create it or run preflight with --require-secret");
+}
+if (overlay === "pbs-live" && requireCluster && pbsRuntimeServicePresent) {
+  const probe = pbsRuntimeProbePodName ? runPbsRuntimeHealthProbe(pbsRuntimeProbePodName, pbsAuthMode === "service-token" ? pbsBearerToken : "") : { ok: false, error: "no ready PBS runtime pod selected for health probe" };
+  const readiness = pbsRuntimeHealthReadiness(probe.body);
+  pbsRuntimeHealthEvidence.push({
+    pod: pbsRuntimeProbePodName || null,
+    ok: Boolean(probe.ok),
+    status: probe.status ?? null,
+    python: probe.python ?? null,
+    readiness
+  });
+  expect(
+    "cluster:pbs-runtime-health-ready",
+    probe.ok === true && pbsRuntimeHealthReady(probe.body),
+    "playbookstudio-runtime /api/health reports DB, pgvector, corpus/index, compiled wiki, and required ready scopes through the Service DNS",
+    `playbookstudio-runtime /api/health must be reachable from a runtime pod through ${pbsBaseUrl} and report database_runtime/db_ready/pgvector_ready/embedding_index_parity/compiled_wiki_ready plus official_docs,study_docs ready scopes: ${JSON.stringify({ pod: pbsRuntimeProbePodName || null, status: probe.status ?? null, error: probe.error ?? probe.stderr ?? "", readiness })}`,
+    { pbsRuntimeHealthEvidence: pbsRuntimeHealthEvidence[pbsRuntimeHealthEvidence.length - 1] }
+  );
 }
 const ownerAuthSecret = getJson("cluster:internal-owner-auth-secret", ["get", "secret", "-n", namespace, "cas-knowledge-internal-auth"]);
 if (ownerAuthSecret) {

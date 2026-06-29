@@ -35,6 +35,7 @@ const files = [
   "scripts/render-pbs-live-prereqs.mjs",
   "scripts/render-pbs-cutover-bundle.mjs",
   "scripts/verify-pbs-source-contract.mjs",
+  "scripts/verify-console-launcher-dom.mjs",
   "apps/gateway/src/server.mjs",
   "apps/knowledge-engine/src/cas_knowledge_engine/engine.py",
   "apps/knowledge-engine/src/cas_knowledge_engine/pbs_client.py",
@@ -1136,6 +1137,16 @@ for (const file of files) {
         fail("package:topology-dom-required", "package.json must require browser-backed topology DOM verification with a direct-script build prerequisite");
       }
       if (
+        text.includes('"verify:console:launcher-dom"') &&
+        text.includes("verify:console-plugin") &&
+        text.includes('"verify:console:launcher-dom:built"') &&
+        text.includes("verify-console-launcher-dom.mjs --require-browser")
+      ) {
+        pass("package:launcher-dom-required", "package.json requires browser-backed CAS launcher DOM verification after console build");
+      } else {
+        fail("package:launcher-dom-required", "package.json must require browser-backed CAS launcher DOM verification after console build");
+      }
+      if (
         text.includes('"verify:console:integration"') &&
         text.includes("verify:console-plugin") &&
         text.includes('"verify:console:integration:built"')
@@ -1305,6 +1316,7 @@ for (const file of files) {
           text.includes("bad-owner-hmac-rejected") &&
           text.includes("wildcard-acl-rejected") &&
           text.includes("string-wildcard-acl-rejected") &&
+          text.includes("string-grant-acl-rejected") &&
           text.includes("broad-group-acl-rejected") &&
           text.includes("non-string-acl-rejected") &&
           text.includes("db-url-mismatch-rejected") &&
@@ -1344,19 +1356,24 @@ for (const file of files) {
       expect(
         "pbs-source-contract:evidence",
         text.includes("cas-pbs-source-contract.json") &&
+          text.includes("cas-pbs-source-contract-required.json") &&
+          text.includes("cas-pbs-source-contract-pinned.json") &&
           text.includes("CAS_PBS_SOURCE_DIR") &&
           text.includes("CAS_PBS_SOURCE_HEAD") &&
           text.includes("CAS_PBS_REQUIRE_SOURCE_HEAD") &&
           text.includes("gitMetadata") &&
           text.includes("fullGitSha") &&
+          text.includes("remoteOriginUrl") &&
+          text.includes("approvedRemoteUrl") &&
+          text.includes("git-remote-approved") &&
           text.includes("git-head-expected-full-sha") &&
           text.includes("contractFileSha256") &&
           text.includes("--require-source") &&
           text.includes("--require-clean-source") &&
           text.includes("--require-expected-head") &&
           text.includes("--self-test"),
-        "PBS source contract verifier writes pinned source evidence and supports explicit source/self-test modes",
-        "PBS source contract verifier must write PBS source git/hash evidence and support explicit source/self-test modes"
+        "PBS source contract verifier writes optional/required/pinned evidence and verifies approved PBS remote identity for strict source pinning",
+        "PBS source contract verifier must write PBS source git/hash/remote evidence and support explicit source/self-test modes"
       );
     }
     if (file.includes("render-pbs-cutover-bundle")) {
@@ -1366,7 +1383,7 @@ for (const file of files) {
           text.includes("cas-release-images.json") &&
           text.includes("cas-deploy-manifests.json") &&
           text.includes("cas-pbs-live-prereqs-render.json") &&
-          text.includes("cas-pbs-source-contract.json") &&
+          text.includes("cas-pbs-source-contract-pinned.json") &&
           text.includes("cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json"),
         "PBS cutover bundle renderer collects CRC, release, manifest, prereq, source-contract, and live preapply evidence",
         "PBS cutover bundle renderer must collect the release evidence set needed for live cutover handoff"
@@ -1386,6 +1403,14 @@ for (const file of files) {
           text.includes("currentHeadMatches") &&
           text.includes("git-tree-clean") &&
           text.includes("sourceContractPinned") &&
+          text.includes("approvedPbsRemoteUrl") &&
+          text.includes("allow-dirty-live-ready") &&
+          text.includes(":clean-source") &&
+          text.includes("requiredPbsContractFiles") &&
+          text.includes("livePreapplyTimingValid") &&
+          text.includes("livePreapplyRuntimeSourceMatches") &&
+          text.includes("live-runtime-source-revision") &&
+          text.includes("maxLivePreapplyAgeMinutes") &&
           text.includes("hasRealRenderHashes") &&
           text.includes("recordedFileHashesMatch") &&
           text.includes("resolvedPathUnder") &&
@@ -1403,12 +1428,13 @@ for (const file of files) {
           text.includes("source-contract-pinned") &&
           text.includes("localGateFailures") &&
           text.includes("externalLiveBlockers") &&
+          text.includes("uniqueBlockers") &&
           text.includes("artifactSummary") &&
           text.includes("sha256File") &&
           text.includes("cas-pbs-cutover-bundle.json") &&
           text.includes("--require-live-ready"),
-        "PBS cutover bundle renderer checks current-head evidence, clean source, strict PBS source pinning, real-render hashes, artifact hashes, and live-ready enforcement",
-        "PBS cutover bundle renderer must bind bundle evidence to current source, reject dirty/unpinned PBS source evidence, reject self-test prereq evidence, and support strict live-ready mode"
+        "PBS cutover bundle renderer checks current-head clean evidence, approved PBS remote/source pinning, runtime source stamps, real-render hashes, artifact hashes, and live-ready enforcement",
+        "PBS cutover bundle renderer must bind bundle evidence to current clean source, reject dirty/unpinned PBS source evidence, reject self-test prereq evidence, and support strict live-ready mode"
       );
       expect(
         "pbs-cutover-bundle:self-test",
@@ -1420,13 +1446,34 @@ for (const file of files) {
           text.includes("self-test-prereq-hash-drift-rejected") &&
           text.includes("self-test-prereq-path-escape-rejected") &&
           text.includes("self-test-preapply-hash-mismatch-rejected") &&
+          text.includes("self-test-aged-preapply-rejected") &&
           text.includes("self-test-cluster-mismatch-rejected") &&
+          text.includes("self-test-runtime-source-mismatch-rejected") &&
+          text.includes("self-test-dirty-local-evidence-rejected") &&
           text.includes("self-test-dirty-source-rejected") &&
+          text.includes("self-test-source-contract-hash-set-rejected") &&
           text.includes("self-test-prereq-self-test-rejected") &&
           text.includes("self-test-prereq-output-dir-rejected") &&
           text.includes("self-test-fail-retains-external-blockers"),
-        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding, cluster mismatch rejection, dirty source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention",
-        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding, cluster mismatch rejection, dirty source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention"
+        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding/freshness, runtime source revision binding, source hash shape, cluster mismatch rejection, dirty local/source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention",
+        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, hash drift/path escape rejection, preapply hash binding/freshness, runtime source revision binding, source hash shape, cluster mismatch rejection, dirty local/source rejection, self-test evidence rejection, prereq output directory binding, and external blocker retention"
+      );
+    }
+    if (file.includes("verify-console-launcher-dom")) {
+      expect(
+        "console-launcher-dom:browser-contract",
+          text.includes("useCASLauncher") &&
+          text.includes("@openshift-console/dynamic-plugin-sdk") &&
+          text.includes("cas-launcher-button") &&
+          text.includes("console-launcher-dom:bottom-right-fixed") &&
+          text.includes("console-launcher-dom:native-lightspeed-suppressed") &&
+          text.includes("lightspeed-launcher-button") &&
+          text.includes("console-launcher-dom:no-duplicate-after-remount") &&
+          text.includes("/api/aiops/brainz") &&
+          text.includes("/api/aiops/query") &&
+          text.includes("console-launcher-dom:conversation-preserved"),
+        "CAS launcher browser harness checks modal hook, native Lightspeed suppression, bottom-right button, query flow, and conversation preservation",
+        "CAS launcher browser harness must verify the runtime launcher, not only source/bundle strings"
       );
     }
     if (file.includes("promote-crc-release-images")) {
@@ -1556,10 +1603,20 @@ for (const file of files) {
         text.includes("preflight:tls-insecure-disabled") && text.includes('configValue(configMap, "tls-insecure") === "false"'),
         "PBS preflight rejects tls-insecure=true regressions"
       );
-      if (text.includes("playbookstudio-runtime") && text.includes("port 8765") && text.includes("cluster:pbs-runtime-service-endpoints-ready")) {
-        pass("pbs-preflight:runtime-service-contract", "PBS preflight checks runtime service, endpoint readiness, and backend port");
+      if (
+        text.includes("playbookstudio-runtime") &&
+        text.includes("port 8765") &&
+        text.includes("cluster:pbs-runtime-service-endpoints-ready") &&
+        text.includes("cluster:pbs-runtime-health-ready") &&
+        text.includes("runPbsRuntimeHealthProbe") &&
+        text.includes("pbsRuntimeHealthReady") &&
+        text.includes("pbsRuntimeHealthEvidence") &&
+        text.includes("Number(port.port) === 8765") &&
+        text.includes("pbsBaseUrlTargetsRuntimeService")
+      ) {
+        pass("pbs-preflight:runtime-service-contract", "PBS preflight checks runtime service, endpoint readiness, backend port, and /api/health readiness through the Service DNS");
       } else {
-        fail("pbs-preflight:runtime-service-contract", "PBS preflight must check runtime service/backend port and ready endpoints");
+        fail("pbs-preflight:runtime-service-contract", "PBS preflight must check runtime service/backend port, ready endpoints, and runtime health");
       }
       if (
         text.includes("CAS_PBS_REQUIRE_RUNTIME_READY") &&
@@ -1618,6 +1675,14 @@ for (const file of files) {
         text.includes("must match promoted evidence digest") &&
         text.includes("must resolve to image.dockerImageReference with @sha256:") &&
         text.includes("cluster:pbs-runtime-ready-pods") &&
+        text.includes("cluster:pbs-runtime-source-head-required") &&
+        text.includes("cluster:pbs-runtime-source-revision") &&
+        text.includes("pbsRuntimeSourceEvidence") &&
+        text.includes("cluster:pbs-runtime-health-ready") &&
+        text.includes("official_docs") &&
+        text.includes("study_docs") &&
+        text.includes("cas-pbs-source-contract-pinned.json") &&
+        text.includes("org.opencontainers.image.revision") &&
         text.includes("cluster:gateway-kubernetes-api-egress") &&
         text.includes("ipBlockMatches") &&
         text.includes("networkPolicyPortMatches") &&
@@ -1630,9 +1695,9 @@ for (const file of files) {
         text.includes("skipApplied") &&
         text.includes("pbs-live")
       ) {
-        pass("pbs-preflight:live-readiness-gate", "PBS preflight checks overlays, live runtime, corpus, Secret, release images, Postgres image pinning, applied policies, API egress, and PBS pod-label gates");
+        pass("pbs-preflight:live-readiness-gate", "PBS preflight checks overlays, live runtime health, corpus, Secret, release images, Postgres image pinning, applied policies, API egress, and PBS pod-label gates");
       } else {
-        fail("pbs-preflight:live-readiness-gate", "PBS preflight must check overlays, live runtime, corpus, Secret, release images, Postgres image pinning, applied policies, API egress, and PBS pod-label gates");
+        fail("pbs-preflight:live-readiness-gate", "PBS preflight must check overlays, live runtime health, corpus, Secret, release images, Postgres image pinning, applied policies, API egress, and PBS pod-label gates");
       }
     }
     if (file.includes("21-lightspeed-ingress")) {

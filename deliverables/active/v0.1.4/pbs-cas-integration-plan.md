@@ -134,7 +134,7 @@ Status: implemented for the v0.1.4 smoke path.
   - `/api/wiki-vault/notes`
 - Shadow writes are disabled by default unless `CAS_PBS_SHADOW_WRITES=true`, to avoid duplicate PBS-side write effects.
 - PBS runtime inspection confirmed the backend API surface runs on port `8765` with `GET /api/health`; the public web/nginx surface normally runs on port `8080` and proxies `/api/*`.
-- `verify:pbs:source-contract:required` now verifies the actual `F:\AI_Projects\PBS-Dev3` checkout for the Docker/compose runtime contract, port `8765`, `/api/health`, upload, URL ingest, chat/RAG, Wiki Vault, Wiki Loop, owner-scoped upload reports, selected uploads, graph, and chunk-preview API surface before v0.1.4 claims PBS source compatibility.
+- `verify:pbs:source-contract:required` now verifies the actual `F:\AI_Projects\PBS-Dev3` checkout for the Docker/compose runtime contract, approved remote identity, port `8765`, `/api/health`, upload, URL ingest, chat/RAG, Wiki Vault, Wiki Loop, owner-scoped upload reports, selected uploads, graph, and chunk-preview API surface before v0.1.4 claims PBS source compatibility. `verify:release:source-pinning` is the stricter release gate: it writes `test-results/cas-pbs-source-contract-pinned.json` only when `CAS_PBS_SOURCE_HEAD` is a full approved SHA, the PBS checkout is clean, the PBS remote matches the approved repository pattern, and the expected source contract file hashes are present.
 - `CAS_KNOWLEDGE_OWNER_MODE=trusted-header` and `CAS_KNOWLEDGE_SINGLE_OWNER` are explicit.
 - Gateway derives a stable owner hint from UserToken/Authorization and does not trust forwarded owner headers by default.
 - Knowledge Engine scoped APIs require a trusted owner header in the base deployment.
@@ -343,7 +343,7 @@ Latest closed review items:
 
 ## Risks
 
-- PBS-Dev3 워킹트리가 더럽기 때문에 소스 기준점을 먼저 고정해야 한다. 현재 source-contract evidence는 branch/HEAD/tree status와 contract file hash를 기록하며, strict release에는 `CAS_PBS_SOURCE_HEAD`와 `CAS_PBS_REQUIRE_CLEAN_SOURCE=true`를 걸 수 있다.
+- PBS-Dev3 워킹트리가 더럽기 때문에 소스 기준점을 먼저 고정해야 한다. 일반 `verify:pbs:source-contract` evidence는 compatibility 진단용이고, production/live cutover는 `CAS_PBS_SOURCE_HEAD`를 approved full SHA로 지정한 뒤 approved remote의 clean PBS checkout에서 `verify:release:source-pinning`으로 생성한 `cas-pbs-source-contract-pinned.json`만 인정한다. Live preflight/cutover evidence also requires ready PBS runtime pods to expose that same source revision and report `/api/health` runtime/corpus readiness through the Service DNS.
 - PBS Python dependency가 크다. CAS Node gateway에 합치지 말고 별도 image로 분리해야 한다.
 - pgvector embedding dimension, model 선택, migration 순서가 맞지 않으면 재색인이 필요하다.
 - PBS-live URL ingest는 실제 fetch가 PBS에서 수행되므로 PBS 런타임의 SSRF/redirect/DNS-rebind 방어 계약을 별도로 확인해야 한다.
@@ -377,7 +377,7 @@ v0.1.4 currently proves:
 - rendered PBS shadow/live deployment overlays with HTTPS service-token transport, shadow optional token Secret reference, live required token Secret reference, live required Postgres Secret references, no dev owner/DB Secret material, release image tags, and restricted knowledge-engine egress to labeled PBS runtime pods on `8765`
 - rendered PBS live overlay with Gateway customer ACL required from `cas-knowledge-live-config/customer-access-json`; production cutover uses the generated `pbs-live-site` overlay from `render:pbs:live-prereqs` so strict preflight sees a reviewed concrete customer/group mapping instead of placeholder policy
 - rendered PBS live prerequisites include `cas-knowledge-internal-auth/owner-hmac-secret` for Gateway/Knowledge Engine owner-header signing and verification
-- source/API contract verification against `F:\AI_Projects\PBS-Dev3` through `verify:pbs:source-contract:required`, including PBS source branch/HEAD/tree status and contract file hashes
+- source/API contract verification against `F:\AI_Projects\PBS-Dev3` through `verify:pbs:source-contract:required`, including PBS source branch/HEAD/tree status, approved remote identity, and contract file hashes; live cutover additionally requires strict `verify:release:source-pinning` evidence in `test-results/cas-pbs-source-contract-pinned.json`, PBS runtime pod source stamps matching the same approved SHA, and Service-DNS `/api/health` readiness for DB, pgvector, corpus/index, compiled wiki, and required scopes
 - topology normalization across PBS `graph`, `topology.graph`, `links`, `relations`, `relationships`, `node_id`, `source_id`, and `target_id` variants without mixing wrapper and nested graph candidates
 - topology normalization preserves PBS summary counts, wikilinks, tags, entity/concept nodes, relation signals, degree/weight, selected context, selected upload metadata, and renders those Wiki Vault side-channel fields in the Cywell dashboard
 - Knowledge Engine ingress isolation so only the CAS gateway can call scoped data APIs in-cluster

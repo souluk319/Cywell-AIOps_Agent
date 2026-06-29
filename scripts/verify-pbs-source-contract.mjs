@@ -9,7 +9,6 @@ import { dirname, join, resolve } from "node:path";
 const args = new Set(process.argv.slice(2).filter((arg) => !arg.startsWith("--source-dir=")));
 const sourceDirArg = process.argv.find((arg) => arg.startsWith("--source-dir="))?.split("=")[1];
 const checkedAt = new Date().toISOString();
-const evidencePath = join("test-results", "cas-pbs-source-contract.json");
 const repoDefaultSourceDir = resolve(process.cwd(), "..", "PBS-Dev3");
 const sourceDir = resolve(sourceDirArg || process.env.CAS_PBS_SOURCE_DIR || repoDefaultSourceDir);
 const requireSource = args.has("--require-source");
@@ -17,6 +16,16 @@ const requireCleanSource = args.has("--require-clean-source") || /^(1|true|yes|y
 const requireExpectedHead = args.has("--require-expected-head") || /^(1|true|yes|y|on)$/i.test(process.env.CAS_PBS_REQUIRE_SOURCE_HEAD || "");
 const expectedSourceHead = String(process.env.CAS_PBS_SOURCE_HEAD || "").trim();
 const selfTest = args.has("--self-test");
+const defaultApprovedRemotePattern = "github\\.com[:/]souluk319/PBS_DEV_Part3(?:\\.git)?$";
+const approvedRemotePatterns = (process.env.CAS_PBS_APPROVED_REMOTE_PATTERN || defaultApprovedRemotePattern)
+  .split(",")
+  .map((pattern) => pattern.trim())
+  .filter(Boolean)
+  .map((pattern) => new RegExp(pattern, "i"));
+const optionalEvidencePath = join("test-results", "cas-pbs-source-contract.json");
+const requiredEvidencePath = join("test-results", "cas-pbs-source-contract-required.json");
+const pinnedEvidencePath = join("test-results", "cas-pbs-source-contract-pinned.json");
+const evidencePath = requireCleanSource && requireExpectedHead ? pinnedEvidencePath : requireSource ? requiredEvidencePath : optionalEvidencePath;
 const checks = [];
 const contractFiles = [
   "deploy/Dockerfile",
@@ -48,6 +57,7 @@ function gitMetadata(root) {
     branch: runGit(["branch", "--show-current"], root),
     head: runGit(["rev-parse", "--short", "HEAD"], root),
     fullHead: runGit(["rev-parse", "HEAD"], root),
+    remoteOriginUrl: runGit(["config", "--get", "remote.origin.url"], root),
     treeStatus: status ? "dirty" : "clean",
     statusShort: status
   };
@@ -87,6 +97,11 @@ function expect(id, condition, passDetail, failDetail = passDetail) {
 
 function fullGitSha(value) {
   return /^[a-f0-9]{40}$/i.test(String(value ?? "").trim());
+}
+
+function approvedRemoteUrl(value) {
+  const remote = String(value ?? "").trim();
+  return Boolean(remote && approvedRemotePatterns.some((pattern) => pattern.test(remote)));
 }
 
 function readRequired(root, relativePath) {
@@ -325,6 +340,18 @@ if (!existsSync(sourceDir)) {
   }
   if (metadata.available) {
     pass("pbs-source:git-head", `PBS source git head ${metadata.head} on ${metadata.branch || "detached"}`);
+    if (requireCleanSource && requireExpectedHead) {
+      expect(
+        "pbs-source:git-remote-approved",
+        approvedRemoteUrl(metadata.remoteOriginUrl),
+        `PBS source remote is approved: ${metadata.remoteOriginUrl}`,
+        `PBS source remote.origin.url must match an approved PBS repository pattern; found ${metadata.remoteOriginUrl || "missing"}`
+      );
+    } else if (approvedRemoteUrl(metadata.remoteOriginUrl)) {
+      pass("pbs-source:git-remote-approved", `PBS source remote is approved: ${metadata.remoteOriginUrl}`);
+    } else {
+      warn("pbs-source:git-remote-unverified", `PBS source remote.origin.url is not approved for strict release pinning: ${metadata.remoteOriginUrl || "missing"}`);
+    }
     if (expectedSourceHead) {
       expect(
         "pbs-source:git-head-expected",
