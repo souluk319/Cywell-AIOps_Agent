@@ -34,7 +34,10 @@ const approvedCywellRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\
 const requiredPbsContractFiles = [
   "deploy/Dockerfile",
   "docker-compose.yml",
+  "src/play_book_studio/config/settings.py",
+  "src/play_book_studio/http/public_chat_gateway.py",
   "src/play_book_studio/http/server_handler_factory.py",
+  "src/play_book_studio/http/server_handler_base.py",
   "src/play_book_studio/http/upload_api.py",
   "src/play_book_studio/http/url_ingest_api.py",
   "src/play_book_studio/http/server_chat.py",
