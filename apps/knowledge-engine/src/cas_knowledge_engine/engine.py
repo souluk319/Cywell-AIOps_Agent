@@ -11,9 +11,11 @@ import socket
 import time
 import zipfile
 from collections import Counter
+from pathlib import PurePath
 from typing import Any
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .pbs_client import PBSHttpClient
 from .storage import build_store, empty_store
@@ -22,6 +24,63 @@ TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣_./:-]{2,}")
 TAG_RE = re.compile(r"<[^>]+>")
 WIKI_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 PDF_TEXT_RE = re.compile(rb"\(([^()]{2,500})\)")
+UPLOAD_ALLOWED_EXTENSIONS = {
+    "",
+    ".csv",
+    ".docx",
+    ".htm",
+    ".html",
+    ".json",
+    ".log",
+    ".md",
+    ".markdown",
+    ".pdf",
+    ".pptx",
+    ".txt",
+    ".xlsx",
+    ".yaml",
+    ".yml",
+}
+UPLOAD_BLOCKED_EXTENSIONS = {
+    ".7z",
+    ".apk",
+    ".bat",
+    ".bin",
+    ".cmd",
+    ".com",
+    ".dll",
+    ".dmg",
+    ".exe",
+    ".iso",
+    ".jar",
+    ".msi",
+    ".ps1",
+    ".rar",
+    ".scr",
+    ".sh",
+    ".tar",
+    ".tgz",
+    ".war",
+    ".zip",
+}
+UPLOAD_ALLOWED_MIME_TYPES = {
+    "",
+    "application/json",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/csv",
+    "text/html",
+    "text/markdown",
+    "text/plain",
+    "text/x-log",
+    "text/yaml",
+}
+UPLOAD_MAX_DECODED_BYTES = 18 * 1024 * 1024
+OFFICE_ZIP_MAX_ENTRIES = 400
+OFFICE_ZIP_MAX_ENTRY_BYTES = 3 * 1024 * 1024
+OFFICE_ZIP_MAX_TOTAL_XML_BYTES = 12 * 1024 * 1024
 STOPWORDS = {
     "the",
     "and",
@@ -49,6 +108,11 @@ STOPWORDS = {
     "고객",
     "데이터",
 }
+
+
+class NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
+        return None
 
 
 def now_ms() -> int:
@@ -105,11 +169,21 @@ def decode_binary_text(raw: bytes) -> str:
 
 def extract_office_zip_text(raw: bytes, prefixes: tuple[str, ...]) -> str:
     parts: list[str] = []
+    total_xml_bytes = 0
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-        for name in sorted(archive.namelist()):
+        infos = archive.infolist()
+        if len(infos) > OFFICE_ZIP_MAX_ENTRIES:
+            raise ValueError("office upload has too many archive entries")
+        for info in sorted(infos, key=lambda item: item.filename):
+            name = info.filename
             if not name.endswith(".xml") or not name.startswith(prefixes):
                 continue
-            parts.append(strip_xml_text(archive.read(name).decode("utf-8", errors="replace")))
+            if info.file_size > OFFICE_ZIP_MAX_ENTRY_BYTES:
+                raise ValueError("office upload XML entry is too large")
+            total_xml_bytes += info.file_size
+            if total_xml_bytes > OFFICE_ZIP_MAX_TOTAL_XML_BYTES:
+                raise ValueError("office upload XML payload is too large")
+            parts.append(strip_xml_text(archive.read(info).decode("utf-8", errors="replace")))
     return "\n".join(part for part in parts if part).strip()
 
 
@@ -126,6 +200,7 @@ def extract_pdf_text(raw: bytes) -> str:
 
 
 def extract_uploaded_text(title: str, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    validate_upload_policy(title, payload)
     text = str(payload.get("content") or payload.get("text") or "")
     if text:
         return text, {"parser": "text"}
@@ -133,12 +208,14 @@ def extract_uploaded_text(title: str, payload: dict[str, Any]) -> tuple[str, dic
     encoded = payload.get("content_base64") or payload.get("file_base64") or payload.get("data_base64")
     raw: bytes | None = None
     if isinstance(encoded, str) and encoded.strip():
-        raw = base64.b64decode(encoded, validate=False)
+        raw = base64.b64decode(encoded, validate=True)
     elif isinstance(payload.get("file_bytes"), list):
         raw = bytes(int(value) & 0xFF for value in payload["file_bytes"])
 
     if raw is None:
         return "", {"parser": "empty"}
+    if len(raw) > UPLOAD_MAX_DECODED_BYTES:
+        raise ValueError(f"decoded upload exceeds {UPLOAD_MAX_DECODED_BYTES} bytes")
 
     lowered = title.lower()
     mime_type = str(payload.get("mime_type") or payload.get("mimeType") or "").lower()
@@ -159,10 +236,45 @@ def extract_uploaded_text(title: str, payload: dict[str, Any]) -> tuple[str, dic
         else:
             text = decode_binary_text(raw)
     except Exception as error:
+        if isinstance(error, ValueError) and (
+            "too large" in str(error) or "too many archive entries" in str(error)
+        ):
+            raise
         parser = f"{parser}-fallback"
         text = decode_binary_text(raw)
         return text, {"parser": parser, "byte_size": len(raw), "parser_warning": str(error)}
     return text, {"parser": parser, "byte_size": len(raw)}
+
+
+def upload_extension(title: str) -> str:
+    name = PurePath(str(title or "")).name.lower()
+    return PurePath(name).suffix
+
+
+def upload_mime_type(payload: dict[str, Any]) -> str:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    return str(payload.get("mime_type") or payload.get("mimeType") or metadata.get("mime_type") or "").split(";")[0].strip().lower()
+
+
+def validate_upload_policy(title: str, payload: dict[str, Any]) -> None:
+    extension = upload_extension(title)
+    mime_type = upload_mime_type(payload)
+    if extension in UPLOAD_BLOCKED_EXTENSIONS:
+        raise ValueError(f"upload extension {extension} is not allowed")
+    if extension not in UPLOAD_ALLOWED_EXTENSIONS:
+        raise ValueError(f"upload extension {extension or '(none)'} is not in the allowed document set")
+    if mime_type and mime_type not in UPLOAD_ALLOWED_MIME_TYPES and not mime_type.startswith("text/"):
+        raise ValueError(f"upload MIME type {mime_type} is not allowed")
+
+
+def validate_encoded_upload_size(payload: dict[str, Any]) -> None:
+    encoded = payload.get("content_base64") or payload.get("file_base64") or payload.get("data_base64")
+    if isinstance(encoded, str) and encoded.strip():
+        raw = base64.b64decode(encoded, validate=True)
+        if len(raw) > UPLOAD_MAX_DECODED_BYTES:
+            raise ValueError(f"decoded upload exceeds {UPLOAD_MAX_DECODED_BYTES} bytes")
+    elif isinstance(payload.get("file_bytes"), list) and len(payload["file_bytes"]) > UPLOAD_MAX_DECODED_BYTES:
+        raise ValueError(f"decoded upload exceeds {UPLOAD_MAX_DECODED_BYTES} bytes")
 
 
 def payload_bool(payload: dict[str, Any], *keys: str, default: bool) -> bool:
@@ -235,6 +347,33 @@ def is_private_hostname(hostname: str) -> bool:
     except OSError:
         return True
     return False
+
+
+def validated_public_http_url(url: str) -> Any:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("only http and https URLs are supported")
+    if parsed.username or parsed.password:
+        raise ValueError("URL credentials are not allowed")
+    if is_private_hostname(parsed.hostname):
+        raise ValueError("private, loopback, or unresolved URL targets are blocked")
+    return parsed
+
+
+def fetch_public_url_text(url: str) -> str:
+    request = Request(url, headers={"User-Agent": "Cywell-KnowledgeEngine/0.1.4"})
+    opener = build_opener(NoRedirectHandler)
+    try:
+        with opener.open(request, timeout=8) as response:
+            final_url = response.geturl()
+            if final_url and final_url != url:
+                validated_public_http_url(final_url)
+            return response.read(1_500_000).decode("utf-8", errors="replace")
+    except HTTPError as error:
+        if 300 <= int(error.code or 0) <= 399:
+            location = error.headers.get("Location", "")
+            raise ValueError(f"URL redirects are blocked for guarded ingest: {location}") from error
+        raise
 
 
 class KnowledgeEngine:
@@ -317,8 +456,74 @@ class KnowledgeEngine:
         }
         return body
 
-    def _pbs_upload_payload(self, pbs_result: Any) -> dict[str, Any]:
-        body = self._pbs_body("upload_ingest", pbs_result, {"status": "indexed"})
+    def _pbs_scope_value(self, value: Any) -> str:
+        return str(value or "").strip()
+
+    def _pbs_scope_mismatches(
+        self, value: Any, *, customer_id: str, owner_id: str, path: str = "$"
+    ) -> list[dict[str, str]]:
+        if not isinstance(value, (dict, list)):
+            return []
+        expected_customer_id = self._pbs_scope_value(customer_id)
+        expected_owner_values = {
+            self._pbs_scope_value(owner_id),
+            self._pbs_scope_value(self.pbs.owner_id(owner_id)),
+        }
+        owner_keys = {"owner_id", "ownerId", "owner_user_id", "ownerUserId", "user_id", "userId", "created_by", "createdBy"}
+        customer_keys = {"customer_id", "customerId"}
+        mismatches: list[dict[str, str]] = []
+
+        def walk(candidate: Any, current_path: str) -> None:
+            if isinstance(candidate, dict):
+                for key, item in candidate.items():
+                    item_path = f"{current_path}.{key}"
+                    observed = self._pbs_scope_value(item)
+                    if key in customer_keys and observed and expected_customer_id and observed != expected_customer_id:
+                        mismatches.append(
+                            {"path": item_path, "expected": expected_customer_id, "observed": observed, "scope": "customer_id"}
+                        )
+                    if key in owner_keys and observed and observed not in expected_owner_values:
+                        mismatches.append(
+                            {
+                                "path": item_path,
+                                "expected": self._pbs_scope_value(self.pbs.owner_id(owner_id)),
+                                "observed": observed,
+                                "scope": "owner",
+                            }
+                        )
+                    if isinstance(item, (dict, list)):
+                        walk(item, item_path)
+            elif isinstance(candidate, list):
+                for index, item in enumerate(candidate):
+                    walk(item, f"{current_path}[{index}]")
+
+        walk(value, path)
+        return mismatches
+
+    def _pbs_scope_error_payload(self, operation: str, pbs_result: Any, mismatches: list[dict[str, str]]) -> dict[str, Any]:
+        payload = self._pbs_error_payload(operation, pbs_result)
+        payload["code"] = "pbs-scope-mismatch"
+        payload["error"] = "PBS response scope mismatch"
+        payload["pbs"]["scope_mismatches"] = mismatches[:25]
+        return payload
+
+    def _pbs_scoped_body(
+        self,
+        operation: str,
+        pbs_result: Any,
+        *,
+        customer_id: str,
+        owner_id: str,
+        defaults: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if pbs_result.ok:
+            mismatches = self._pbs_scope_mismatches(pbs_result.body, customer_id=customer_id, owner_id=owner_id)
+            if mismatches:
+                return self._pbs_scope_error_payload(operation, pbs_result, mismatches)
+        return self._pbs_body(operation, pbs_result, defaults)
+
+    def _pbs_upload_payload(self, pbs_result: Any, *, customer_id: str, owner_id: str) -> dict[str, Any]:
+        body = self._pbs_scoped_body("upload_ingest", pbs_result, customer_id=customer_id, owner_id=owner_id, defaults={"status": "indexed"})
         if body.get("status") == "error":
             return body
         if body.get("status") == "ok":
@@ -339,8 +544,8 @@ class KnowledgeEngine:
             body["document"] = document
         return body
 
-    def _pbs_search_payload(self, question: str, pbs_result: Any) -> dict[str, Any]:
-        body = self._pbs_body("chat", pbs_result, {"status": "ok"})
+    def _pbs_search_payload(self, question: str, pbs_result: Any, *, customer_id: str, owner_id: str) -> dict[str, Any]:
+        body = self._pbs_scoped_body("chat", pbs_result, customer_id=customer_id, owner_id=owner_id, defaults={"status": "ok"})
         if body.get("status") == "error":
             return body
         body.setdefault("question", question)
@@ -352,16 +557,16 @@ class KnowledgeEngine:
         body["trace"] = trace
         return body
 
-    def _pbs_wiki_loop_payload(self, pbs_result: Any) -> dict[str, Any]:
-        body = self._pbs_body("wiki_loop_run", pbs_result, {"status": "ok"})
+    def _pbs_wiki_loop_payload(self, pbs_result: Any, *, customer_id: str, owner_id: str) -> dict[str, Any]:
+        body = self._pbs_scoped_body("wiki_loop_run", pbs_result, customer_id=customer_id, owner_id=owner_id, defaults={"status": "ok"})
         if body.get("status") == "error":
             return body
         summary = body.get("summary") if isinstance(body.get("summary"), dict) else {}
         body.setdefault("notes_upserted", int(summary.get("compiled_note_count") or body.get("compiled_note_count") or 0))
         return body
 
-    def _pbs_reports_payload(self, pbs_result: Any) -> dict[str, Any]:
-        body = self._pbs_body("upload_reports", pbs_result, {"status": "ok"})
+    def _pbs_reports_payload(self, pbs_result: Any, *, customer_id: str, owner_id: str) -> dict[str, Any]:
+        body = self._pbs_scoped_body("upload_reports", pbs_result, customer_id=customer_id, owner_id=owner_id, defaults={"status": "ok"})
         if body.get("status") == "error":
             return body
         items = body.get("items") if isinstance(body.get("items"), list) else body.get("documents") if isinstance(body.get("documents"), list) else []
@@ -451,13 +656,33 @@ class KnowledgeEngine:
                 candidates.append(candidate)
         return candidates
 
-    def _pbs_first_list(self, candidates: list[dict[str, Any]], keys: list[str]) -> list[Any]:
-        for candidate in candidates:
-            for key in keys:
-                value = candidate.get(key)
-                if isinstance(value, list):
-                    return value
+    def _pbs_graph_candidate(self, body: dict[str, Any]) -> dict[str, Any]:
+        for candidate in self._pbs_graph_candidates(body):
+            for key in ["nodes", "entities", "vertices", "edges", "links", "relations", "relationships"]:
+                if isinstance(candidate.get(key), list):
+                    return candidate
+        return {}
+
+    def _pbs_first_list(self, candidate: dict[str, Any], keys: list[str]) -> list[Any]:
+        if not isinstance(candidate, dict):
+            return []
+        for key in keys:
+            value = candidate.get(key)
+            if isinstance(value, list):
+                return value
         return []
+
+    def _pbs_count(self, candidate: dict[str, Any], body: dict[str, Any], key: str, fallback: int) -> int:
+        for source in [candidate.get("counts") if isinstance(candidate.get("counts"), dict) else None, body.get("counts") if isinstance(body.get("counts"), dict) else None, body.get("summary") if isinstance(body.get("summary"), dict) else None]:
+            if not isinstance(source, dict):
+                continue
+            for count_key in [key, f"{key}_count", f"graph_{key}_count"]:
+                try:
+                    if count_key in source:
+                        return max(fallback, int(source[count_key] or 0))
+                except (TypeError, ValueError):
+                    continue
+        return fallback
 
     def _pbs_node_ref(self, value: Any) -> str:
         if isinstance(value, dict):
@@ -506,9 +731,9 @@ class KnowledgeEngine:
         return {"id": node_id, "type": fallback_type, "label": node_id, "summary": "", "status": "pbs"}
 
     def _topology_from_pbs_vault(self, body: dict[str, Any], *, customer_id: str, owner_id: str) -> dict[str, Any]:
-        candidates = self._pbs_graph_candidates(body)
-        raw_nodes = self._pbs_first_list(candidates, ["nodes", "entities", "vertices"])
-        raw_edges = self._pbs_first_list(candidates, ["edges", "links", "relations", "relationships"])
+        candidate = self._pbs_graph_candidate(body)
+        raw_nodes = self._pbs_first_list(candidate, ["nodes", "entities", "vertices"])
+        raw_edges = self._pbs_first_list(candidate, ["edges", "links", "relations", "relationships"])
         nodes: list[dict[str, Any]] = []
         node_ids: set[str] = set()
         def add_node(value: Any, *, fallback_id: str, fallback_type: str = "pbs-node") -> str:
@@ -557,8 +782,8 @@ class KnowledgeEngine:
             "nodes": nodes,
             "edges": edges,
             "counts": {
-                "documents": len([node for node in nodes if node["type"] in {"document", "upload", "source"}]),
-                "notes": len([node for node in nodes if "note" in node["type"] or "wiki" in node["type"]]),
+                "documents": self._pbs_count(candidate, body, "documents", len([node for node in nodes if node["type"] in {"document", "upload", "source"}])),
+                "notes": self._pbs_count(candidate, body, "notes", len([node for node in nodes if "note" in node["type"] or "wiki" in node["type"]])),
                 "nodes": len(nodes),
                 "edges": len(edges),
             },
@@ -738,13 +963,15 @@ class KnowledgeEngine:
 
     def ingest_upload(self, payload: dict[str, Any], owner_id: str | None = None) -> dict[str, Any]:
         resolved_owner_id = self.owner_id(owner_id)
-        if self._pbs_live_enabled():
-            return self._pbs_upload_payload(self.pbs.upload_ingest(payload, resolved_owner_id))
         title = str(
             payload.get("file_name") or payload.get("fileName") or payload.get("filename") or payload.get("title") or "uploaded-document"
         )
-        content, parser_metadata = extract_uploaded_text(title, payload)
+        validate_upload_policy(title, payload)
+        validate_encoded_upload_size(payload)
         customer_id = str(payload.get("customer_id") or payload.get("customerId") or "default")
+        if self._pbs_live_enabled():
+            return self._pbs_upload_payload(self.pbs.upload_ingest(payload, resolved_owner_id), customer_id=customer_id, owner_id=resolved_owner_id)
+        content, parser_metadata = extract_uploaded_text(title, payload)
         metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
         pbs_payload = {
             **pbs_common_payload(payload, customer_id=customer_id, owner_id=resolved_owner_id, source_kind="upload"),
@@ -787,20 +1014,20 @@ class KnowledgeEngine:
         url = str(payload.get("url") or "").strip()
         if not url:
             raise ValueError("url is required")
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("only http and https URLs are supported")
-        if is_private_hostname(parsed.hostname):
-            raise ValueError("private, loopback, or unresolved URL targets are blocked")
+        parsed = validated_public_http_url(url)
+        customer_id = str(payload.get("customer_id") or payload.get("customerId") or "default")
         if self._pbs_live_enabled():
-            return self._pbs_body("url_ingest", self.pbs.url_ingest(payload, resolved_owner_id), {"status": "indexed"})
+            return self._pbs_scoped_body(
+                "url_ingest",
+                self.pbs.url_ingest(payload, resolved_owner_id),
+                customer_id=customer_id,
+                owner_id=resolved_owner_id,
+                defaults={"status": "indexed"},
+            )
         content = str(payload.get("content") or "")
         if not content:
-            request = Request(url, headers={"User-Agent": "Cywell-KnowledgeEngine/0.1.4"})
-            with urlopen(request, timeout=8) as response:
-                content = response.read(1_500_000).decode("utf-8", errors="replace")
+            content = fetch_public_url_text(url)
         title = str(payload.get("title") or parsed.netloc + parsed.path or url)
-        customer_id = str(payload.get("customer_id") or payload.get("customerId") or "default")
         pbs_payload = {
             **pbs_common_payload(payload, customer_id=customer_id, owner_id=resolved_owner_id, source_kind="url"),
             "url": url,
@@ -832,7 +1059,7 @@ class KnowledgeEngine:
         if not question:
             raise ValueError("question is required")
         if self._pbs_live_enabled():
-            return self._pbs_search_payload(question, self.pbs.chat(payload, resolved_owner_id))
+            return self._pbs_search_payload(question, self.pbs.chat(payload, resolved_owner_id), customer_id=customer_id, owner_id=resolved_owner_id)
         query_terms = tokenize(question)
         store = self.load_store()
         scored: list[tuple[int, dict[str, Any]]] = []
@@ -889,7 +1116,7 @@ class KnowledgeEngine:
     def upload_reports(self, customer_id: str = "default", owner_id: str | None = None) -> dict[str, Any]:
         resolved_owner_id = self.owner_id(owner_id)
         if self._pbs_live_enabled():
-            return self._pbs_reports_payload(self.pbs.upload_reports(resolved_owner_id, customer_id=customer_id))
+            return self._pbs_reports_payload(self.pbs.upload_reports(resolved_owner_id, customer_id=customer_id), customer_id=customer_id, owner_id=resolved_owner_id)
         store = self.load_store()
         documents = [doc for doc in store["documents"] if self._in_scope(doc, customer_id=customer_id, owner_id=resolved_owner_id)]
         events = [
@@ -919,7 +1146,7 @@ class KnowledgeEngine:
         resolved_owner_id = self.owner_id(owner_id)
         loop_payload = {"customer_id": customer_id, "document_id": document_id}
         if self._pbs_live_enabled():
-            return self._pbs_wiki_loop_payload(self.pbs.wiki_loop_run(loop_payload, resolved_owner_id))
+            return self._pbs_wiki_loop_payload(self.pbs.wiki_loop_run(loop_payload, resolved_owner_id), customer_id=customer_id, owner_id=resolved_owner_id)
         store = self.load_store()
         documents = [
             doc
@@ -999,7 +1226,13 @@ class KnowledgeEngine:
     def wiki_loop_status(self, *, customer_id: str = "default", owner_id: str | None = None) -> dict[str, Any]:
         resolved_owner_id = self.owner_id(owner_id)
         if self._pbs_live_enabled():
-            return self._pbs_body("wiki_loop_status", self.pbs.wiki_loop_status(resolved_owner_id, customer_id=customer_id), {"status": "ok"})
+            return self._pbs_scoped_body(
+                "wiki_loop_status",
+                self.pbs.wiki_loop_status(resolved_owner_id, customer_id=customer_id),
+                customer_id=customer_id,
+                owner_id=resolved_owner_id,
+                defaults={"status": "ok"},
+            )
         store = self.load_store()
         documents = [doc for doc in store["documents"] if self._in_scope(doc, customer_id=customer_id, owner_id=resolved_owner_id)]
         notes = [note for note in store["notes"] if self._in_scope(note, customer_id=customer_id, owner_id=resolved_owner_id)]
@@ -1023,7 +1256,13 @@ class KnowledgeEngine:
         customer_id = str(payload.get("customer_id") or payload.get("customerId") or "default")
         resolved_owner_id = self.owner_id(owner_id)
         if self._pbs_live_enabled():
-            return self._pbs_body("wiki_vault_note_save", self.pbs.save_note(payload, resolved_owner_id), {"status": "ok"})
+            return self._pbs_scoped_body(
+                "wiki_vault_note_save",
+                self.pbs.save_note(payload, resolved_owner_id),
+                customer_id=customer_id,
+                owner_id=resolved_owner_id,
+                defaults={"status": "ok"},
+            )
         title = str(payload.get("title") or "Untitled note").strip()
         body = str(payload.get("body") or "").strip()
         if not body:
@@ -1066,7 +1305,9 @@ class KnowledgeEngine:
         resolved_owner_id = self.owner_id(owner_id)
         if self._pbs_live_enabled():
             pbs_result = self.pbs.wiki_vault({"customer_id": customer_id}, resolved_owner_id)
-            body = self._pbs_body("wiki_vault", pbs_result, {"status": "ok"})
+            body = self._pbs_scoped_body("wiki_vault", pbs_result, customer_id=customer_id, owner_id=resolved_owner_id, defaults={"status": "ok"})
+            if body.get("status") == "error":
+                return body
             body.setdefault("customer_id", customer_id)
             if "topology" in body:
                 body.setdefault("pbs_topology", body.get("topology"))
@@ -1092,6 +1333,10 @@ class KnowledgeEngine:
         resolved_owner_id = self.owner_id(owner_id)
         if self._pbs_live_enabled():
             pbs_result = self.pbs.wiki_vault({"customer_id": customer_id}, resolved_owner_id)
+            if pbs_result.ok:
+                mismatches = self._pbs_scope_mismatches(pbs_result.body, customer_id=customer_id, owner_id=resolved_owner_id)
+                if mismatches:
+                    return self._pbs_scope_error_payload("wiki_vault_topology", pbs_result, mismatches)
             result = self._topology_from_pbs_vault(pbs_result.body if pbs_result.ok else {}, customer_id=customer_id, owner_id=resolved_owner_id)
             result["pbs"] = {
                 **result.get("pbs", {}),

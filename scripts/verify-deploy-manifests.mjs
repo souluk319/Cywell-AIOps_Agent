@@ -16,6 +16,7 @@ const files = [
   "deploy/kustomize/overlays/crc/buildconfigs.yaml",
   "deploy/kustomize/overlays/crc/21-lightspeed-ingress.yaml",
   "deploy/kustomize/overlays/crc/gateway-crc-api-egress.yaml",
+  "deploy/kustomize/overlays/crc/gateway-lightspeed-tls-insecure-patch.yaml",
   "deploy/kustomize/overlays/crc/kustomization.yaml",
   "deploy/kustomize/overlays/pbs-shadow/kustomization.yaml",
   "deploy/kustomize/overlays/pbs-shadow/knowledge-engine-pbs-shadow-patch.yaml",
@@ -29,6 +30,9 @@ const files = [
   "scripts/promote-crc-release-images.mjs",
   "scripts/verify-pbs-live-smoke.mjs",
   "scripts/verify-pbs-preflight.mjs",
+  "apps/knowledge-engine/src/cas_knowledge_engine/engine.py",
+  "apps/knowledge-engine/src/cas_knowledge_engine/pbs_client.py",
+  "apps/knowledge-engine/src/cas_knowledge_engine/selftest.py",
   "apps/console-plugin/console-extensions.json"
 ];
 
@@ -322,6 +326,7 @@ function runRenderedChecks() {
 
   const baseDeployment = renderedDoc(base, "Deployment", "cas-knowledge-engine");
   const baseGatewayDeployment = renderedDoc(base, "Deployment", "cas-gateway");
+  const crcGatewayDeployment = renderedDoc(crc, "Deployment", "cas-gateway");
   expect("render:base:gateway-deployment", Boolean(baseGatewayDeployment), "base renders cas-gateway Deployment");
   expect(
     "render:base:gateway-owner-identity",
@@ -339,6 +344,14 @@ function runRenderedChecks() {
     envValue(baseGatewayDeployment, "CAS_OPENSHIFT_API_TLS_INSECURE") === "false" &&
       envValue(baseGatewayDeployment, "CAS_OPENSHIFT_API_CA_FILE") === "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
     "base gateway verifies OpenShift API TLS with mounted cluster CA"
+  );
+  expect(
+    "render:base:lightspeed-tls",
+    envValue(baseGatewayDeployment, "CAS_LIGHTSPEED_TLS_INSECURE") === "false" &&
+      envValue(baseGatewayDeployment, "CAS_LIGHTSPEED_CA_FILE") === "/var/run/secrets/openshift/service-ca/service-ca.crt" &&
+      base.includes("service.beta.openshift.io/inject-cabundle") &&
+      base.includes("cas-openshift-service-ca"),
+    "base gateway verifies Lightspeed TLS with mounted OpenShift service CA"
   );
   expect("render:base:knowledge-deployment", Boolean(baseDeployment), "base renders cas-knowledge-engine Deployment");
   expect(
@@ -381,6 +394,11 @@ function runRenderedChecks() {
     "render:crc:lightspeed-ingress",
     Boolean(renderedDoc(crc, "NetworkPolicy", "cas-gateway-to-lightspeed-app-server")) && crc.includes("cywell.io/lab-scope: crc-dev"),
     "CRC overlay renders lab-scoped Lightspeed ingress prerequisite"
+  );
+  expect(
+    "render:crc:lightspeed-tls-lab-override",
+    envValue(crcGatewayDeployment, "CAS_LIGHTSPEED_TLS_INSECURE") === "true",
+    "CRC overlay owns the lab-only Lightspeed TLS insecure override"
   );
 
   const shadowDeployment = renderedDoc(shadow, "Deployment", "cas-knowledge-engine");
@@ -572,10 +590,79 @@ for (const file of files) {
       for (const forbidden of ["delete", "patch", "update", "pods/exec", "pods/portforward"]) {
         if (text.includes(forbidden)) fail(`rbac:forbidden:${forbidden}`, `${forbidden} must not appear in MVP RBAC`);
       }
-      for (const required of ["get", "list", "watch", "selfsubjectaccessreviews"]) {
+      for (const required of ["get", "list", "watch", "selfsubjectreviews"]) {
         if (text.includes(required)) pass(`rbac:required:${required}`, `${required} present`);
         else fail(`rbac:required:${required}`, `${required} missing`);
       }
+      expect(
+        "rbac:selfsubjectreview-api-group",
+        text.includes('apiGroups: ["authentication.k8s.io"]') && !text.includes("selfsubjectaccessreviews"),
+        "Gateway owner verification RBAC matches authentication.k8s.io SelfSubjectReview",
+        "Gateway owner verification RBAC must match authentication.k8s.io SelfSubjectReview"
+      );
+    }
+    if (file.includes("cas_knowledge_engine/engine.py")) {
+      expect(
+        "knowledge-engine:upload-policy",
+        text.includes("UPLOAD_ALLOWED_EXTENSIONS") &&
+          text.includes("UPLOAD_BLOCKED_EXTENSIONS") &&
+          text.includes("UPLOAD_ALLOWED_MIME_TYPES") &&
+          text.includes("OFFICE_ZIP_MAX_ENTRY_BYTES") &&
+          text.includes("validate_encoded_upload_size") &&
+          text.includes("validate_upload_policy") &&
+          text.includes("base64.b64decode(encoded, validate=True)"),
+        "knowledge engine enforces upload extension, MIME, strict base64, and OOXML zip limits",
+        "knowledge engine upload policy must reject unsafe extensions/MIME, invalid base64, and oversized OOXML zips"
+      );
+      expect(
+        "knowledge-engine:url-ingest-ssrf-redirect-guard",
+        text.includes("NoRedirectHandler") &&
+          text.includes("validated_public_http_url") &&
+          text.includes("URL credentials are not allowed") &&
+          text.includes("URL redirects are blocked") &&
+          text.includes("build_opener(NoRedirectHandler)"),
+        "knowledge engine URL ingest blocks private targets, credentials, and redirects",
+        "knowledge engine URL ingest must block private targets, credentials, and redirects"
+      );
+      expect(
+        "knowledge-engine:pbs-topology-single-candidate",
+        text.includes("def _pbs_graph_candidate") &&
+          text.includes("candidate = self._pbs_graph_candidate(body)") &&
+          !text.includes("raw_nodes = self._pbs_first_list(candidates"),
+        "PBS live topology normalization uses one graph candidate for nodes and edges",
+        "PBS live topology normalization must not mix wrapper and nested graph candidates"
+      );
+      expect(
+        "knowledge-engine:pbs-live-response-scope",
+        text.includes("def _pbs_scope_mismatches") &&
+          text.includes("pbs-scope-mismatch") &&
+          text.includes("scope_mismatches") &&
+          text.includes("_pbs_scoped_body"),
+        "PBS live response bodies are checked against requested customer/owner scope",
+        "PBS live adapter must reject response bodies outside the requested customer/owner scope"
+      );
+    }
+    if (file.includes("cas_knowledge_engine/pbs_client.py")) {
+      expect(
+        "pbs-client:service-token-required",
+        text.includes("CAS_PBS_BEARER_TOKEN is required for service-token auth") &&
+          text.includes("service-token auth requires HTTPS or mTLS") &&
+          text.includes("CAS_PBS_ALLOW_INSECURE_TOKEN_HTTP") &&
+          text.includes("_local_http_url"),
+        "PBS client fails closed when service-token auth lacks token or uses non-local HTTP",
+        "PBS client must fail closed without service-token material and must not send tokens over non-local HTTP"
+      );
+    }
+    if (file.includes("cas_knowledge_engine/selftest.py")) {
+      expect(
+        "knowledge-engine:selftest-upload-url-guards",
+        text.includes("upload rejects executable extensions") &&
+          text.includes("upload rejects invalid base64 payloads") &&
+          text.includes("office upload rejects oversized compressed XML") &&
+          text.includes("URL ingest rejects loopback targets before ingest"),
+        "knowledge engine self-test covers unsafe upload and URL ingest rejection",
+        "knowledge engine self-test must cover unsafe upload and URL ingest rejection"
+      );
     }
     if (file.includes("base/20-networkpolicy")) {
       if (text.includes("policyTypes") && text.includes("Egress")) pass("networkpolicy:egress", "egress policy present");
@@ -647,6 +734,11 @@ for (const file of files) {
         pass("pbs-shadow:base-url-placeholder", "PBS shadow overlay has an explicit in-cluster PBS base URL placeholder");
       } else {
         fail("pbs-shadow:base-url-placeholder", "PBS shadow overlay PBS base URL placeholder missing");
+      }
+      if (text.includes("base-url=https://playbookstudio-runtime.playbookstudio.svc.cluster.local:8765")) {
+        pass("pbs-shadow:service-token-https", "PBS shadow/live service-token transport defaults to HTTPS");
+      } else {
+        fail("pbs-shadow:service-token-https", "PBS shadow/live service-token transport must default to HTTPS");
       }
       if (/bearer-token|CAS_PBS_BEARER|secretKeyRef|Authorization:\s*Bearer/i.test(text)) {
         fail("pbs-shadow:no-token-literal", "PBS shadow kustomization must not contain token literals");
@@ -805,6 +897,18 @@ for (const file of files) {
       } else {
         fail("crc-overlay:no-pbs-overlays", "CRC overlay must compose base/local deployment path with CRC-only policies and no PBS overlays");
       }
+      if (text.includes("gateway-lightspeed-tls-insecure-patch.yaml")) {
+        pass("crc-overlay:lightspeed-tls-override-owned", "CRC overlay explicitly owns lab-only Lightspeed TLS insecure override");
+      } else {
+        fail("crc-overlay:lightspeed-tls-override-owned", "CRC overlay must own any Lightspeed TLS insecure override explicitly");
+      }
+    }
+    if (file.includes("gateway-lightspeed-tls-insecure-patch")) {
+      if (text.includes("CAS_LIGHTSPEED_TLS_INSECURE") && text.includes('value: "true"')) {
+        pass("crc-overlay:lightspeed-tls-insecure-patch", "CRC-only Lightspeed TLS insecure patch is explicit");
+      } else {
+        fail("crc-overlay:lightspeed-tls-insecure-patch", "CRC-only Lightspeed TLS insecure patch missing expected env override");
+      }
     }
     if (file.includes("gateway-crc-api-egress")) {
       if (text.includes("cywell.io/lab-scope: crc-dev") && text.includes("10.217.4.1/32") && text.includes("192.168.126.11/32")) {
@@ -885,6 +989,11 @@ for (const file of files) {
       } else {
         fail("package:pbs-preflight-shadow-script", "package.json must expose verify:pbs:preflight:shadow with --overlay=pbs-shadow");
       }
+      if (text.includes('"verify:pbs:preflight:shadow:cluster"') && text.includes("--overlay=pbs-shadow --require-cluster")) {
+        pass("package:pbs-preflight-shadow-cluster-script", "package.json exposes strict PBS shadow cluster preflight");
+      } else {
+        fail("package:pbs-preflight-shadow-cluster-script", "package.json must expose verify:pbs:preflight:shadow:cluster with --require-cluster");
+      }
       if (text.includes('"verify:pbs:live"') && text.includes("verify-pbs-live-smoke.mjs")) {
         pass("package:pbs-live-script", "package.json exposes verify:pbs:live");
       } else {
@@ -914,6 +1023,15 @@ for (const file of files) {
       } else {
         fail("package:pbs-cutover-cluster-script", "package.json must run strict preflight before in-cluster PBS cutover smoke");
       }
+      if (
+        text.includes('"verify:release:pbs-live"') &&
+        text.includes("verify:pbs:preflight:live") &&
+        text.includes("--cutover --cluster")
+      ) {
+        pass("package:pbs-live-release-script", "package.json exposes non-skipping PBS live release gate");
+      } else {
+        fail("package:pbs-live-release-script", "package.json must expose non-skipping PBS live release gate");
+      }
       if (text.includes('"release:crc:v0.1.4"') && text.includes("promote-crc-release-images.mjs")) {
         pass("package:release-crc-script", "package.json exposes CRC release image promotion");
       } else {
@@ -936,6 +1054,14 @@ for (const file of files) {
         text.includes("imageID") && text.includes("@sha256:") && text.includes("--source=docker"),
         "CRC release promotion script pins Postgres release tag from the running digest imageID"
       );
+      expect(
+        "release-crc:existing-tag-force-gate",
+        text.includes("CAS_RELEASE_FORCE") &&
+          text.includes("assertReleaseTargetMutable") &&
+          text.includes("already resolves to a different image") &&
+          text.includes("forceRelease"),
+        "CRC release promotion refuses to mutate existing release tags unless force is explicit"
+      );
     }
     if (file.includes("verify-pbs-live-smoke")) {
       if (text.includes("--cutover") && text.includes("CAS_PBS_LIVE_CUTOVER") && text.includes("write-smoke-required") && text.includes("pbs-live:cutover-auth")) {
@@ -943,6 +1069,11 @@ for (const file of files) {
       } else {
         fail("pbs-live-smoke:cutover-mode", "PBS live smoke must support cutover mode with required write smoke and PBS auth material");
       }
+      expect(
+        "pbs-live-smoke:mode-specific-evidence",
+        text.includes("evidenceMode") && text.includes("cas-pbs-live-smoke-${evidenceMode}.json"),
+        "PBS live smoke writes mode-specific evidence artifacts"
+      );
       if (text.includes("compiled_wiki_ready") && text.includes("cutover-topology-ready")) {
         pass("pbs-live-smoke:readiness-topology", "PBS live smoke checks compiled wiki and cutover topology readiness");
       } else {
@@ -979,6 +1110,8 @@ for (const file of files) {
         text.includes("CAS_PBS_REQUIRE_CORPUS_READY") &&
         text.includes("cas-knowledge-postgres-live") &&
         text.includes("validOverlays") &&
+        text.includes("evidenceSuffix") &&
+        text.includes("service-token-transport") &&
         text.includes("appliedPbsEgressScoped") &&
         text.includes("appliedKnowledgeIngressScoped") &&
         text.includes("liveDatabaseUrlUsesService") &&
@@ -1039,6 +1172,18 @@ for (const file of files) {
         pass("gateway:openshift-api-tls", "gateway verifies Kubernetes API TLS with mounted namespace CA bundle");
       } else {
         fail("gateway:openshift-api-tls", "gateway must verify Kubernetes API TLS with mounted namespace CA bundle");
+      }
+      if (
+        text.includes("CAS_LIGHTSPEED_CA_FILE") &&
+        text.includes("/var/run/secrets/openshift/service-ca/service-ca.crt") &&
+        text.includes("CAS_LIGHTSPEED_TLS_INSECURE") &&
+        text.includes('value: "false"') &&
+        text.includes("service.beta.openshift.io/inject-cabundle") &&
+        text.includes("cas-openshift-service-ca")
+      ) {
+        pass("gateway:lightspeed-tls", "gateway verifies Lightspeed TLS with mounted OpenShift service CA bundle");
+      } else {
+        fail("gateway:lightspeed-tls", "gateway must verify Lightspeed TLS with mounted OpenShift service CA bundle");
       }
       if (text.includes("CAS_KNOWLEDGE_ENGINE_URL") && text.includes("cas-knowledge-engine.cywell-ai-sentinel.svc.cluster.local")) {
         pass("gateway:knowledge-engine-url", "gateway points at in-cluster CAS knowledge engine");

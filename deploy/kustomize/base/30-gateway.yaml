@@ -1,3 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cas-openshift-service-ca
+  namespace: cywell-ai-sentinel
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,8 +53,10 @@ spec:
               value: https://lightspeed-app-server.openshift-lightspeed.svc.cluster.local:8443
             - name: CAS_LIGHTSPEED_TIMEOUT_MS
               value: "90000"
+            - name: CAS_LIGHTSPEED_CA_FILE
+              value: /var/run/secrets/openshift/service-ca/service-ca.crt
             - name: CAS_LIGHTSPEED_TLS_INSECURE
-              value: "true"
+              value: "false"
             - name: CAS_EVIDENCE_PROVIDER
               value: openshift-api
             - name: CAS_OPENSHIFT_API_URL
@@ -85,6 +99,9 @@ spec:
             - name: kube-root-ca
               mountPath: /var/run/secrets/kubernetes.io/serviceaccount
               readOnly: true
+            - name: openshift-service-ca
+              mountPath: /var/run/secrets/openshift/service-ca
+              readOnly: true
       volumes:
         - name: service-serving-cert
           secret:
@@ -95,6 +112,12 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
+        - name: openshift-service-ca
+          configMap:
+            name: cas-openshift-service-ca
+            items:
+              - key: service-ca.crt
+                path: service-ca.crt
 ---
 apiVersion: v1
 kind: Service

@@ -13,6 +13,10 @@ const requireSecret = process.argv.includes("--require-secret") || envBool("CAS_
 const skipApplied = process.argv.includes("--skip-applied") || envBool("CAS_PBS_PREFLIGHT_SKIP_APPLIED");
 const checkedAt = new Date().toISOString();
 const checks = [];
+const evidencePhase = skipApplied ? "preapply" : overlay === "pbs-shadow" && !requireCluster ? "diagnostic" : "applied";
+const evidenceScope = requireCluster ? "cluster" : "local";
+const evidenceSuffix = [overlay, evidencePhase, evidenceScope, requireSecret ? "required-secrets" : "optional-secrets"].join("-");
+const evidencePath = `test-results/cas-pbs-preflight-${evidenceSuffix}.json`;
 
 function envBool(name, defaultValue = false) {
   const raw = process.env[name];
@@ -263,7 +267,7 @@ function pbsRuntimeEgressScoped(policy) {
 function writeEvidence(status) {
   mkdirSync("test-results", { recursive: true });
   writeFileSync(
-    "test-results/cas-pbs-preflight.json",
+    evidencePath,
     JSON.stringify(
       {
         checkedAt,
@@ -287,7 +291,7 @@ function writeEvidence(status) {
       2
     )
   );
-  console.log("Evidence: test-results/cas-pbs-preflight.json");
+  console.log(`Evidence: ${evidencePath}`);
 }
 
 function getJson(id, args) {
@@ -443,11 +447,19 @@ if (overlay === "pbs-live") {
 }
 expect("preflight:no-secret-material", noSecretMaterial(rendered), "rendered PBS overlay contains no literal bearer/API token material");
 expect("preflight:configmap", Boolean(configMap), `${overlay} renders cas-pbs-config`);
+const pbsBaseUrl = configValue(configMap, "base-url");
+const pbsAuthMode = configValue(configMap, "auth-mode");
 expect(
   "preflight:base-url-shape",
-  /^https?:\/\//.test(configValue(configMap, "base-url")) && configValue(configMap, "base-url").includes(":8765"),
+  /^https?:\/\//.test(pbsBaseUrl) && pbsBaseUrl.includes(":8765"),
   "cas-pbs-config base-url is an HTTP(S) PBS backend URL on port 8765",
-  `unexpected base-url: ${configValue(configMap, "base-url") || "<missing>"}`
+  `unexpected base-url: ${pbsBaseUrl || "<missing>"}`
+);
+expect(
+  "preflight:service-token-transport",
+  pbsAuthMode !== "service-token" || pbsBaseUrl.startsWith("https://"),
+  "service-token PBS auth uses HTTPS transport in rendered overlay",
+  "service-token PBS auth must not use plain HTTP for non-local live/shadow traffic"
 );
 expect(
   "preflight:timeout-bounds",

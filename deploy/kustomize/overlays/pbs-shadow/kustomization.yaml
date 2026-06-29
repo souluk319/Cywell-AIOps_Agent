@@ -7,7 +7,7 @@ configMapGenerator:
   - name: cas-pbs-config
     namespace: cywell-ai-sentinel
     literals:
-      - base-url=http://playbookstudio-runtime.playbookstudio.svc.cluster.local:8765
+      - base-url=https://playbookstudio-runtime.playbookstudio.svc.cluster.local:8765
       - auth-mode=service-token
       - timeout-ms=10000
       - max-response-bytes=5242880

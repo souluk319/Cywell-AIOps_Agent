@@ -174,6 +174,8 @@ Delivered:
 - MIME metadata capture
 - lightweight text extraction for text, DOCX, PPTX, XLSX, and PDF payloads
 - guarded URL ingest
+- unsafe upload extension/MIME rejection, strict base64 validation, decoded-size cap, and OOXML zip entry/size caps
+- URL ingest rejects private/loopback/unresolved targets, URL credentials, and redirects in the local guarded ingest path
 - URL ingest PBS-compatible metadata including `auto_compile_wiki`
 - upload report list
 - customer_id scope
@@ -183,7 +185,6 @@ Delivered:
 Not yet PBS parity:
 
 - exact PBS parser/indexer parity
-- production-grade MIME policy and upload limits
 - OCR/vision asset pipeline
 - duplicate/delete workflow
 - streamed ingest progress
@@ -280,6 +281,7 @@ Delivered:
   - live `cas-knowledge-live-config/service-owner` instead of inherited CRC owner defaults
   - live render removes inherited dev Postgres Secret material and uses `v0.1.4` release image tags instead of `:dev`
   - knowledge-engine egress limited to DNS, Postgres, and labeled PBS runtime pods on namespace `playbookstudio`, port `8765`
+  - PBS service-token transport defaults to HTTPS, and the PBS client fails closed for missing token material or non-local HTTP token transport unless explicitly overridden for a lab
   - live mode requires PBS runtime readiness through `CAS_PBS_REQUIRE_RUNTIME_READY=true`
   - live mode requires PBS corpus/index readiness through `CAS_PBS_REQUIRE_CORPUS_READY=true` and `CAS_PBS_REQUIRED_READY_SCOPES=official_docs,study_docs`
 - v0.1.3 operator paused during dev deployment
@@ -289,24 +291,27 @@ Delivered:
 - optional `npm run verify:pbs:live` smoke script for a real PBS target; it skips cleanly when `CAS_PBS_BASE_URL` is not set
 - `npm run verify:pbs:preflight` renders the PBS live/shadow overlay and checks config, Secret refs, egress, ingress, runtime service shape, and live readiness gates before a cluster cutover
 - `npm run verify:pbs:preflight:live` is the strict cutover preflight and fails unless the real PBS namespace/service and required Secrets exist
-- `npm run verify:pbs:cutover` is the required write smoke gate and fails unless `CAS_PBS_BASE_URL` is configured
+- `npm run verify:release:pbs-live` is the non-skipping release gate and runs strict live preflight plus in-cluster cutover smoke
+- `npm run verify:pbs:cutover` is a local write smoke gate and fails unless `CAS_PBS_BASE_URL` and PBS auth material are configured
 - live PBS route failures propagate as non-2xx CAS HTTP status with PBS trace evidence
 - `deploy:crc` starts OpenShift binary builds without `--follow --wait`, follows build logs separately, and polls final build phase to avoid cancellation after slow uploads
 
 Still required:
 
 - production secret management
+- production customer authorization policy that maps verified OpenShift users/groups/namespaces to allowed customer workspaces; v0.1.4 currently treats `customer_id` as an owner-namespaced workspace key
 - migration rollback plan
 - backup/restore plan
 - exact PBS migration lineage
 - real PBS runtime route/service name confirmation in the target cluster
+- real PBS runtime HTTPS or service-mesh mTLS confirmation in the target cluster
 - real `cas-pbs-auth` Secret material creation outside git
 - real `cas-knowledge-postgres-live` Secret material creation outside git
 - cleanup of legacy CRC `cas-knowledge-postgres` Secret before live apply
 - PBS runtime pod labels matching the CAS egress policy
-- release image publishing/tagging for `v0.1.4`
+- release image publishing/tagging for `v0.1.4`; moving an existing release tag requires `CAS_RELEASE_FORCE=true`
 - applying `pbs-shadow` or `pbs-live` overlay in an environment where PBS is deployed
-- live PBS smoke with `CAS_PBS_BASE_URL` set and strict `npm run verify:pbs:preflight:live` plus `npm run verify:pbs:cutover`
+- live PBS smoke with HTTPS `CAS_PBS_BASE_URL` set and strict `npm run verify:release:pbs-live`
 - egress controls for URL ingest and LLM/embedding endpoints
 
 Latest closed review items:
@@ -322,7 +327,7 @@ Latest closed review items:
 - PBS-Dev3 워킹트리가 더럽기 때문에 소스 기준점을 먼저 고정해야 한다.
 - PBS Python dependency가 크다. CAS Node gateway에 합치지 말고 별도 image로 분리해야 한다.
 - pgvector embedding dimension, model 선택, migration 순서가 맞지 않으면 재색인이 필요하다.
-- URL ingest는 SSRF/private network 접근 정책을 CAS 배포 환경 기준으로 재검토해야 한다.
+- PBS-live URL ingest는 실제 fetch가 PBS에서 수행되므로 PBS 런타임의 SSRF/redirect/DNS-rebind 방어 계약을 별도로 확인해야 한다.
 - 고객 데이터는 tenant isolation, audit trail, retention policy가 먼저 정해져야 한다.
 - 기존 CAS 검증은 nav/route 미등록을 기대하므로 v0.1.4부터 검증 기준을 바꿔야 한다.
 
@@ -332,16 +337,19 @@ v0.1.4 currently proves:
 
 - Cywell menu and route integration
 - working customer data/RAG/wiki/topology API path
+- owner-scoped customer workspace isolation; it does not yet prove a global customer ACL across OpenShift users/groups
 - CRC deployment of gateway, console plugin, knowledge engine, and Postgres
 - topology dashboard visual design in the live console plugin bundle
 - topology KPI strip, relation grid, selected-node inspector, and node-to-RAG action in the live console plugin bundle
 - PBS-compatible upload and URL ingest payload metadata
 - base64 file upload with lightweight MIME-aware extraction
+- unsafe upload extension/MIME/base64/oversized OOXML rejection before local indexing or PBS-live outbound upload
 - PBS HTTP shadow/live adapter with fake PBS verification for upload, URL ingest, reports, RAG, wiki-loop, wiki status, wiki vault topology, and note save
 - PBS live outbound owner/hash contract verification across upload, URL ingest, reports, chat, wiki run/status, wiki vault, and note save
 - PBS live outbound customer scope verification for reports, wiki status, and wiki vault
-- rendered PBS shadow/live deployment overlays with shadow optional token Secret reference, live required token Secret reference, live required Postgres Secret references, no dev owner/DB Secret material, release image tags, and restricted knowledge-engine egress to labeled PBS runtime pods on `8765`
-- topology normalization across PBS `graph`, `topology.graph`, `links`, `relations`, `relationships`, `node_id`, `source_id`, and `target_id` variants
+- PBS live response scope verification so mismatched customer IDs or PBS owner/user hashes are blocked before report rows, wiki vault payloads, or topology graphs reach CAS callers
+- rendered PBS shadow/live deployment overlays with HTTPS service-token transport, shadow optional token Secret reference, live required token Secret reference, live required Postgres Secret references, no dev owner/DB Secret material, release image tags, and restricted knowledge-engine egress to labeled PBS runtime pods on `8765`
+- topology normalization across PBS `graph`, `topology.graph`, `links`, `relations`, `relationships`, `node_id`, `source_id`, and `target_id` variants without mixing wrapper and nested graph candidates
 - Knowledge Engine ingress isolation so only the CAS gateway can call scoped data APIs in-cluster
 - optional real PBS live smoke verifier with skip/required modes and strict DB/pgvector/corpus readiness checks
 - owner-required scoped knowledge APIs with Gateway SelfSubjectReview owner mapping and deployed gateway rejection of spoofed owner headers

@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 
 const namespace = process.env.CAS_RELEASE_NAMESPACE || "cywell-ai-sentinel";
 const releaseTag = process.env.CAS_RELEASE_TAG || "v0.1.4";
+const forceRelease = ["1", "true", "yes", "y", "on"].includes(String(process.env.CAS_RELEASE_FORCE ?? "").trim().toLowerCase());
 const appImageStreams = ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine"];
 const postgresImageStream = "cas-knowledge-postgres";
 const checks = [];
@@ -33,6 +34,15 @@ function getJson(args) {
   return JSON.parse(run("oc", [...args, "-o", "json"]));
 }
 
+function getImageStreamTagReference(name, tag) {
+  try {
+    const imageTag = getJson(["get", "imagestreamtag", `${name}:${tag}`, "-n", namespace]);
+    return imageTag?.image?.dockerImageReference ?? imageTag?.image?.metadata?.name ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -51,11 +61,10 @@ function ensureImageStreamTag(name, tag) {
   let lastError = "";
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
-      const imageTag = getJson(["get", "imagestreamtag", `${name}:${tag}`, "-n", namespace]);
-      const resolved = imageTag?.image?.dockerImageReference ?? imageTag?.image?.metadata?.name ?? "";
+      const resolved = getImageStreamTagReference(name, tag);
       if (resolved) {
         pass(`release:imagestreamtag:${name}:${tag}`, `${name}:${tag} resolves`, { image: resolved });
-        return;
+        return resolved;
       }
       lastError = `${name}:${tag} exists but has no resolved image reference`;
     } catch (error) {
@@ -66,10 +75,31 @@ function ensureImageStreamTag(name, tag) {
   throw new Error(lastError || `${name}:${tag} did not resolve`);
 }
 
+function assertReleaseTargetMutable(name, sourceRef) {
+  const targetRef = getImageStreamTagReference(name, releaseTag);
+  if (!targetRef) {
+    pass(`release:target:${name}:${releaseTag}`, `${name}:${releaseTag} does not exist yet`);
+    return;
+  }
+  if (targetRef === sourceRef) {
+    pass(`release:target:${name}:${releaseTag}:unchanged`, `${name}:${releaseTag} already matches source`, { image: targetRef });
+    return;
+  }
+  if (forceRelease) {
+    pass(`release:target:${name}:${releaseTag}:force`, `${name}:${releaseTag} differs and CAS_RELEASE_FORCE=true allows retag`, {
+      previous: targetRef,
+      next: sourceRef
+    });
+    return;
+  }
+  throw new Error(`${name}:${releaseTag} already resolves to a different image; set CAS_RELEASE_FORCE=true to retag intentionally`);
+}
+
 function promoteAppReleaseTags() {
   for (const name of appImageStreams) {
     ensureImageStream(name);
-    ensureImageStreamTag(name, "dev");
+    const sourceRef = ensureImageStreamTag(name, "dev");
+    assertReleaseTargetMutable(name, sourceRef);
     run("oc", ["tag", "-n", namespace, `${name}:dev`, `${name}:${releaseTag}`, "--reference-policy=local"], { stdio: "inherit" });
     ensureImageStreamTag(name, releaseTag);
   }
@@ -106,6 +136,7 @@ function promotePostgresReleaseTag() {
   const { digest, pod } = findRunningPostgresDigest();
   if (!digest) throw new Error("could not resolve a digest-pinned imageID from the running cas-knowledge-postgres pod");
   pass("release:postgres:digest-source", `resolved running Postgres image digest from ${pod}`, { image: digest });
+  assertReleaseTargetMutable(postgresImageStream, digest);
   run(
     "oc",
     ["tag", "-n", namespace, "--source=docker", digest, `${postgresImageStream}:${releaseTag}`, "--reference-policy=local"],
@@ -125,6 +156,7 @@ try {
         checkedAt,
         namespace,
         releaseTag,
+        forceRelease,
         status: "PASS",
         summary: { total: checks.length, passed: checks.length, failed: 0 },
         checks

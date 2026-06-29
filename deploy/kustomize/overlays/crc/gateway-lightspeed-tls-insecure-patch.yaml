@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cas-gateway
+  namespace: cywell-ai-sentinel
+spec:
+  template:
+    spec:
+      containers:
+        - name: gateway
+          env:
+            - name: CAS_LIGHTSPEED_TLS_INSECURE
+              value: "true"

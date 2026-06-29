@@ -204,6 +204,19 @@ function startFakePbsServer(port) {
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/uploads/reports") {
+      if (url.searchParams.get("customer_id") === "scope-leak") {
+        sendFakePbsJson(response, 200, {
+          items: [
+            {
+              document_source_id: "pbs-leaked-doc",
+              filename: "leaked.txt",
+              customer_id: "other-customer",
+              owner_user_id: pbsOwnerHash("other-owner")
+            }
+          ]
+        });
+        return;
+      }
       sendFakePbsJson(response, 200, {
         items: [{ document_source_id: "pbs-doc-1", filename: "fake-pbs.txt", owner_user_id: url.searchParams.get("user_id") }]
       });
@@ -242,6 +255,26 @@ function startFakePbsServer(port) {
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/wiki-vault") {
+      if (url.searchParams.get("customer_id") === "scope-leak") {
+        sendFakePbsJson(response, 200, {
+          user_id: pbsOwnerHash("other-owner"),
+          customer_id: "other-customer",
+          topology: {
+            graph: {
+              nodes: [
+                {
+                  node_id: "pbs-leaked-note",
+                  kind: "wiki-note",
+                  title: "PBS Leaked Note",
+                  metadata: { customer_id: "other-customer" }
+                }
+              ],
+              links: []
+            }
+          }
+        });
+        return;
+      }
       if (url.searchParams.get("customer_id") === "orphan-live") {
         sendFakePbsJson(response, 200, {
           user_id: url.searchParams.get("user_id"),
@@ -250,6 +283,23 @@ function startFakePbsServer(port) {
             graph: {
               nodes: [{ node_id: "pbs-orphan-note", kind: "wiki-note", title: "PBS Orphan Note" }],
               links: [{ source_id: "pbs-orphan-note", target_id: "pbs-missing-endpoint", kind: "references" }]
+            }
+          },
+          summary: { graph_relation_count: 1 }
+        });
+        return;
+      }
+      if (url.searchParams.get("customer_id") === "mixed-live") {
+        sendFakePbsJson(response, 200, {
+          user_id: url.searchParams.get("user_id"),
+          relations: [{ source_id: "wrapper-noise-a", target_id: "wrapper-noise-b", kind: "should-not-render" }],
+          topology: {
+            graph: {
+              nodes: [
+                { node_id: "pbs-mixed-note", kind: "wiki-note", title: "PBS Mixed Note" },
+                { node_id: "pbs-mixed-term", kind: "term", title: "mixed" }
+              ],
+              links: [{ source_id: "pbs-mixed-note", target_id: "pbs-mixed-term", kind: "tag" }]
             }
           },
           summary: { graph_relation_count: 1 }
@@ -650,6 +700,38 @@ try {
     base64Upload.body.document?.metadata?.pbs_payload?.content_fields?.includes("content_base64"),
     "gateway base64 upload records PBS content field contract"
   );
+  const executableUpload = await fetchJson(`${gatewayBase}/api/knowledge/uploads/ingest`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      filename: "unsafe-runbook.exe",
+      content: "Executable-looking customer uploads should not enter the local ingest path.",
+      mime_type: "application/x-msdownload"
+    })
+  });
+  expect(
+    "knowledge:upload-blocks-executable-extension",
+    executableUpload.response.status === 400 && String(executableUpload.body.error ?? "").includes("not allowed"),
+    "gateway upload rejects executable extensions before indexing",
+    JSON.stringify(executableUpload.body)
+  );
+  const invalidBase64Upload = await fetchJson(`${gatewayBase}/api/knowledge/uploads/ingest`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      filename: "invalid-base64.txt",
+      content_base64: "not valid base64!!",
+      mime_type: "text/plain"
+    })
+  });
+  expect(
+    "knowledge:upload-blocks-invalid-base64",
+    invalidBase64Upload.response.status === 400 && String(invalidBase64Upload.body.error ?? "").toLowerCase().includes("base64"),
+    "gateway upload rejects invalid base64 payloads before indexing",
+    JSON.stringify(invalidBase64Upload.body)
+  );
 
   const urlIngest = await fetchJson(`${gatewayBase}/api/knowledge/uploads/url-ingest`, {
     method: "POST",
@@ -676,6 +758,22 @@ try {
       urlIngest.body.document?.metadata?.pbs_payload?.url === "https://93.184.216.34/verify-runbook" &&
       urlIngest.body.document?.metadata?.pbs_payload?.auto_compile_wiki === true,
     "gateway URL ingest records PBS wiki compile contract"
+  );
+  const loopbackUrlIngest = await fetchJson(`${gatewayBase}/api/knowledge/uploads/url-ingest`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      customer_id: "verify",
+      url: "http://127.0.0.1/internal-runbook",
+      content: "Loopback URLs must be rejected even when inline content is supplied.",
+      auto_compile_wiki: true
+    })
+  });
+  expect(
+    "knowledge:url-ingest-blocks-loopback-target",
+    loopbackUrlIngest.response.status === 400 && String(loopbackUrlIngest.body.error ?? "").includes("blocked"),
+    "gateway URL ingest rejects loopback/private targets before indexing",
+    JSON.stringify(loopbackUrlIngest.body)
   );
 
   const reports = await fetchJson(`${gatewayBase}/api/knowledge/uploads/reports?customer_id=verify`, {
@@ -1356,6 +1454,26 @@ try {
     "PBS live upload response is normalized into CAS upload shape",
     JSON.stringify(liveUpload.body)
   );
+  const liveUploadRecordCountBeforeReject = fakePbs.records.filter((record) => record.path === "/api/uploads/ingest").length;
+  const liveRejectedUpload = await fetchJson(`${liveBase}/api/knowledge/uploads/ingest`, {
+    method: "POST",
+    headers: liveHeaders,
+    body: JSON.stringify({
+      customer_id: "live",
+      filename: "live-unsafe.exe",
+      content_base64: Buffer.from("PBS live unsafe upload must be rejected before outbound call.", "utf8").toString("base64"),
+      mime_type: "application/x-msdownload"
+    })
+  });
+  const liveUploadRecordCountAfterReject = fakePbs.records.filter((record) => record.path === "/api/uploads/ingest").length;
+  expect(
+    "knowledge:pbs-live-upload-policy-before-outbound",
+    liveRejectedUpload.response.status === 400 &&
+      String(liveRejectedUpload.body.error ?? "").includes("not allowed") &&
+      liveUploadRecordCountAfterReject === liveUploadRecordCountBeforeReject,
+    "PBS live upload rejects unsafe files before any outbound PBS request",
+    JSON.stringify({ body: liveRejectedUpload.body, before: liveUploadRecordCountBeforeReject, after: liveUploadRecordCountAfterReject })
+  );
   const liveUrlIngest = await fetchJson(`${liveBase}/api/knowledge/uploads/url-ingest`, {
     method: "POST",
     headers: liveHeaders,
@@ -1387,6 +1505,18 @@ try {
       liveReports.body.documents?.[0]?.document_source_id === "pbs-doc-1",
     "PBS live upload reports response is normalized into CAS report shape",
     JSON.stringify(liveReports.body)
+  );
+  const liveLeakedReports = await fetchJson(`${liveBase}/api/knowledge/uploads/reports?customer_id=scope-leak`, {
+    headers: liveHeaders
+  });
+  expect(
+    "knowledge:pbs-live-reports-scope-mismatch-blocked",
+    liveLeakedReports.response.status === 502 &&
+      liveLeakedReports.body.status === "error" &&
+      liveLeakedReports.body.code === "pbs-scope-mismatch" &&
+      liveLeakedReports.body.pbs?.scope_mismatches?.length >= 1,
+    "PBS live upload reports reject response rows outside the requested customer/owner scope",
+    JSON.stringify(liveLeakedReports.body)
   );
   const liveRag = await fetchJson(`${liveBase}/api/knowledge/rag/query`, {
     method: "POST",
@@ -1469,6 +1599,35 @@ try {
       graphIntegrity(liveOrphanTopology.body),
     "PBS live topology normalization adds fallback endpoint nodes for orphan edge references",
     JSON.stringify(liveOrphanTopology.body)
+  );
+  const liveMixedTopology = await fetchJson(`${liveBase}/api/knowledge/topology?customer_id=mixed-live`, {
+    headers: liveHeaders
+  });
+  const liveMixedNodeIds = new Set((Array.isArray(liveMixedTopology.body.nodes) ? liveMixedTopology.body.nodes : []).map((node) => node.id));
+  expect(
+    "knowledge:pbs-live-topology-single-graph-candidate",
+    liveMixedTopology.response.status === 200 &&
+      liveMixedTopology.body.provider === "pbs-http-live" &&
+      liveMixedTopology.body.counts?.nodes === 2 &&
+      liveMixedTopology.body.counts?.edges === 1 &&
+      liveMixedNodeIds.has("pbs-mixed-note") &&
+      liveMixedNodeIds.has("pbs-mixed-term") &&
+      !liveMixedNodeIds.has("wrapper-noise-a") &&
+      graphIntegrity(liveMixedTopology.body),
+    "PBS live topology normalization derives nodes and edges from the same nested graph candidate",
+    JSON.stringify(liveMixedTopology.body)
+  );
+  const liveLeakedTopology = await fetchJson(`${liveBase}/api/knowledge/topology?customer_id=scope-leak`, {
+    headers: liveHeaders
+  });
+  expect(
+    "knowledge:pbs-live-topology-scope-mismatch-blocked",
+    liveLeakedTopology.response.status === 502 &&
+      liveLeakedTopology.body.status === "error" &&
+      liveLeakedTopology.body.code === "pbs-scope-mismatch" &&
+      liveLeakedTopology.body.pbs?.scope_mismatches?.length >= 1,
+    "PBS live topology rejects graph payloads outside the requested customer/owner scope",
+    JSON.stringify(liveLeakedTopology.body)
   );
   const liveVault = await fetchJson(`${liveBase}/api/knowledge/wiki-vault?customer_id=live`, {
     headers: liveHeaders

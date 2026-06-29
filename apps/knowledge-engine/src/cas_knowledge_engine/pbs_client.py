@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -44,6 +44,11 @@ def pbs_owner_id(owner_id: str) -> str:
     raw_owner = str(owner_id or default_owner).strip() or default_owner
     header_name = _owner_header_name()
     return hashlib.sha256(f"header:{header_name}:{raw_owner}".encode("utf-8")).hexdigest()[:32]
+
+
+def _local_http_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
 
 
 @dataclass(frozen=True)
@@ -117,6 +122,16 @@ class PBSHttpClient:
     ) -> PBSHttpResult:
         if not self.configured:
             return PBSHttpResult(False, 0, 0, path, {}, "CAS_PBS_BASE_URL is not configured")
+        if self.auth_mode == "service-token" and not self.api_key:
+            return PBSHttpResult(False, 0, 0, path, {}, "CAS_PBS_BEARER_TOKEN is required for service-token auth")
+        if (
+            self.auth_mode == "service-token"
+            and self.api_key
+            and self.base_url.startswith("http://")
+            and not _local_http_url(self.base_url)
+            and not _env_bool("CAS_PBS_ALLOW_INSECURE_TOKEN_HTTP")
+        ):
+            return PBSHttpResult(False, 0, 0, path, {}, "service-token auth requires HTTPS or mTLS for non-local PBS URLs")
         suffix = path if path.startswith("/") else f"/{path}"
         query_items = {key: value for key, value in (query or {}).items() if value not in {None, ""}}
         if query_items:

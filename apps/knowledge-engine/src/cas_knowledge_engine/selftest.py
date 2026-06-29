@@ -14,6 +14,15 @@ def expect(condition: bool, message: str) -> None:
     print(f"[PASS] {message}")
 
 
+def expect_error(callable_object, message: str, expected_text: str) -> None:
+    try:
+        callable_object()
+    except Exception as error:
+        expect(expected_text in str(error), message)
+        return
+    raise AssertionError(message)
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         engine = KnowledgeEngine(tmp)
@@ -51,6 +60,30 @@ def main() -> None:
             base64_upload["document"]["metadata"]["pbs_payload"]["content_fields"] == ["content_base64"],
             "base64 upload records PBS content field contract",
         )
+        expect_error(
+            lambda: engine.ingest_upload(
+                {
+                    "customer_id": "acme",
+                    "filename": "unsafe-runbook.exe",
+                    "content": "Executable-looking customer uploads must be rejected.",
+                    "mime_type": "application/x-msdownload",
+                }
+            ),
+            "upload rejects executable extensions",
+            "not allowed",
+        )
+        expect_error(
+            lambda: engine.ingest_upload(
+                {
+                    "customer_id": "acme",
+                    "filename": "invalid-base64.txt",
+                    "content_base64": "not valid base64!!",
+                    "mime_type": "text/plain",
+                }
+            ),
+            "upload rejects invalid base64 payloads",
+            "base64",
+        )
         docx_buffer = io.BytesIO()
         with zipfile.ZipFile(docx_buffer, "w") as archive:
             archive.writestr(
@@ -66,6 +99,21 @@ def main() -> None:
             }
         )
         expect(docx_upload["document"]["metadata"]["parser"] == "docx-xml", "docx upload extracts office XML text")
+        zip_bomb_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_bomb_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("word/document.xml", "<w:t>" + ("oversized " * 400_000) + "</w:t>")
+        expect_error(
+            lambda: engine.ingest_upload(
+                {
+                    "customer_id": "acme",
+                    "filename": "oversized.docx",
+                    "content_base64": base64.b64encode(zip_bomb_buffer.getvalue()).decode("ascii"),
+                    "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                }
+            ),
+            "office upload rejects oversized compressed XML",
+            "too large",
+        )
         url_upload = engine.ingest_url(
             {
                 "customer_id": "acme",
@@ -75,6 +123,17 @@ def main() -> None:
             }
         )
         expect(url_upload["document"]["metadata"]["pbs_payload"]["auto_compile_wiki"] is True, "URL ingest records PBS wiki compile contract")
+        expect_error(
+            lambda: engine.ingest_url(
+                {
+                    "customer_id": "acme",
+                    "url": "http://127.0.0.1/internal-runbook",
+                    "content": "Loopback URLs must be rejected even when inline content is supplied.",
+                }
+            ),
+            "URL ingest rejects loopback targets before ingest",
+            "blocked",
+        )
         reports = engine.upload_reports("acme")
         expect(reports["counts"]["documents"] == 4, "upload reports list indexed documents")
         rag = engine.search({"customer_id": "acme", "question": "router latency 원인"})

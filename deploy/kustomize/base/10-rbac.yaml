@@ -26,8 +26,8 @@ kind: ClusterRole
 metadata:
   name: cas-self-access-review
 rules:
-  - apiGroups: ["authorization.k8s.io"]
-    resources: ["selfsubjectaccessreviews"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["selfsubjectreviews"]
     verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

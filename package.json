@@ -30,11 +30,13 @@
     "verify:crc:deployment": "node ./scripts/verify-crc-deployment.mjs",
     "verify:pbs:preflight": "node ./scripts/verify-pbs-preflight.mjs",
     "verify:pbs:preflight:shadow": "node ./scripts/verify-pbs-preflight.mjs --overlay=pbs-shadow",
+    "verify:pbs:preflight:shadow:cluster": "node ./scripts/verify-pbs-preflight.mjs --overlay=pbs-shadow --require-cluster",
     "verify:pbs:preflight:live:preapply": "node ./scripts/verify-pbs-preflight.mjs --require-cluster --require-secret --skip-applied",
     "verify:pbs:preflight:live": "node ./scripts/verify-pbs-preflight.mjs --require-cluster --require-secret",
     "verify:pbs:live": "node ./scripts/verify-pbs-live-smoke.mjs",
     "verify:pbs:cutover": "node ./scripts/verify-pbs-live-smoke.mjs --cutover",
     "verify:pbs:cutover:cluster": "npm run verify:pbs:preflight:live && node ./scripts/verify-pbs-live-smoke.mjs --cutover --cluster",
+    "verify:release:pbs-live": "npm run verify:pbs:preflight:live && node ./scripts/verify-pbs-live-smoke.mjs --cutover --cluster",
     "deploy:crc": "node ./scripts/deploy-crc-dev.mjs",
     "release:crc:v0.1.4": "node ./scripts/promote-crc-release-images.mjs",
     "verify:deploy:manifests": "node ./scripts/verify-deploy-manifests.mjs"

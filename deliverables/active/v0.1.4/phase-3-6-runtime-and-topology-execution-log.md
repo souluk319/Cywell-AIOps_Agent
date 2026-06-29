@@ -162,10 +162,11 @@ Latest manifest verifier evidence:
 
 Latest PBS preflight evidence:
 
-- `test-results/cas-pbs-preflight.json`
-- status: `WARN` in the local CRC environment because the real `playbookstudio` namespace/service and `cas-pbs-auth` Secret are absent
-- total checks: `29`
-- rendered live overlay checks pass for provider, ConfigMap env refs, required token Secret ref, live Postgres Secret refs, no literal Secret material, no dev defaults, PBS base URL shape, timeout/response bounds, labeled PBS egress, knowledge ingress, runtime readiness gate, corpus readiness gate, and disabled shadow writes
+- `test-results/cas-pbs-preflight-pbs-shadow-diagnostic-local-optional-secrets.json`
+- `test-results/cas-pbs-preflight-pbs-live-preapply-cluster-required-secrets.json`
+- shadow diagnostic status: `PASS/WARN` in the local CRC environment because the real `playbookstudio` namespace/service and optional `cas-pbs-auth` Secret are absent
+- live preapply status: expected `FAIL`, `35 PASS / 7 FAIL`
+- rendered live overlay checks pass for provider, ConfigMap env refs, required token Secret ref, live Postgres Secret refs, no literal Secret material, no dev defaults, HTTPS PBS service-token transport, PBS base URL shape, timeout/response bounds, labeled PBS egress, knowledge ingress, runtime readiness gate, corpus readiness gate, and disabled shadow writes
 - WARNs are expected in local CRC until the real `playbookstudio` namespace/service, required `cas-pbs-auth` Secret, required `cas-knowledge-postgres-live` Secret, and cleanup of legacy `cas-knowledge-postgres` Secret are handled
 
 ## Parallel Review Findings
@@ -283,6 +284,19 @@ Historical verified results at this step:
 - `npm run deploy:crc`: `PASS`
 - `npm run verify:pbs:cutover`: expected `FAIL`; `CAS_PBS_BASE_URL` is not configured
 - `npm run verify:pbs:cutover:cluster`: expected `FAIL`; current CRC has no `playbookstudio` namespace/service, no `cas-pbs-auth`, no `cas-knowledge-postgres-live`, still runs `:dev` base images/provider, has legacy `cas-knowledge-postgres` dev Secret, and has not applied `cas-knowledge-engine-pbs-egress`
+
+## Current Update - PBS Live Response Scope Hardening
+
+Implemented after the latest parallel review pass:
+
+- PBS live response bodies are now checked against the requested customer ID and owner/PBS user hash.
+- CAS blocks mismatched PBS report rows, wiki vault payloads, and topology graphs with `pbs-scope-mismatch` before exposing them to callers.
+- Topology visual design remains owned by the Cywell console plugin implementation; no separate user-provided design package is required for v0.1.4.
+
+Verified results at this step:
+
+- `npm run verify:knowledge-engine`: `PASS`, 72 checks
+- `npm run verify:deploy:manifests`: `PASS`, 243 checks
 
 Live cutover note:
 

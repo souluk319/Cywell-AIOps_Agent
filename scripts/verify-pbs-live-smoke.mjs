@@ -26,6 +26,8 @@ const requireLive = cutover || clusterSmoke || envBool("CAS_PBS_LIVE_REQUIRED");
 const writeSmoke = (cutover && !readOnlyException) || envBool("CAS_PBS_LIVE_WRITE_SMOKE");
 const requireRuntimeReady = envBool("CAS_PBS_LIVE_REQUIRE_RUNTIME_READY", true);
 const requireCorpusReady = envBool("CAS_PBS_LIVE_REQUIRE_CORPUS_READY", true);
+const evidenceMode = clusterSmoke ? "cluster-cutover" : cutover ? "local-cutover" : requireLive ? "required-diagnostic" : "diagnostic";
+const evidencePath = `test-results/cas-pbs-live-smoke-${evidenceMode}.json`;
 
 function record(status, id, detail) {
   checks.push({ status, id, detail });
@@ -292,7 +294,7 @@ async function stopChildren() {
 function writeEvidence(status) {
   mkdirSync("test-results", { recursive: true });
   writeFileSync(
-    "test-results/cas-pbs-live-smoke.json",
+    evidencePath,
     JSON.stringify(
       {
         checkedAt,
@@ -319,7 +321,7 @@ function writeEvidence(status) {
       2
     )
   );
-  console.log("Evidence: test-results/cas-pbs-live-smoke.json");
+  console.log(`Evidence: ${evidencePath}`);
 }
 
 async function runClusterSmoke() {
