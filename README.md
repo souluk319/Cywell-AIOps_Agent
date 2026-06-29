@@ -57,13 +57,14 @@ The v0.1.4 base deployment uses the local/Postgres PBS-compatible Knowledge Engi
 For PBS live cutover, use:
 
 ```bash
+npm run verify:pbs:preflight:shadow
 npm run verify:pbs:cutover
 npm run verify:pbs:cutover:cluster
 ```
 
-Those commands are expected to fail until `CAS_PBS_BASE_URL`, the `playbookstudio` runtime, `cas-pbs-auth`, `cas-knowledge-postgres-live`, live overlay application, and live PBS egress policy are present.
+Those commands are expected to fail or warn until `CAS_PBS_BASE_URL`, PBS bearer token material, the `playbookstudio` runtime, `cas-pbs-auth`, `cas-knowledge-postgres-live`, live overlay application, and live PBS egress policy are present. `verify:pbs:cutover` is the local PBS API smoke and requires `CAS_PBS_BASE_URL` plus `CAS_PBS_BEARER_TOKEN`, `CAS_PBS_API_KEY`, or `CAS_PBS_BEARER_TOKEN_FILE`; release readiness is proven by `verify:pbs:cutover:cluster`.
 
-`npm run verify:pbs:preflight` may exit 0 with WARN entries, and `npm run verify:pbs:live` may exit 0 as SKIP when `CAS_PBS_BASE_URL` is unset. Those are diagnostic states, not PBS live release readiness.
+`npm run verify:pbs:preflight` defaults to pbs-live diagnostics and may exit 0 with WARN entries. Use `npm run verify:pbs:preflight:shadow` after applying `pbs-shadow`. `npm run verify:pbs:live` may exit 0 as SKIP when `CAS_PBS_BASE_URL` is unset. Those are diagnostic states, not PBS live release readiness.
 
 The production runbook is tracked at `deliverables/active/v0.1.4/production-live-cutover-checklist.md`.
 

@@ -880,6 +880,11 @@ for (const file of files) {
       } else {
         fail("package:pbs-preflight-script", "package.json must expose verify:pbs:preflight");
       }
+      if (text.includes('"verify:pbs:preflight:shadow"') && text.includes("--overlay=pbs-shadow")) {
+        pass("package:pbs-preflight-shadow-script", "package.json exposes explicit PBS shadow preflight");
+      } else {
+        fail("package:pbs-preflight-shadow-script", "package.json must expose verify:pbs:preflight:shadow with --overlay=pbs-shadow");
+      }
       if (text.includes('"verify:pbs:live"') && text.includes("verify-pbs-live-smoke.mjs")) {
         pass("package:pbs-live-script", "package.json exposes verify:pbs:live");
       } else {
@@ -933,10 +938,10 @@ for (const file of files) {
       );
     }
     if (file.includes("verify-pbs-live-smoke")) {
-      if (text.includes("--cutover") && text.includes("CAS_PBS_LIVE_CUTOVER") && text.includes("write-smoke-required")) {
-        pass("pbs-live-smoke:cutover-mode", "PBS live smoke has a cutover mode that requires write smoke");
+      if (text.includes("--cutover") && text.includes("CAS_PBS_LIVE_CUTOVER") && text.includes("write-smoke-required") && text.includes("pbs-live:cutover-auth")) {
+        pass("pbs-live-smoke:cutover-mode", "PBS live smoke has a cutover mode that requires write smoke and PBS auth material");
       } else {
-        fail("pbs-live-smoke:cutover-mode", "PBS live smoke must support cutover mode with required write smoke");
+        fail("pbs-live-smoke:cutover-mode", "PBS live smoke must support cutover mode with required write smoke and PBS auth material");
       }
       if (text.includes("compiled_wiki_ready") && text.includes("cutover-topology-ready")) {
         pass("pbs-live-smoke:readiness-topology", "PBS live smoke checks compiled wiki and cutover topology readiness");
@@ -949,11 +954,13 @@ for (const file of files) {
         text.includes("cluster-gateway-health") &&
         text.includes("cluster-console-plugin-gateway-service") &&
         text.includes("cluster-write-lineage") &&
-        text.includes("cluster-direct-engine-blocked")
+        text.includes("cluster-direct-engine-blocked") &&
+        text.includes("appliedPbsEgressScoped") &&
+        text.includes("serviceHost(")
       ) {
-        pass("pbs-live-smoke:cluster-cutover-mode", "PBS live smoke has in-cluster gateway and console-plugin-to-gateway cutover checks");
+        pass("pbs-live-smoke:cluster-cutover-mode", "PBS live smoke has in-cluster gateway, console-plugin-to-gateway, namespace-aware service, and applied policy checks");
       } else {
-        fail("pbs-live-smoke:cluster-cutover-mode", "PBS live smoke must support in-cluster gateway and console-plugin-to-gateway cutover checks");
+        fail("pbs-live-smoke:cluster-cutover-mode", "PBS live smoke must support in-cluster gateway, console-plugin-to-gateway, namespace-aware service, and applied policy checks");
       }
     }
     if (file.includes("verify-pbs-preflight")) {
@@ -971,6 +978,11 @@ for (const file of files) {
         text.includes("CAS_PBS_REQUIRE_RUNTIME_READY") &&
         text.includes("CAS_PBS_REQUIRE_CORPUS_READY") &&
         text.includes("cas-knowledge-postgres-live") &&
+        text.includes("validOverlays") &&
+        text.includes("appliedPbsEgressScoped") &&
+        text.includes("appliedKnowledgeIngressScoped") &&
+        text.includes("liveDatabaseUrlUsesService") &&
+        text.includes("image.dockerImageReference") &&
         text.includes("cluster:pbs-runtime-ready-pods") &&
         text.includes("cluster:gateway-kubernetes-api-egress") &&
         text.includes("cluster:release-image:") &&
@@ -979,9 +991,9 @@ for (const file of files) {
         text.includes("skipApplied") &&
         text.includes("pbs-live")
       ) {
-        pass("pbs-preflight:live-readiness-gate", "PBS preflight checks live runtime, corpus, Secret, release images, Postgres image pinning, API egress, and PBS pod-label gates");
+        pass("pbs-preflight:live-readiness-gate", "PBS preflight checks overlays, live runtime, corpus, Secret, release images, Postgres image pinning, applied policies, API egress, and PBS pod-label gates");
       } else {
-        fail("pbs-preflight:live-readiness-gate", "PBS preflight must check live runtime, corpus, Secret, release images, Postgres image pinning, API egress, and PBS pod-label gates");
+        fail("pbs-preflight:live-readiness-gate", "PBS preflight must check overlays, live runtime, corpus, Secret, release images, Postgres image pinning, applied policies, API egress, and PBS pod-label gates");
       }
     }
     if (file.includes("21-lightspeed-ingress")) {

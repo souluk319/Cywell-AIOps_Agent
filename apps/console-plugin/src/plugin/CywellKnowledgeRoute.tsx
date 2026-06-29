@@ -47,6 +47,13 @@ type TopologyEdge = {
   source: string;
   target: string;
   type: string;
+  source_document_id?: string;
+  document_id?: string;
+  revision?: number;
+  previous_revision?: number;
+  updated_at?: string | number;
+  metadata?: ActionResult;
+  provenance?: ActionResult;
 };
 
 type TopologyPayload = {
@@ -752,7 +759,7 @@ function topologyCandidates(value: ActionResult) {
   const topology = recordValue(value.topology);
   const topologyGraph = topology ? recordValue(topology.graph) : null;
   const graph = recordValue(value.graph);
-  return [value, topology, topologyGraph, graph].filter((candidate): candidate is ActionResult => Boolean(candidate));
+  return [graph, topologyGraph, topology, value].filter((candidate): candidate is ActionResult => Boolean(candidate));
 }
 
 function firstTopologyList(candidates: ActionResult[], keys: string[]) {
@@ -765,20 +772,29 @@ function firstTopologyList(candidates: ActionResult[], keys: string[]) {
   return [];
 }
 
+function topologyListCandidate(candidate: ActionResult) {
+  return ["nodes", "entities", "vertices", "edges", "links", "relations", "relationships"].some((key) => Array.isArray(candidate[key]));
+}
+
 function nodeRef(value: unknown) {
   const record = recordValue(value);
   if (!record) return String(value ?? "").trim();
   return String(record.id ?? record.node_id ?? record.key ?? record.slug ?? record.entity_id ?? record.document_source_id ?? "").trim();
 }
 
+function countAtLeast(value: unknown, minimum: number) {
+  const count = Number(value);
+  return Math.max(Number.isFinite(count) ? count : 0, minimum);
+}
+
 function topologyPayload(value: ActionResult | null): TopologyPayload | null {
   if (!value) return null;
   const candidates = topologyCandidates(value);
-  const candidate = candidates.find((item) => firstTopologyList([item], ["nodes", "entities", "vertices"]).length > 0);
-  const rawNodes = firstTopologyList(candidates, ["nodes", "entities", "vertices"]);
-  const rawEdges = firstTopologyList(candidates, ["edges", "links", "relations", "relationships"]);
-  if (rawNodes.length === 0 && rawEdges.length === 0) return null;
-  const countsCandidate = recordValue(candidate?.counts) ?? recordValue(value.counts) ?? recordValue(value.summary);
+  const candidate = candidates.find(topologyListCandidate);
+  if (!candidate) return null;
+  const rawNodes = firstTopologyList([candidate], ["nodes", "entities", "vertices"]);
+  const rawEdges = firstTopologyList([candidate], ["edges", "links", "relations", "relationships"]);
+  const countsCandidate = recordValue(candidate.counts) ?? recordValue(candidate.summary);
   const nodesById = new Map<string, TopologyNode>();
   const ensureNode = (id: string, fallbackType = "pbs-endpoint") => {
     if (!id || nodesById.has(id)) return;
@@ -813,23 +829,41 @@ function topologyPayload(value: ActionResult | null): TopologyPayload | null {
     .map((edge) => {
       const source = nodeRef(edge.source ?? edge.from ?? edge.subject ?? edge.source_id ?? edge.subject_id);
       const target = nodeRef(edge.target ?? edge.to ?? edge.object ?? edge.target_id ?? edge.object_id);
+      const metadata = recordValue(edge.metadata);
+      const provenance = recordValue(edge.provenance);
+      const sourceDocumentId =
+        edge.source_document_id ?? edge.document_id ?? edge.document_source_id ?? metadata?.source_document_id ?? provenance?.source_document_id;
       if (source) ensureNode(source);
       if (target) ensureNode(target);
       return {
         id: edge.id ? String(edge.id) : undefined,
         source,
         target,
-        type: String(edge.type ?? edge.kind ?? edge.relation ?? "relates")
+        type: String(edge.type ?? edge.kind ?? edge.relation ?? "relates"),
+        source_document_id: sourceDocumentId ? String(sourceDocumentId) : undefined,
+        document_id: edge.document_id ? String(edge.document_id) : undefined,
+        revision: Number.isFinite(Number(edge.revision)) ? Number(edge.revision) : undefined,
+        previous_revision: Number.isFinite(Number(edge.previous_revision)) ? Number(edge.previous_revision) : undefined,
+        updated_at: typeof edge.updated_at === "string" || typeof edge.updated_at === "number" ? edge.updated_at : undefined,
+        metadata: metadata ?? undefined,
+        provenance: provenance ?? undefined
       };
     })
     .filter((edge) => edge.source && edge.target);
   const nodes = [...nodesById.values()];
+  const counts = countsCandidate
+    ? {
+        ...countsCandidate,
+        nodes: countAtLeast(countsCandidate.nodes, nodes.length),
+        edges: countAtLeast(countsCandidate.edges, edges.length)
+      }
+    : undefined;
   return {
     status: value.status ? String(value.status) : candidate?.status ? String(candidate.status) : undefined,
     customer_id: value.customer_id ? String(value.customer_id) : candidate?.customer_id ? String(candidate.customer_id) : undefined,
     nodes,
     edges,
-    counts: countsCandidate as TopologyPayload["counts"] | undefined
+    counts: counts as TopologyPayload["counts"] | undefined
   };
 }
 
@@ -850,6 +884,13 @@ function nodeDegreeMap(edges: TopologyEdge[]) {
     degreeById.set(edge.target, (degreeById.get(edge.target) ?? 0) + 1);
   }
   return degreeById;
+}
+
+function edgeLineageText(edge: TopologyEdge) {
+  const parts = [];
+  if (edge.source_document_id) parts.push(`edge source ${edge.source_document_id}`);
+  if (edge.revision !== undefined) parts.push(`rev ${edge.revision}`);
+  return parts.join(" | ");
 }
 
 function layoutTopology(nodes: TopologyNode[], edges: TopologyEdge[]) {
@@ -982,7 +1023,9 @@ function TopologyDashboard({
   if (!topology || topologyNodes.length === 0) {
     return (
       <section className="cas-topology-dashboard" data-test="cas-topology-dashboard">
-        <div className="cas-topology-empty">No topology nodes are available for this customer yet.</div>
+        <div aria-live="polite" className="cas-topology-empty" role="status">
+          No topology nodes are available for this customer yet.
+        </div>
       </section>
     );
   }
@@ -1026,7 +1069,11 @@ function TopologyDashboard({
       <div className="cas-topology-grid">
         <div className="cas-topology-workspace">
           <div className="cas-topology-canvas" data-test="cas-topology-canvas">
-            {visibleNodes.length === 0 && <div className="cas-topology-empty">No nodes match this filter.</div>}
+            {visibleNodes.length === 0 && (
+              <div aria-live="polite" className="cas-topology-empty" role="status">
+                No nodes match this filter.
+              </div>
+            )}
             <svg aria-hidden="true" className="cas-topology-edges" viewBox="0 0 100 100" preserveAspectRatio="none">
               {visibleEdges.map((edge, index) => {
                 const source = positionById.get(edge.source);
@@ -1141,6 +1188,7 @@ function TopologyDashboard({
                 <span className="cas-knowledge-muted">
                   {`${edge.source} -> ${edge.target}`}
                 </span>
+                {edgeLineageText(edge) && <span className="cas-knowledge-muted">{edgeLineageText(edge)}</span>}
               </div>
             ))}
           </div>
@@ -1152,6 +1200,7 @@ function TopologyDashboard({
             <div className="cas-topology-relation" key={`${edge.source}-${edge.target}-${edge.type}-${index}`}>
               <strong>{edge.type}</strong>
               <span className="cas-knowledge-muted">{`${edge.source} -> ${edge.target}`}</span>
+              {edgeLineageText(edge) && <span className="cas-knowledge-muted">{edgeLineageText(edge)}</span>}
             </div>
           ))}
         </div>
@@ -1181,6 +1230,7 @@ export default function CywellKnowledgeRoute() {
   const [topologyTypeFilter, setTopologyTypeFilter] = React.useState("all");
   const [selectedTopologyNodeId, setSelectedTopologyNodeId] = React.useState<string | null>(null);
   const autoTopologyLoadKey = React.useRef("");
+  const topologyRequestSequence = React.useRef(0);
   const pathname = typeof window === "undefined" ? "/cywell/customer-data" : window.location.pathname;
   const activeKey = currentRouteKey(pathname);
   const activeRoute = routeItems.find((item) => item.key === activeKey) ?? routeItems[0];
@@ -1230,6 +1280,32 @@ export default function CywellKnowledgeRoute() {
         });
       } finally {
         setIsRunning(false);
+      }
+    },
+    [refreshHealth]
+  );
+
+  const runTopologyRequest = React.useCallback(
+    async (requestCustomerId: string, action: () => Promise<ActionResult>, options: { clearFirst?: boolean } = {}) => {
+      const requestId = topologyRequestSequence.current + 1;
+      topologyRequestSequence.current = requestId;
+      setIsRunning(true);
+      if (options.clearFirst) setTopologyData(emptyTopology(requestCustomerId));
+      try {
+        const result = await action();
+        if (requestId !== topologyRequestSequence.current) return;
+        setTopologyData(topologyPayload(result) ?? emptyTopology(requestCustomerId));
+        setActionResult(result);
+        await refreshHealth();
+      } catch (actionError) {
+        if (requestId !== topologyRequestSequence.current) return;
+        setTopologyData(emptyTopology(requestCustomerId));
+        setActionResult({
+          status: "error",
+          error: actionError instanceof Error ? actionError.message : "knowledge action failed"
+        });
+      } finally {
+        if (requestId === topologyRequestSequence.current) setIsRunning(false);
       }
     },
     [refreshHealth]
@@ -1356,25 +1432,22 @@ export default function CywellKnowledgeRoute() {
 
   const loadVault = React.useCallback(
     () =>
-      runAction(async () => {
-        const result = await requestJson(`/api/knowledge/wiki-vault?customer_id=${encodeURIComponent(customerId)}`);
-        const topology = topologyPayload(result);
-        if (topology) setTopologyData(topology);
-        return result;
-      }),
-    [customerId, runAction]
+      runTopologyRequest(
+        customerId,
+        () => requestJson(`/api/knowledge/wiki-vault?customer_id=${encodeURIComponent(customerId)}`),
+        { clearFirst: true }
+      ),
+    [customerId, runTopologyRequest]
   );
 
   const loadTopology = React.useCallback(
     () =>
-      runAction(async () => {
-        setTopologyData(emptyTopology(customerId));
-        const result = await requestJson(`/api/knowledge/topology?customer_id=${encodeURIComponent(customerId)}`);
-        const topology = topologyPayload(result);
-        setTopologyData(topology ?? emptyTopology(customerId));
-        return result;
-      }),
-    [customerId, runAction]
+      runTopologyRequest(
+        customerId,
+        () => requestJson(`/api/knowledge/topology?customer_id=${encodeURIComponent(customerId)}`),
+        { clearFirst: true }
+      ),
+    [customerId, runTopologyRequest]
   );
 
   React.useEffect(() => {
@@ -1572,7 +1645,11 @@ export default function CywellKnowledgeRoute() {
                 </>
               )}
             </div>
-            {actionResult && <pre className="cas-knowledge-result" data-test="cas-knowledge-result">{prettyJson(actionResult)}</pre>}
+            {actionResult && (
+              <pre className="cas-knowledge-result" data-test="cas-knowledge-result" role={actionResult.status === "error" ? "alert" : undefined}>
+                {prettyJson(actionResult)}
+              </pre>
+            )}
           </section>
 
           <section className="cas-knowledge-panel">

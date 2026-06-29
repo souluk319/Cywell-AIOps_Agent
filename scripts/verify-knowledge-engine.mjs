@@ -242,6 +242,20 @@ function startFakePbsServer(port) {
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/wiki-vault") {
+      if (url.searchParams.get("customer_id") === "orphan-live") {
+        sendFakePbsJson(response, 200, {
+          user_id: url.searchParams.get("user_id"),
+          notes: [{ id: "pbs-orphan-note", title: "PBS Orphan Note", body: "PBS body", tags: ["orphan"], wikilinks: [] }],
+          topology: {
+            graph: {
+              nodes: [{ node_id: "pbs-orphan-note", kind: "wiki-note", title: "PBS Orphan Note" }],
+              links: [{ source_id: "pbs-orphan-note", target_id: "pbs-missing-endpoint", kind: "references" }]
+            }
+          },
+          summary: { graph_relation_count: 1 }
+        });
+        return;
+      }
       sendFakePbsJson(response, 200, {
         user_id: url.searchParams.get("user_id"),
         notes: [{ id: "pbs-note-1", title: "PBS Note", body: "PBS body", tags: ["router"], wikilinks: ["HAProxy"] }],
@@ -1439,6 +1453,22 @@ try {
       liveTopologyEdge?.provenance?.source_document_id === "pbs-doc-1",
     "PBS live topology normalization preserves revision and provenance metadata",
     JSON.stringify({ liveTopologyNote, liveTopologyEdge })
+  );
+  const liveOrphanTopology = await fetchJson(`${liveBase}/api/knowledge/topology?customer_id=orphan-live`, {
+    headers: liveHeaders
+  });
+  const liveOrphanNodes = Array.isArray(liveOrphanTopology.body.nodes) ? liveOrphanTopology.body.nodes : [];
+  const liveOrphanEndpoint = liveOrphanNodes.find((node) => node.id === "pbs-missing-endpoint");
+  expect(
+    "knowledge:pbs-live-topology-orphan-endpoint",
+    liveOrphanTopology.response.status === 200 &&
+      liveOrphanTopology.body.provider === "pbs-http-live" &&
+      liveOrphanTopology.body.counts?.nodes === 2 &&
+      liveOrphanTopology.body.counts?.edges === 1 &&
+      liveOrphanEndpoint?.type === "pbs-endpoint" &&
+      graphIntegrity(liveOrphanTopology.body),
+    "PBS live topology normalization adds fallback endpoint nodes for orphan edge references",
+    JSON.stringify(liveOrphanTopology.body)
   );
   const liveVault = await fetchJson(`${liveBase}/api/knowledge/wiki-vault?customer_id=live`, {
     headers: liveHeaders

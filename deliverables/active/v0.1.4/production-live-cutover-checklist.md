@@ -27,6 +27,8 @@ These values must come from the target environment. Do not commit any secret val
   - `app.kubernetes.io/component=runtime`
 - Live PBS API base URL for smoke tests:
   - `CAS_PBS_BASE_URL=http://playbookstudio-runtime.playbookstudio.svc.cluster.local:8765`
+- Local cutover smoke PBS auth material:
+  - `CAS_PBS_BEARER_TOKEN`, `CAS_PBS_API_KEY`, or `CAS_PBS_BEARER_TOKEN_FILE`
 - PBS bearer token material for:
   - `cas-pbs-auth/bearer-token`
 - Live Postgres credentials for:
@@ -91,12 +93,13 @@ Use shadow mode first if the target cluster has not previously run this PBS inte
 ```powershell
 oc apply -k deploy/kustomize/overlays/pbs-shadow
 $env:CAS_PBS_BASE_URL="http://playbookstudio-runtime.playbookstudio.svc.cluster.local:8765"
-npm run verify:pbs:preflight
+npm run verify:pbs:preflight:shadow
 npm run verify:pbs:live
 ```
 
 Required result:
 
+- `verify:pbs:preflight:shadow` renders `pbs-shadow`; do not substitute the default live preflight for shadow acceptance.
 - Knowledge Engine remains reachable through Gateway.
 - Shadow health reports PBS runtime readiness.
 - No broad NetworkPolicy peers are introduced.
@@ -119,8 +122,10 @@ Required result:
 - Knowledge Engine provider is `pbs-http-live`.
 - `CAS_PBS_BEARER_TOKEN` comes from required `cas-pbs-auth/bearer-token`.
 - `DATABASE_URL` and Postgres credentials come from required `cas-knowledge-postgres-live`.
+- `DATABASE_URL` targets the `cas-knowledge-postgres` Service DNS on port `5432`, not localhost or a pod-local endpoint.
 - Legacy CRC dev Secret `cas-knowledge-postgres` is absent before live cutover.
-- PBS egress policy is present and scoped to labeled PBS runtime pods on port `8765`.
+- PBS egress policy is present and scoped exactly to DNS, Postgres, and labeled PBS runtime pods on port `8765`.
+- Knowledge Engine applied env includes PBS config refs, required runtime/corpus readiness gates, HMAC Secret refs, and live Secret refs.
 - Upload -> RAG -> wiki vault -> topology lineage passes through the Gateway.
 - Direct console-plugin pod access to `cas-knowledge-engine` remains blocked.
 
@@ -142,6 +147,7 @@ Save command output or JSON artifacts for the release record:
 
 - `git rev-parse HEAD`
 - `npm run verify`
+- `npm run verify:pbs:preflight:shadow` if shadow mode is applied
 - `npm run verify:pbs:preflight:live`
 - `npm run verify:pbs:cutover:cluster`
 - `oc get deploy,statefulset,svc,networkpolicy,secret -n cywell-ai-sentinel`

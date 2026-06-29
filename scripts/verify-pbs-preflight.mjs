@@ -4,7 +4,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 
 const namespace = process.env.CAS_PBS_PREFLIGHT_NAMESPACE || "cywell-ai-sentinel";
 const overlayArg = process.argv.find((arg) => arg.startsWith("--overlay="))?.split("=")[1] ?? process.env.CAS_PBS_PREFLIGHT_OVERLAY ?? "pbs-live";
-const overlay = overlayArg === "pbs-shadow" ? "pbs-shadow" : "pbs-live";
+const validOverlays = new Set(["pbs-shadow", "pbs-live"]);
+const overlayNameValid = validOverlays.has(overlayArg);
+const overlay = overlayNameValid ? overlayArg : overlayArg || "invalid";
 const overlayPath = `deploy/kustomize/overlays/${overlay}`;
 const requireCluster = process.argv.includes("--require-cluster") || envBool("CAS_PBS_PREFLIGHT_REQUIRE_CLUSTER");
 const requireSecret = process.argv.includes("--require-secret") || envBool("CAS_PBS_PREFLIGHT_REQUIRE_SECRET");
@@ -159,6 +161,95 @@ function policyHasNoBroadAccess(policy) {
   return !/namespaceSelector:\s*\{\}|cidr:\s*0\.0\.0\.0\/0|ipBlock:\s*\{\}|podSelector:\s*\{\}/.test(policy);
 }
 
+function matchLabels(selector = {}) {
+  return selector?.matchLabels ?? {};
+}
+
+function labelsEqual(actual = {}, expected = {}) {
+  const actualEntries = Object.entries(actual);
+  const expectedEntries = Object.entries(expected);
+  return actualEntries.length === expectedEntries.length && expectedEntries.every(([key, value]) => actual[key] === value);
+}
+
+function selectorMatches(selector = {}, expected = {}) {
+  return labelsEqual(matchLabels(selector), expected) && !selector.matchExpressions?.length;
+}
+
+function peerHasNoBroadAccess(peer = {}) {
+  const broadSelector = (selector) => selector && Object.keys(selector).length === 0;
+  const broadCidr = peer.ipBlock?.cidr === "0.0.0.0/0" || peer.ipBlock?.cidr === "::/0";
+  return !broadSelector(peer.namespaceSelector) && !broadSelector(peer.podSelector) && !broadCidr;
+}
+
+function portsEqual(actual = [], expected = []) {
+  const normalize = (ports) => ports.map((port) => `${port.protocol ?? "TCP"}:${Number(port.port)}`).sort();
+  return JSON.stringify(normalize(actual)) === JSON.stringify(normalize(expected));
+}
+
+function appliedKnowledgeIngressScoped(policy) {
+  const spec = policy?.spec ?? {};
+  const ingress = spec.ingress ?? [];
+  if (!selectorMatches(spec.podSelector, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "knowledge-engine" })) {
+    return false;
+  }
+  if (ingress.length !== 1 || (spec.egress ?? []).length > 0) return false;
+  const rule = ingress[0];
+  const from = rule.from ?? [];
+  return (
+    from.length === 1 &&
+    peerHasNoBroadAccess(from[0]) &&
+    selectorMatches(from[0].podSelector, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "gateway" }) &&
+    !from[0].namespaceSelector &&
+    !from[0].ipBlock &&
+    portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 8080 }])
+  );
+}
+
+function appliedPbsEgressScoped(policy) {
+  const spec = policy?.spec ?? {};
+  const egress = spec.egress ?? [];
+  if (!selectorMatches(spec.podSelector, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "knowledge-engine" })) {
+    return false;
+  }
+  if (egress.length !== 3 || (spec.ingress ?? []).length > 0) return false;
+  const dnsRule = egress.find((rule) => portsEqual(rule.ports ?? [], [
+    { protocol: "TCP", port: 53 },
+    { protocol: "UDP", port: 53 },
+    { protocol: "TCP", port: 5353 },
+    { protocol: "UDP", port: 5353 }
+  ]));
+  const postgresRule = egress.find((rule) => portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 5432 }]));
+  const pbsRule = egress.find((rule) => portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 8765 }]));
+  const dnsOk =
+    dnsRule &&
+    (dnsRule.to ?? []).length === 1 &&
+    peerHasNoBroadAccess(dnsRule.to[0]) &&
+    selectorMatches(dnsRule.to[0].namespaceSelector, { "kubernetes.io/metadata.name": "openshift-dns" }) &&
+    !dnsRule.to[0].podSelector &&
+    !dnsRule.to[0].ipBlock;
+  const postgresOk =
+    postgresRule &&
+    (postgresRule.to ?? []).length === 1 &&
+    peerHasNoBroadAccess(postgresRule.to[0]) &&
+    selectorMatches(postgresRule.to[0].podSelector, {
+      "app.kubernetes.io/name": "cywell-ai-sentinel",
+      "app.kubernetes.io/component": "knowledge-postgres"
+    }) &&
+    !postgresRule.to[0].namespaceSelector &&
+    !postgresRule.to[0].ipBlock;
+  const pbsOk =
+    pbsRule &&
+    (pbsRule.to ?? []).length === 1 &&
+    peerHasNoBroadAccess(pbsRule.to[0]) &&
+    selectorMatches(pbsRule.to[0].namespaceSelector, { "kubernetes.io/metadata.name": "playbookstudio" }) &&
+    selectorMatches(pbsRule.to[0].podSelector, {
+      "app.kubernetes.io/name": "playbookstudio",
+      "app.kubernetes.io/component": "runtime"
+    }) &&
+    !pbsRule.to[0].ipBlock;
+  return Boolean(dnsOk && postgresOk && pbsOk && egress.every((rule) => (rule.to ?? []).every(peerHasNoBroadAccess)));
+}
+
 function pbsRuntimeEgressScoped(policy) {
   return (
     policy.includes("kubernetes.io/metadata.name: playbookstudio") &&
@@ -246,6 +337,11 @@ function workloadEnvSecretRef(workload, name, secretName, key, containerName) {
   return ref?.name === secretName && ref?.key === key && ref?.optional !== true;
 }
 
+function workloadEnvConfigRef(workload, name, configName, key, containerName) {
+  const ref = workloadEnv(workload, name, containerName).valueFrom?.configMapKeyRef;
+  return ref?.name === configName && ref?.key === key && ref?.optional !== true;
+}
+
 function selectorMatchesGateway(selector = {}) {
   const labels = selector.matchLabels ?? {};
   return labels["app.kubernetes.io/name"] === "cywell-ai-sentinel" && labels["app.kubernetes.io/component"] === "gateway";
@@ -279,6 +375,21 @@ function pinnedProductionImage(image) {
   return image.includes("@sha256:") || /^image-registry\.openshift-image-registry\.svc:5000\/cywell-ai-sentinel\/[^:]+:v0\.1\.4$/.test(image);
 }
 
+function liveDatabaseUrlUsesService(urlText) {
+  try {
+    const url = new URL(urlText);
+    const allowedHosts = new Set([
+      "cas-knowledge-postgres",
+      `cas-knowledge-postgres.${namespace}`,
+      `cas-knowledge-postgres.${namespace}.svc`,
+      `cas-knowledge-postgres.${namespace}.svc.cluster.local`
+    ]);
+    return url.protocol.startsWith("postgres") && allowedHosts.has(url.hostname) && (url.port === "" || url.port === "5432");
+  } catch {
+    return false;
+  }
+}
+
 function deploymentReady(deploymentJson) {
   return (
     Number(deploymentJson?.status?.observedGeneration ?? 0) >= Number(deploymentJson?.metadata?.generation ?? 0) &&
@@ -287,6 +398,12 @@ function deploymentReady(deploymentJson) {
   );
 }
 
+expect(
+  "preflight:overlay-name",
+  overlayNameValid,
+  `${overlay} is a supported PBS preflight overlay`,
+  `unsupported PBS preflight overlay '${overlayArg}'; expected pbs-shadow or pbs-live`
+);
 const rendered = renderKustomize(overlayPath);
 const deployment = renderedDoc(rendered, "Deployment", "cas-knowledge-engine");
 const configMap = renderedDoc(rendered, "ConfigMap", "cas-pbs-config");
@@ -463,7 +580,16 @@ if (overlay === "pbs-live") {
   if (requireCluster) {
     for (const imageName of ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine", "cas-knowledge-postgres"]) {
       const imageTag = getJson(`cluster:release-image:${imageName}`, ["get", "imagestreamtag", "-n", namespace, `${imageName}:v0.1.4`]);
-      if (imageTag) pass(`cluster:release-image:${imageName}:v0.1.4`, `${imageName}:v0.1.4 ImageStreamTag exists`);
+      if (imageTag) {
+        const dockerImageReference = imageTag.image?.dockerImageReference ?? "";
+        pass(`cluster:release-image:${imageName}:v0.1.4`, `${imageName}:v0.1.4 ImageStreamTag exists`);
+        expect(
+          `cluster:release-image-reference:${imageName}:v0.1.4`,
+          Boolean(dockerImageReference) && (imageName !== "cas-knowledge-postgres" || dockerImageReference.includes("@sha256:")),
+          `${imageName}:v0.1.4 resolves to an image reference${imageName === "cas-knowledge-postgres" ? " pinned by digest" : ""}`,
+          `${imageName}:v0.1.4 must resolve to image.dockerImageReference${imageName === "cas-knowledge-postgres" ? " with @sha256:" : ""}; found ${dockerImageReference || "none"}`
+        );
+      }
     }
     const apiTargets = collectKubernetesApiTargets();
     const networkPolicies = getJson("cluster:gateway-networkpolicies", ["get", "networkpolicy", "-n", namespace]);
@@ -487,6 +613,12 @@ if (overlay === "pbs-live") {
       missingKeys.length === 0,
       "cas-knowledge-postgres-live Secret contains database, username, password, and database-url keys",
       `cas-knowledge-postgres-live Secret missing keys: ${missingKeys.join(", ")}`
+    );
+    expect(
+      "cluster:knowledge-postgres-live-database-url-service",
+      liveDatabaseUrlUsesService(liveDatabaseUrl),
+      "cas-knowledge-postgres-live database-url targets the knowledge Postgres Service on port 5432",
+      "cas-knowledge-postgres-live database-url must use cas-knowledge-postgres Service DNS on port 5432, not localhost or a pod-local endpoint"
     );
   } else if (requireSecret) {
     fail("cluster:knowledge-postgres-live-secret-required", "cas-knowledge-postgres-live Secret is required for live cutover");
@@ -512,13 +644,24 @@ if (overlay === "pbs-live") {
           String(engineContainer.image ?? "").endsWith(":v0.1.4") &&
           workloadEnvValue(appliedEngine, "CAS_KNOWLEDGE_PROVIDER", "knowledge-engine") === "pbs-http-live" &&
           workloadEnvValue(appliedEngine, "CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER", "knowledge-engine") === "true" &&
+          workloadEnvSecretRef(appliedEngine, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "cas-knowledge-internal-auth", "owner-hmac-secret", "knowledge-engine") &&
+          workloadEnvConfigRef(appliedEngine, "CAS_PBS_BASE_URL", "cas-pbs-config", "base-url", "knowledge-engine") &&
+          workloadEnvConfigRef(appliedEngine, "CAS_PBS_AUTH_MODE", "cas-pbs-config", "auth-mode", "knowledge-engine") &&
+          workloadEnvConfigRef(appliedEngine, "CAS_PBS_TIMEOUT_MS", "cas-pbs-config", "timeout-ms", "knowledge-engine") &&
+          workloadEnvConfigRef(appliedEngine, "CAS_PBS_MAX_RESPONSE_BYTES", "cas-pbs-config", "max-response-bytes", "knowledge-engine") &&
+          workloadEnvConfigRef(appliedEngine, "CAS_PBS_TLS_INSECURE", "cas-pbs-config", "tls-insecure", "knowledge-engine") &&
+          workloadEnvValue(appliedEngine, "CAS_PBS_REQUIRE_RUNTIME_READY", "knowledge-engine") === "true" &&
+          workloadEnvValue(appliedEngine, "CAS_PBS_REQUIRE_CORPUS_READY", "knowledge-engine") === "true" &&
+          workloadEnvValue(appliedEngine, "CAS_PBS_REQUIRED_READY_SCOPES", "knowledge-engine") === "official_docs,study_docs" &&
+          workloadEnvSecretRef(appliedEngine, "CAS_PBS_BEARER_TOKEN", "cas-pbs-auth", "bearer-token", "knowledge-engine") &&
           workloadEnvSecretRef(appliedEngine, "DATABASE_URL", "cas-knowledge-postgres-live", "database-url", "knowledge-engine") &&
           serviceOwnerRef?.name === "cas-knowledge-live-config" &&
           serviceOwnerRef?.key === "service-owner",
-        "applied cas-knowledge-engine is rolled out with v0.1.4 pbs-live env and live Secret refs",
+        "applied cas-knowledge-engine is rolled out with v0.1.4 pbs-live env, readiness gates, HMAC, and live Secret refs",
         JSON.stringify({
           image: engineContainer.image,
           provider: workloadEnvValue(appliedEngine, "CAS_KNOWLEDGE_PROVIDER", "knowledge-engine"),
+          pbsBaseUrlRef: workloadEnv(appliedEngine, "CAS_PBS_BASE_URL", "knowledge-engine").valueFrom?.configMapKeyRef,
           readyReplicas: appliedEngine.status?.readyReplicas,
           availableReplicas: appliedEngine.status?.availableReplicas,
           serviceOwnerRef
@@ -532,8 +675,10 @@ if (overlay === "pbs-live") {
         "cluster:applied-gateway-contract",
         deploymentReady(appliedGateway) &&
           String(gatewayContainer.image ?? "").endsWith(":v0.1.4") &&
+          workloadEnvValue(appliedGateway, "CAS_KNOWLEDGE_OWNER_IDENTITY_MODE", "gateway") === "openshift-selfsubjectreview" &&
+          workloadEnvSecretRef(appliedGateway, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "cas-knowledge-internal-auth", "owner-hmac-secret", "gateway") &&
           workloadEnvValue(appliedGateway, "CAS_KNOWLEDGE_ENGINE_URL", "gateway").includes("cas-knowledge-engine"),
-        "applied cas-gateway is rolled out with v0.1.4 and routes knowledge traffic to cas-knowledge-engine",
+        "applied cas-gateway is rolled out with v0.1.4, SelfSubjectReview owner identity, HMAC, and knowledge routing",
         JSON.stringify({
           image: gatewayContainer.image,
           knowledgeUrl: workloadEnvValue(appliedGateway, "CAS_KNOWLEDGE_ENGINE_URL", "gateway"),
@@ -647,12 +792,11 @@ if (overlay === "pbs-live") {
       "cas-knowledge-engine-ingress"
     ]);
     if (appliedKnowledgeIngress) {
-      const policy = JSON.stringify(appliedKnowledgeIngress.spec ?? {});
       expect(
         "cluster:applied-knowledge-ingress-scoped",
-        policy.includes("gateway") && policy.includes("8080") && !policy.includes("\"podSelector\":{}"),
+        appliedKnowledgeIngressScoped(appliedKnowledgeIngress),
         "applied knowledge ingress NetworkPolicy allows only gateway pods on 8080",
-        policy
+        JSON.stringify(appliedKnowledgeIngress.spec ?? {})
       );
     }
     const appliedPbsEgress = getJson("cluster:applied-pbs-egress-policy", [
@@ -663,12 +807,11 @@ if (overlay === "pbs-live") {
       "cas-knowledge-engine-pbs-egress"
     ]);
     if (appliedPbsEgress) {
-      const policy = JSON.stringify(appliedPbsEgress.spec ?? {});
       expect(
         "cluster:applied-pbs-egress-scoped",
-        policy.includes("playbookstudio") && policy.includes("runtime") && policy.includes("8765") && !policy.includes("\"podSelector\":{}"),
-        "applied PBS egress NetworkPolicy is restricted to labeled playbookstudio runtime pods on 8765",
-        policy
+        appliedPbsEgressScoped(appliedPbsEgress),
+        "applied PBS egress NetworkPolicy is restricted exactly to DNS, Postgres, and labeled playbookstudio runtime pods on 8765",
+        JSON.stringify(appliedPbsEgress.spec ?? {})
       );
     }
   } else if (requireCluster && skipApplied) {

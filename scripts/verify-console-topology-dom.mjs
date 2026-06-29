@@ -118,6 +118,52 @@ function topologyResponse(customerId) {
       }
     };
   }
+  if (customerId === "mixed-scope-topology") {
+    return {
+      status: "ok",
+      customer_id: customerId,
+      relations: [{ source_id: "wrapper-noise-source", target_id: "wrapper-noise-target", kind: "noise" }],
+      topology: {
+        graph: {
+          counts: { nodes: 2, edges: 1, documents: 1, notes: 1 },
+          nodes: [
+            { node_id: "mixed-doc", kind: "document", title: "Mixed Scope Document" },
+            { node_id: "mixed-note", kind: "wiki-note", title: "Mixed Scope Wiki" }
+          ],
+          links: [{ source_id: "mixed-note", target_id: "mixed-doc", kind: "summarizes" }]
+        }
+      }
+    };
+  }
+  if (customerId === "orphan-topology") {
+    return {
+      status: "ok",
+      customer_id: customerId,
+      topology: {
+        graph: {
+          counts: { nodes: 1, edges: 1, documents: 0, notes: 1 },
+          nodes: [{ node_id: "pbs-orphan-note", kind: "wiki-note", title: "Orphan Edge Wiki Note" }],
+          links: [{ source_id: "pbs-orphan-note", target_id: "pbs-missing-endpoint", kind: "references" }]
+        }
+      }
+    };
+  }
+  if (customerId === "slow-topology") {
+    return {
+      status: "ok",
+      customer_id: customerId,
+      topology: {
+        graph: {
+          counts: { nodes: 2, edges: 1, documents: 1, notes: 1 },
+          nodes: [
+            { node_id: "slow-doc", kind: "document", title: "Slow Customer Document" },
+            { node_id: "slow-note", kind: "wiki-note", title: "Slow Customer Wiki" }
+          ],
+          links: [{ source_id: "slow-note", target_id: "slow-doc", kind: "summarizes" }]
+        }
+      }
+    };
+  }
   const graph =
     customerId === "dense-topology"
       ? denseTopologyGraph()
@@ -144,7 +190,7 @@ function topologyResponse(customerId) {
             { node_id: "pbs-runtime", kind: "runtime", title: "PBS Runtime" }
           ],
           links: [
-            { source_id: "wiki-router", target_id: "doc-router", kind: "summarizes" },
+            { source_id: "wiki-router", target_id: "doc-router", kind: "summarizes", provenance: { source_document_id: "doc-router" } },
             { source_id: "doc-router", target_id: "term-latency", kind: "mentions" },
             { source_id: "pbs-runtime", target_id: "wiki-router", kind: "feeds" }
           ]
@@ -265,6 +311,27 @@ function createHarnessServer() {
       if (request.method === "GET" && knowledgePath === "/api/knowledge/topology") {
         if (url.searchParams.get("customer_id") === "broken-topology") {
           sendJson(response, 500, { status: "error", code: "topology-fixture-failure", error: "forced topology failure" });
+          return;
+        }
+        if (url.searchParams.get("customer_id") === "slow-topology") {
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+        }
+        sendJson(response, 200, topologyResponse(url.searchParams.get("customer_id") || "default"));
+        return;
+      }
+      if (request.method === "GET" && knowledgePath === "/api/knowledge/wiki-vault") {
+        if (url.searchParams.get("customer_id") === "vault-empty-topology") {
+          sendJson(response, 200, {
+            status: "ok",
+            customer_id: "vault-empty-topology",
+            topology: {
+              graph: {
+                counts: { nodes: 0, edges: 0, documents: 0, notes: 0 },
+                nodes: [],
+                links: []
+              }
+            }
+          });
           return;
         }
         sendJson(response, 200, topologyResponse(url.searchParams.get("customer_id") || "default"));
@@ -498,8 +565,9 @@ try {
         inspectorText.includes("wiki-router") &&
         inspectorText.includes("rev 4") &&
         inspectorText.includes("source doc-router") &&
+        inspectorText.includes("edge source doc-router") &&
         inspectorText.includes("summarizes"),
-      "node inspector renders selected node lineage and direct relation text",
+      "node inspector renders selected node lineage, edge lineage, and direct relation text",
       inspectorText
     );
 
@@ -555,7 +623,8 @@ try {
       "console-topology-dom:empty-topology-no-stale-nodes",
       emptyTopologyText.includes("No topology nodes are available") &&
         !emptyTopologyText.includes("ACME Router Wiki") &&
-        (await page.locator('[data-test="cas-topology-edge"]').count()) === 0,
+        (await page.locator('[data-test="cas-topology-edge"]').count()) === 0 &&
+        (await page.locator('[data-test="cas-topology-dashboard"] .cas-topology-empty[role="status"][aria-live="polite"]').count()) === 1,
       "empty topology clears previous graph nodes and edges",
       emptyTopologyText
     );
@@ -575,9 +644,77 @@ try {
       "console-topology-dom:failed-reload-clears-stale-graph",
       failedTopologyText.includes("No topology nodes are available") &&
         !failedTopologyText.includes("ACME Router Wiki") &&
-        failedResultText.includes("forced topology failure"),
+        failedResultText.includes("forced topology failure") &&
+        (await page.getByRole("alert").count()) === 1,
       "failed topology reload clears stale graph and exposes the load error",
       JSON.stringify({ failedTopologyText, failedResultText })
+    );
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=orphan-topology") && response.status() === 200),
+      page.getByLabel("Customer ID").fill("orphan-topology")
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 2);
+    const orphanKpiText = await page.locator('[data-test="cas-topology-kpis"]').innerText();
+    const orphanDashboardText = await page.locator('[data-test="cas-topology-dashboard"]').innerText();
+    expect(
+      "console-topology-dom:orphan-edge-fallback-node",
+      orphanKpiText.toLowerCase().includes("2\nnodes") &&
+        orphanKpiText.toLowerCase().includes("1\nedges") &&
+        (await page.locator('[data-test="cas-topology-edge"]').count()) === 1 &&
+        orphanDashboardText.includes("pbs-missing-endpoint") &&
+        orphanDashboardText.includes("pbs-orphan-note -> pbs-missing-endpoint"),
+      "orphan topology edges create fallback endpoint nodes and reconcile visible KPI counts",
+      JSON.stringify({ orphanKpiText, orphanDashboardText })
+    );
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=mixed-scope-topology") && response.status() === 200),
+      page.getByLabel("Customer ID").fill("mixed-scope-topology")
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 2);
+    const mixedScopeText = await page.locator('[data-test="cas-topology-dashboard"]').innerText();
+    expect(
+      "console-topology-dom:mixed-scope-uses-single-graph-candidate",
+      mixedScopeText.includes("Mixed Scope Wiki") &&
+        mixedScopeText.includes("mixed-note -> mixed-doc") &&
+        !mixedScopeText.includes("wrapper-noise-source") &&
+        (await page.locator('[data-test="cas-topology-edge"]').count()) === 1,
+      "topology normalization derives nodes and edges from the same nested graph candidate",
+      mixedScopeText
+    );
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=vault-empty-topology") && response.status() === 200),
+      page.getByLabel("Customer ID").fill("vault-empty-topology")
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 4);
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/wiki-vault?customer_id=vault-empty-topology") && response.status() === 200),
+      page.getByRole("button", { name: "Load Vault" }).click()
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 0);
+    const emptyVaultText = await page.locator('[data-test="cas-topology-dashboard"]').innerText();
+    expect(
+      "console-topology-dom:empty-vault-clears-stale-topology",
+      emptyVaultText.includes("No topology nodes are available") && !emptyVaultText.includes("ACME Router Wiki"),
+      "empty wiki vault topology clears previously loaded graph data",
+      emptyVaultText
+    );
+    const slowResponse = page.waitForResponse(
+      (response) => response.url().includes("/api/knowledge/topology?customer_id=slow-topology") && response.status() === 200
+    );
+    await page.getByLabel("Customer ID").fill("slow-topology");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=acme-topology") && response.status() === 200),
+      page.getByLabel("Customer ID").fill("acme-topology")
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 4);
+    await slowResponse;
+    await page.waitForTimeout(50);
+    const raceTopologyText = await page.locator('[data-test="cas-topology-dashboard"]').innerText();
+    expect(
+      "console-topology-dom:late-topology-response-ignored",
+      raceTopologyText.includes("ACME Router Wiki") && !raceTopologyText.includes("Slow Customer Wiki"),
+      "late topology responses cannot overwrite the newest customer graph",
+      raceTopologyText
     );
     await assertViewportLayout(page, { width: 1024, height: 768 }, "dense-topology");
     expect(

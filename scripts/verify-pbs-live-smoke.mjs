@@ -9,6 +9,8 @@ const checks = [];
 const children = [];
 const checkedAt = new Date().toISOString();
 const pbsBaseUrl = (process.env.CAS_PBS_BASE_URL ?? "").trim();
+const pbsBearerToken = (process.env.CAS_PBS_BEARER_TOKEN ?? process.env.CAS_PBS_API_KEY ?? "").trim();
+const pbsBearerTokenFile = (process.env.CAS_PBS_BEARER_TOKEN_FILE ?? "").trim();
 const namespace = process.env.CAS_PBS_LIVE_NAMESPACE || "cywell-ai-sentinel";
 
 function envBool(name, defaultValue = false) {
@@ -126,6 +128,74 @@ function envSecretRef(workload, name, secretName, key, containerName) {
 function envConfigRef(workload, name, configName, key, containerName) {
   const ref = (containerByName(workload, containerName).env ?? []).find((entry) => entry.name === name)?.valueFrom?.configMapKeyRef;
   return ref?.name === configName && ref?.key === key;
+}
+
+function serviceHost(serviceName) {
+  return `${serviceName}.${namespace}.svc.cluster.local`;
+}
+
+function matchLabels(selector = {}) {
+  return selector?.matchLabels ?? {};
+}
+
+function labelsEqual(actual = {}, expected = {}) {
+  const actualEntries = Object.entries(actual);
+  const expectedEntries = Object.entries(expected);
+  return actualEntries.length === expectedEntries.length && expectedEntries.every(([key, value]) => actual[key] === value);
+}
+
+function selectorMatches(selector = {}, expected = {}) {
+  return labelsEqual(matchLabels(selector), expected) && !selector.matchExpressions?.length;
+}
+
+function peerHasNoBroadAccess(peer = {}) {
+  const broadSelector = (selector) => selector && Object.keys(selector).length === 0;
+  const broadCidr = peer.ipBlock?.cidr === "0.0.0.0/0" || peer.ipBlock?.cidr === "::/0";
+  return !broadSelector(peer.namespaceSelector) && !broadSelector(peer.podSelector) && !broadCidr;
+}
+
+function portsEqual(actual = [], expected = []) {
+  const normalize = (ports) => ports.map((port) => `${port.protocol ?? "TCP"}:${Number(port.port)}`).sort();
+  return JSON.stringify(normalize(actual)) === JSON.stringify(normalize(expected));
+}
+
+function appliedPbsEgressScoped(policy) {
+  const spec = policy?.spec ?? {};
+  const egress = spec.egress ?? [];
+  if (!selectorMatches(spec.podSelector, { "app.kubernetes.io/name": "cywell-ai-sentinel", "app.kubernetes.io/component": "knowledge-engine" })) {
+    return false;
+  }
+  if (egress.length !== 3 || (spec.ingress ?? []).length > 0) return false;
+  const dnsRule = egress.find((rule) => portsEqual(rule.ports ?? [], [
+    { protocol: "TCP", port: 53 },
+    { protocol: "UDP", port: 53 },
+    { protocol: "TCP", port: 5353 },
+    { protocol: "UDP", port: 5353 }
+  ]));
+  const postgresRule = egress.find((rule) => portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 5432 }]));
+  const pbsRule = egress.find((rule) => portsEqual(rule.ports ?? [], [{ protocol: "TCP", port: 8765 }]));
+  return Boolean(
+    dnsRule &&
+      (dnsRule.to ?? []).length === 1 &&
+      peerHasNoBroadAccess(dnsRule.to[0]) &&
+      selectorMatches(dnsRule.to[0].namespaceSelector, { "kubernetes.io/metadata.name": "openshift-dns" }) &&
+      postgresRule &&
+      (postgresRule.to ?? []).length === 1 &&
+      peerHasNoBroadAccess(postgresRule.to[0]) &&
+      selectorMatches(postgresRule.to[0].podSelector, {
+        "app.kubernetes.io/name": "cywell-ai-sentinel",
+        "app.kubernetes.io/component": "knowledge-postgres"
+      }) &&
+      pbsRule &&
+      (pbsRule.to ?? []).length === 1 &&
+      peerHasNoBroadAccess(pbsRule.to[0]) &&
+      selectorMatches(pbsRule.to[0].namespaceSelector, { "kubernetes.io/metadata.name": "playbookstudio" }) &&
+      selectorMatches(pbsRule.to[0].podSelector, {
+        "app.kubernetes.io/name": "playbookstudio",
+        "app.kubernetes.io/component": "runtime"
+      }) &&
+      egress.every((rule) => (rule.to ?? []).every(peerHasNoBroadAccess))
+  );
 }
 
 function execNode(podName, code, timeoutMs = 60000) {
@@ -276,10 +346,18 @@ async function runClusterSmoke() {
         String(engineContainer.image ?? "").endsWith(":v0.1.4") &&
         envValue(engineDeployment, "CAS_KNOWLEDGE_PROVIDER", "knowledge-engine") === "pbs-http-live" &&
         envValue(engineDeployment, "CAS_KNOWLEDGE_REQUIRE_OWNER_HEADER", "knowledge-engine") === "true" &&
+        envSecretRef(engineDeployment, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "cas-knowledge-internal-auth", "owner-hmac-secret", "knowledge-engine") &&
+        envConfigRef(engineDeployment, "CAS_PBS_BASE_URL", "cas-pbs-config", "base-url", "knowledge-engine") &&
         envConfigRef(engineDeployment, "CAS_PBS_AUTH_MODE", "cas-pbs-config", "auth-mode", "knowledge-engine") &&
+        envConfigRef(engineDeployment, "CAS_PBS_TIMEOUT_MS", "cas-pbs-config", "timeout-ms", "knowledge-engine") &&
+        envConfigRef(engineDeployment, "CAS_PBS_MAX_RESPONSE_BYTES", "cas-pbs-config", "max-response-bytes", "knowledge-engine") &&
+        envConfigRef(engineDeployment, "CAS_PBS_TLS_INSECURE", "cas-pbs-config", "tls-insecure", "knowledge-engine") &&
+        envValue(engineDeployment, "CAS_PBS_REQUIRE_RUNTIME_READY", "knowledge-engine") === "true" &&
+        envValue(engineDeployment, "CAS_PBS_REQUIRE_CORPUS_READY", "knowledge-engine") === "true" &&
+        envValue(engineDeployment, "CAS_PBS_REQUIRED_READY_SCOPES", "knowledge-engine") === "official_docs,study_docs" &&
         envSecretRef(engineDeployment, "CAS_PBS_BEARER_TOKEN", "cas-pbs-auth", "bearer-token", "knowledge-engine") &&
         envSecretRef(engineDeployment, "DATABASE_URL", "cas-knowledge-postgres-live", "database-url", "knowledge-engine"),
-      "applied knowledge engine is pbs-live, rolled out, v0.1.4, owner-required, PBS-authenticated, and wired to live Postgres Secret",
+      "applied knowledge engine is pbs-live, rolled out, v0.1.4, owner-required, HMAC-signed, readiness-gated, PBS-authenticated, and wired to live Postgres Secret",
       JSON.stringify({
         image: engineContainer.image,
         provider: envValue(engineDeployment, "CAS_KNOWLEDGE_PROVIDER", "knowledge-engine"),
@@ -292,11 +370,12 @@ async function runClusterSmoke() {
     const gatewayContainer = containerByName(gatewayDeployment, "gateway");
     expect(
       "pbs-live:cluster-gateway-contract",
-      deploymentReady(gatewayDeployment) &&
+        deploymentReady(gatewayDeployment) &&
         String(gatewayContainer.image ?? "").endsWith(":v0.1.4") &&
         envValue(gatewayDeployment, "CAS_KNOWLEDGE_ENGINE_URL", "gateway").includes("cas-knowledge-engine") &&
-        envValue(gatewayDeployment, "CAS_KNOWLEDGE_OWNER_IDENTITY_MODE", "gateway") === "openshift-selfsubjectreview",
-      "applied gateway is rolled out as v0.1.4, verifies users with SelfSubjectReview, and routes knowledge traffic to cas-knowledge-engine",
+        envValue(gatewayDeployment, "CAS_KNOWLEDGE_OWNER_IDENTITY_MODE", "gateway") === "openshift-selfsubjectreview" &&
+        envSecretRef(gatewayDeployment, "CAS_KNOWLEDGE_OWNER_HMAC_SECRET", "cas-knowledge-internal-auth", "owner-hmac-secret", "gateway"),
+      "applied gateway is rolled out as v0.1.4, verifies users with SelfSubjectReview, signs knowledge owners, and routes knowledge traffic to cas-knowledge-engine",
       JSON.stringify({
         image: gatewayContainer.image,
         knowledgeUrl: envValue(gatewayDeployment, "CAS_KNOWLEDGE_ENGINE_URL", "gateway"),
@@ -327,12 +406,11 @@ async function runClusterSmoke() {
     "cas-knowledge-engine-pbs-egress"
   ]);
   if (pbsEgress) {
-    const policy = JSON.stringify(pbsEgress.spec ?? {});
     expect(
       "pbs-live:cluster-pbs-egress-scoped",
-      policy.includes("playbookstudio") && policy.includes("runtime") && policy.includes("8765") && !policy.includes('"podSelector":{}'),
-      "applied PBS egress policy is scoped to labeled playbookstudio runtime pods on 8765",
-      policy
+      appliedPbsEgressScoped(pbsEgress),
+      "applied PBS egress policy is scoped exactly to DNS, Postgres, and labeled playbookstudio runtime pods on 8765",
+      JSON.stringify(pbsEgress.spec ?? {})
     );
   }
 
@@ -359,6 +437,8 @@ async function runClusterSmoke() {
     whoamiToken.stderr || whoamiToken.stdout || "oc whoami -t failed"
   );
   if (!smokeToken) return;
+  const knowledgeEngineHost = serviceHost("cas-knowledge-engine");
+  const gatewayHost = serviceHost("cas-gateway");
   const smokeCode = [
     "const https=require('https');",
     "const http=require('http');",
@@ -368,9 +448,10 @@ async function runClusterSmoke() {
     "const fileName=`cas-pbs-live-cluster-${lineageToken}.txt`; ",
     "const writeSmoke=" + JSON.stringify(writeSmoke) + ";",
     "const readOnlyException=" + JSON.stringify(readOnlyException) + ";",
+    `const knowledgeEngineHost=${JSON.stringify(knowledgeEngineHost)};`,
     "function parse(body){try{return JSON.parse(body||'{}')}catch{return {parse_error:body}}}",
     "function req(path,method='GET',body,auth=true,extraHeaders={}){return new Promise((resolve,reject)=>{const payload=body?JSON.stringify(body):undefined;const headers={'content-type':'application/json','content-length':payload?Buffer.byteLength(payload):0,...extraHeaders};if(auth)headers.authorization=`Bearer ${smokeToken}`;const r=https.request(`https://127.0.0.1:9443${path}`,{method,rejectUnauthorized:false,headers},res=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>resolve({status:res.statusCode,body:parse(b)}));});r.on('error',reject);if(payload)r.write(payload);r.end();});}",
-    "function engineReq(path){return new Promise((resolve,reject)=>{const r=http.request(`http://cas-knowledge-engine.cywell-ai-sentinel.svc.cluster.local:8080${path}`,{method:'GET',timeout:5000},res=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>resolve({status:res.statusCode,body:parse(b)}));});r.on('timeout',()=>{r.destroy(new Error('knowledge engine direct health timed out'))});r.on('error',reject);r.end();});}",
+    "function engineReq(path){return new Promise((resolve,reject)=>{const r=http.request(`http://${knowledgeEngineHost}:8080${path}`,{method:'GET',timeout:5000},res=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>resolve({status:res.statusCode,body:parse(b)}));});r.on('timeout',()=>{r.destroy(new Error('knowledge engine direct health timed out'))});r.on('error',reject);r.end();});}",
     "function traceOk(body){return body?.pbs?.ok===true&&Number(body?.pbs?.status||0)>=200&&Number(body?.pbs?.status||0)<300}",
     "function casOk(result){return result.status>=200&&result.status<300&&result.body?.status!=='error'&&traceOk(result.body)}",
     "(async()=>{",
@@ -474,8 +555,9 @@ async function runClusterSmoke() {
       [
         "const https=require('https');",
         `const smokeToken=${JSON.stringify(smokeToken)};`,
+        `const gatewayHost=${JSON.stringify(gatewayHost)};`,
         "function parse(body){try{return JSON.parse(body||'{}')}catch{return {parse_error:body}}}",
-        "const req=https.request('https://cas-gateway.cywell-ai-sentinel.svc.cluster.local:9443/api/knowledge/healthz',{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${smokeToken}`,accept:'application/json'}},res=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{const body=parse(b);console.log(JSON.stringify({status:res.statusCode,body,provider:body.provider,engineProvider:body.engine&&body.engine.provider}));});});",
+        "const req=https.request(`https://${gatewayHost}:9443/api/knowledge/healthz`,{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${smokeToken}`,accept:'application/json'}},res=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{const body=parse(b);console.log(JSON.stringify({status:res.statusCode,body,provider:body.provider,engineProvider:body.engine&&body.engine.provider}));});});",
         "req.on('error',e=>{console.log(JSON.stringify({error:e.code||e.message}));process.exit(1);});",
         "req.end();"
       ].join(""),
@@ -496,7 +578,8 @@ async function runClusterSmoke() {
       consolePod.metadata.name,
       [
         "const http=require('http');",
-        "const req=http.request('http://cas-knowledge-engine.cywell-ai-sentinel.svc.cluster.local:8080/api/knowledge/healthz',{method:'GET',timeout:2500},res=>{res.resume();res.on('end',()=>{console.log(JSON.stringify({status:res.statusCode}));});});",
+        `const knowledgeEngineHost=${JSON.stringify(knowledgeEngineHost)};`,
+        "const req=http.request(`http://${knowledgeEngineHost}:8080/api/knowledge/healthz`,{method:'GET',timeout:2500},res=>{res.resume();res.on('end',()=>{console.log(JSON.stringify({status:res.statusCode}));});});",
         "req.on('timeout',()=>{console.log(JSON.stringify({blocked:'timeout'}));req.destroy();});",
         "req.on('error',e=>{console.log(JSON.stringify({blocked:'error',code:e.code||e.message}));});",
         "req.end();",
@@ -536,6 +619,13 @@ if (!pbsBaseUrl) {
     skip("pbs-live:base-url", "CAS_PBS_BASE_URL is not set; real PBS live smoke skipped");
     writeEvidence("SKIP");
   }
+  process.exit();
+}
+
+if (cutover && !clusterSmoke && !pbsBearerToken && !pbsBearerTokenFile) {
+  fail("pbs-live:cutover-auth", "CAS_PBS_BEARER_TOKEN, CAS_PBS_API_KEY, or CAS_PBS_BEARER_TOKEN_FILE is required for local cutover smoke");
+  writeEvidence("FAIL");
+  process.exitCode = 1;
   process.exit();
 }
 
