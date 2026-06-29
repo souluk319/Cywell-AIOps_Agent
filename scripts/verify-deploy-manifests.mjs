@@ -1118,6 +1118,17 @@ for (const file of files) {
         "CRC deploy script applies the full CRC overlay, including Lightspeed ingress, Kubernetes API egress, and TLS override"
       );
       expect(
+        "crc-deploy:console-plugin-replacement",
+        text.includes("ensureCasReplacesLightspeed") &&
+          text.includes('plugin !== "lightspeed-console-plugin"') &&
+          text.includes('plugin !== "cywell-opslens"') &&
+          text.includes("cywell-ai-sentinel") &&
+          text.includes("LightspeedButton") &&
+          text.includes('state: "Disabled"'),
+        "CRC deploy script removes native Lightspeed and legacy OpsLens console plugins while enabling the Cywell launcher",
+        "CRC deploy script must keep the console operator plugin list aligned with the Cywell launcher replacement"
+      );
+      expect(
         "crc-deploy:source-annotations",
         text.includes("cywell.io/source-head") &&
           text.includes("cywell.io/source-tree-status") &&
@@ -1154,16 +1165,198 @@ for (const file of files) {
         "PBS runtime CRC bootstrap must create local Secret material without logging raw values"
       );
       expect(
+        "pbs-runtime-crc-deploy:secret-reuse-postgres-sync",
+          text.includes("existingSecretValue") &&
+          text.includes('existingSecretValue("playbookstudio-secret", "POSTGRES_PASSWORD")') &&
+          text.includes("syncPostgresPassword") &&
+          text.includes("applyPbsGraphFoundationMigration") &&
+          text.includes("0012_entity_graph_foundation.sql") &&
+          text.includes("pbs-runtime-crc:graph-foundation-migration") &&
+          text.includes("waitForPostgresStable") &&
+          text.includes("ALTER ROLE") &&
+          text.includes('PGPASSWORD="$POSTGRES_PASSWORD"') &&
+          text.includes("--for=condition=available") &&
+          text.includes("pbs-runtime-crc:postgres-stable") &&
+          text.includes("pbs-runtime-crc:postgres-password-sync") &&
+          text.indexOf("pbs-runtime-crc:rollout:postgres") < text.indexOf("syncPostgresPassword();") &&
+          text.indexOf("syncPostgresPassword();") < text.indexOf("waitForPostgresStable();") &&
+          text.indexOf("waitForPostgresStable();") < text.indexOf("waitForJob(jobName, renderedDocuments)"),
+        "PBS runtime CRC bootstrap reuses existing Secret material and waits for a stable Postgres password-auth window before Jobs run",
+        "PBS runtime CRC bootstrap must avoid Secret/PVC password drift and wait for stable Postgres before migration/seed Jobs"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:one-shot-job-reset",
+        text.includes("pbsOneShotJobs") &&
+          text.includes("db-migrate") &&
+          text.includes("official-corpus-seed") &&
+          text.includes("kmsc-corpus-seed") &&
+          text.includes("learning-seed") &&
+          text.includes("course-runtime-seed") &&
+          text.includes("--ignore-not-found=true") &&
+          text.includes("--wait=false") &&
+          text.includes("--force") &&
+          text.includes("--grace-period=0") &&
+          text.includes("renderedOverlayDocuments") &&
+          text.includes("waitForJob") &&
+          text.includes("pbs-runtime-crc:jobs-reset:stale") &&
+          text.includes("pbs-runtime-crc:jobs-reset:until-postgres") &&
+          text.includes("pbs-runtime-crc:job-pods-reset:${jobName}") &&
+          text.includes("pbs-runtime-crc:job-complete:${jobName}") &&
+          text.includes("pbs-runtime-crc:job-scc:${jobName}") &&
+          text.includes("pbs-runtime-crc:job-source-image:${jobName}") &&
+          text.includes("podDigests.includes(sourceImage.digest)"),
+        "PBS runtime CRC bootstrap resets stale one-shot Jobs, holds them until Postgres is ready, and verifies ordered replay completion from the source-bound local image",
+        "PBS runtime CRC bootstrap must reset one-shot Jobs, replay them after Postgres, and verify completion/SCC/source-image evidence"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:anyuid-scc-grants",
+        text.includes('"adm", "policy", "add-scc-to-user", "anyuid"') &&
+          text.includes('"get", "rolebinding", "system:openshift:scc:anyuid"') &&
+          text.includes('roleRef?.name === "system:openshift:scc:anyuid"') &&
+          text.includes('subject.kind === "ServiceAccount"') &&
+          text.includes("terminal-broker") &&
+          text.includes("playbookstudio") &&
+          text.includes("pbs-runtime-crc:anyuid-grant:${serviceAccount}") &&
+          text.includes("pbs-runtime-crc:anyuid-binding:${serviceAccount}") &&
+          !text.includes('"add-scc-to-user", "privileged"') &&
+          !text.includes("system:serviceaccounts:") &&
+          !text.includes("system:authenticated"),
+        "PBS runtime CRC bootstrap grants and verifies only the narrow anyuid SCC RoleBinding needed by PBS service accounts",
+        "PBS runtime CRC bootstrap must grant anyuid only to playbookstudio/terminal-broker and verify the SCC RoleBinding"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:local-runtime-build",
+          text.includes("CAS_PBS_RUNTIME_USE_LOCAL_BUILD") &&
+          text.includes('?? "true"') &&
+          text.includes("pbs-runtime-crc:local-build-required") &&
+          text.includes("localPbsRuntimeImageSourceEvidence") &&
+          text.includes("localPbsRuntimeImageSourceBound") &&
+          text.includes("pbs-runtime-build-context") &&
+          text.includes("Dockerfile.crc-app") &&
+          text.includes("FROM ghcr.io/jungyuoo/ocpops-playbookstudio-app:dev") &&
+          text.includes("COPY src /app/src") &&
+          text.includes("COPY db /app/db") &&
+          text.includes("ENV PYTHONPATH=/app/src") &&
+          text.includes("org.opencontainers.image.revision") &&
+          text.includes("playbookstudio-app:crc-v014") &&
+          text.includes("image-registry.openshift-image-registry.svc:5000/${namespace}/playbookstudio-app:crc-v014") &&
+          text.includes('"start-build", "playbookstudio-app"') &&
+          text.includes("waitForBuildComplete") &&
+          text.includes("pbs-runtime-crc:local-build-complete") &&
+          text.includes("pbs-runtime-crc:local-build-rebuild-stale") &&
+          text.includes('localPbsRuntimeImageSourceBound("pbs-runtime-crc:local-build")') &&
+          text.includes("replaceAll(\"ghcr.io/jungyuoo/ocpops-playbookstudio-app:dev\", pbsRuntimeImage)") &&
+          text.includes("pbs-runtime-crc:runtime-image-patch") &&
+          text.includes("pbs-runtime-crc:runtime-image-config"),
+        "PBS runtime CRC bootstrap builds or reuses only a source-bound local pinned PBS image and patches deployments/jobs away from stale upstream GHCR code",
+        "PBS runtime CRC bootstrap must require local pinned PBS source image builds and use that source-bound image for app and ordered Jobs"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:source-overlay",
+        text.includes("CAS_PBS_RUNTIME_USE_SOURCE_OVERLAY") &&
+          text.includes("ensurePbsSourceOverlay") &&
+          text.includes("pbs-source-overlay") &&
+          text.includes("pbs-source-loader") &&
+          text.includes('"cp", "src"') &&
+          text.includes("cwd: pbsSourceDir") &&
+          text.includes('mountPath: "/app/src"') &&
+          text.includes('subPath: "src"') &&
+          text.includes("pbs-runtime-crc:source-overlay-copy") &&
+          text.includes("applyPbsSourceOverlayHotfixes") &&
+          text.includes("wiki-loop-crc-compat-20260630") &&
+          text.includes("connect_timeout_seconds=1") &&
+          text.includes("upload_start = text.find('def _load_upload_reports(')") &&
+          text.includes("upload_end = text.find(") &&
+          text.includes("_load_graph_entities") &&
+          text.includes("reports_root.glob('*/ingestion-report.json')") &&
+          text.includes("pbs-runtime-crc:source-overlay-hotfix:wiki-loop-corpus-status") &&
+          text.includes("PBS_SOURCE_PATCHES") &&
+          text.includes("pbs-runtime-crc:source-overlay-mount") &&
+          text.indexOf("ensurePbsSourceOverlay();") < text.indexOf("scaleDeployment(\"app\", 0"),
+        "PBS runtime CRC bootstrap can mount pinned PBS source over the stale upstream image and apply explicit CRC source-overlay hotfixes",
+        "PBS runtime CRC bootstrap must support source PVC overlay and stamped hotfixes before app rollout"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:local-embedding-stub",
+        text.includes("CAS_PBS_RUNTIME_USE_LOCAL_EMBEDDING_STUB") &&
+          text.includes("ensureLocalEmbeddingStub") &&
+          text.includes("embedding-stub") &&
+          text.includes("EMBEDDING_BASE_URL") &&
+          text.includes("http://embedding-stub:8080/v1") &&
+          text.includes("pbs-runtime-crc:embedding-stub-rollout") &&
+          text.includes("pbs-runtime-crc:embedding-config") &&
+          text.indexOf("ensureLocalEmbeddingStub(pbsRuntimeImage)") < text.indexOf("waitForJob(jobName, renderedDocuments)"),
+        "PBS runtime CRC bootstrap can route embedding calls to an in-cluster deterministic stub when external TEI auth is unavailable",
+        "PBS runtime CRC bootstrap must provide a deterministic CRC embedding fallback before migration/seed Jobs"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:https-readiness",
+        text.includes("patchRuntimeHttpsReadiness") &&
+          text.includes("/spec/template/spec/containers/0/readinessProbe/httpGet/scheme") &&
+          text.includes('value: "HTTPS"') &&
+          text.includes("pbs-runtime-crc:runtime-readiness-https") &&
+          text.includes("https://127.0.0.1:8765") &&
+          text.indexOf("patchRuntimeHttpsReadiness();") < text.indexOf("scaleDeployment(\"app\", 0"),
+        "PBS runtime CRC bootstrap aligns app readiness and health probes with the HTTPS runtime server",
+        "PBS runtime CRC bootstrap must patch app readiness and health probes to HTTPS before app rollout"
+      );
+      expect(
         "pbs-runtime-crc-deploy:overlay-and-source-stamp",
         text.includes("openshift-cywell-v014") &&
           text.includes("oc\", [\"apply\", \"-k\", overlayPath]") &&
           text.includes("PLAYBOOKSTUDIO_SOURCE_HEAD") &&
+          text.includes("PLAYBOOKSTUDIO_SOURCE_OVERLAY_PATCHES") &&
           text.includes("cywell.ai/pbs-source-head") &&
+          text.includes("cywell.ai/pbs-source-overlay-patches") &&
           text.includes("org.opencontainers.image.revision") &&
           text.includes("playbookstudio-runtime") &&
           text.includes("runtime-service-contract"),
-        "PBS runtime CRC bootstrap applies the PBS overlay and stamps runtime pods with the approved source SHA",
-        "PBS runtime CRC bootstrap must apply overlay, stamp source env/annotations, and verify runtime Service contract"
+        "PBS runtime CRC bootstrap applies the PBS overlay and stamps runtime pods with the approved source SHA plus explicit CRC hotfix IDs",
+        "PBS runtime CRC bootstrap must apply overlay, stamp source and hotfix env/annotations, and verify runtime Service contract"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:rollout-restart",
+        text.includes("postSccRestartDeployments") &&
+          text.includes("finalRestartDeployments") &&
+          text.includes('["postgres"]') &&
+          text.includes('["app"]') &&
+          text.includes("restartDeploymentAfterSccIfNeeded") &&
+          text.includes("pbs-runtime-crc:rollout-restart-skip:${name}") &&
+          text.includes("scaleDeployment") &&
+          text.includes("pbs-runtime-crc:app-scale-down") &&
+          text.includes("pbs-runtime-crc:app-scale-up") &&
+          text.includes('"rollout", "restart"') &&
+          text.includes("deployment/${name}") &&
+          text.includes("pbs-runtime-crc:rollout-restart:${name}") &&
+          text.indexOf('"adm", "policy", "add-scc-to-user", "anyuid"') < text.indexOf('"rollout", "restart"') &&
+          text.indexOf('"rollout", "restart"') < text.indexOf('"rollout", "status"'),
+        "PBS runtime CRC bootstrap restarts postgres after SCC bootstrap and app after source stamping before rollout status checks",
+        "PBS runtime CRC bootstrap must restart postgres/app at the right phases before rollout status checks"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:runtime-health",
+          text.includes("verifyRuntimeHealth") &&
+          text.includes("/api/health") &&
+          text.includes("/api/wiki-loop/status?user_id=local") &&
+          text.includes("/api/wiki-loop/run") &&
+          text.includes("wiki_run_status") &&
+          text.includes("pbsRuntimeHealthReady") &&
+          text.includes("database_runtime") &&
+          text.includes("pgvector_ready") &&
+          text.includes("embedding_index_parity") &&
+          text.includes("missing_embedding_index_entries") &&
+          text.includes("stale_embedding_index_entries") &&
+          text.includes("corpus_counts_ready") &&
+          text.includes("source_counts") &&
+          text.includes("chunk_counts") &&
+          text.includes("compiled_wiki_ready") &&
+          text.includes('"official_docs", "study_docs"') &&
+          text.includes("pbs-runtime-crc:runtime-source-image-digest") &&
+          text.includes("pbs-runtime-crc:runtime-health-ready") &&
+          text.includes("expectReadyPodScc") &&
+          text.includes("pbs-runtime-crc:ready-pod-scc:${name}"),
+        "PBS runtime CRC bootstrap verifies anyuid Ready pods, source-bound image digests, and strict health readiness for DB, pgvector, corpus scopes, and compiled wiki",
+        "PBS runtime CRC bootstrap must verify Ready pod SCC annotations, source-bound image digests, and strict PBS runtime health readiness"
       );
       expect(
         "pbs-runtime-crc-deploy:evidence",
@@ -1773,6 +1966,13 @@ for (const file of files) {
         text.includes("pbsRuntimeHealthReady") &&
         text.includes("pbsRuntimeHealthEvidence") &&
         text.includes("db_corpus") &&
+        text.includes("missing_embedding_index_entries") &&
+        text.includes("stale_embedding_index_entries") &&
+        text.includes("corpus_counts_ready") &&
+        text.includes("source_counts") &&
+        text.includes("chunk_counts") &&
+        text.includes("/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt") &&
+        text.includes("ssl.create_default_context(cafile=service_ca)") &&
         text.includes("/api/wiki-loop/status?user_id=local") &&
         text.includes("Number(port.port) === 8765") &&
         text.includes("pbsBaseUrlTargetsRuntimeService")
@@ -1841,7 +2041,10 @@ for (const file of files) {
         text.includes("placeholder(clean)") &&
         text.includes("resultIsNotFound") &&
         text.includes("readError") &&
-        text.includes("sourceEvidenceHead") &&
+        text.includes("sourceEvidenceFullHead") &&
+        text.includes("evidenceFullHead") &&
+        text.includes("currentGitFullHead") &&
+        text.includes("releaseImagesEvidenceCurrent") &&
         text.includes("staleEvidenceAllowed") &&
         text.includes("non-stale-source") &&
         text.includes("image.dockerImageReference") &&
@@ -1850,7 +2053,7 @@ for (const file of files) {
         text.includes("loadReleaseImagesEvidence") &&
         text.includes("promotedImages") &&
         text.includes("cluster:release-image-evidence:") &&
-        text.includes("must match promoted evidence digest") &&
+        text.includes("must match current promoted evidence digest") &&
         text.includes("must resolve to image.dockerImageReference with @sha256:") &&
         text.includes("cluster:pbs-runtime-ready-pods") &&
         text.includes("cluster:pbs-runtime-source-head-required") &&

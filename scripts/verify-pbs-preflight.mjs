@@ -1182,6 +1182,11 @@ function runtimePodSourceSummary(pod) {
   };
 }
 
+function numberValue(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function pbsRuntimeHealthReadiness(body) {
   const explicit = body?.provider_config?.pbs_http?.readiness ?? body?.readiness ?? body?.runtime?.readiness;
   if (explicit) return explicit;
@@ -1190,12 +1195,38 @@ function pbsRuntimeHealthReadiness(body) {
   if (Object.keys(dbCorpus).length > 0) {
     const wikiStatus = body?.__casWikiLoopStatus && typeof body.__casWikiLoopStatus === "object" ? body.__casWikiLoopStatus : {};
     const readyScopes = Array.isArray(dbCorpus.ready_scopes) ? dbCorpus.ready_scopes.map(String) : [];
+    const sourceCounts = dbCorpus.source_counts && typeof dbCorpus.source_counts === "object" ? dbCorpus.source_counts : {};
+    const chunkCounts = dbCorpus.chunk_counts && typeof dbCorpus.chunk_counts === "object" ? dbCorpus.chunk_counts : {};
+    const missingEmbeddingEntries = numberValue(dbCorpus.missing_embedding_index_entries);
+    const staleEmbeddingEntries = numberValue(dbCorpus.stale_embedding_index_entries);
+    const embeddingEntries = numberValue(dbCorpus.embedding_index_entries);
+    const indexableChunks = numberValue(dbCorpus.indexable_chunks);
+    const officialSources = numberValue(sourceCounts.official_docs);
+    const studySources = numberValue(sourceCounts.study_docs);
+    const officialChunks = numberValue(chunkCounts.official_docs);
+    const studyChunks = numberValue(chunkCounts.study_docs);
     return {
       database_runtime: runtime.database_runtime === true,
-      db_ready: dbCorpus.database === "postgres" || dbCorpus.ready === true,
-      pgvector_ready: dbCorpus.vector_backend === "pgvector" || dbCorpus.pgvector_ready === true,
-      embedding_index_parity: dbCorpus.embedding_index_parity === true,
+      db_ready: dbCorpus.ready === true && dbCorpus.database === "postgres",
+      pgvector_ready: dbCorpus.ready === true && (dbCorpus.pgvector_ready === true || dbCorpus.vector_backend === "pgvector"),
+      embedding_index_parity:
+        dbCorpus.embedding_index_parity === true &&
+        missingEmbeddingEntries === 0 &&
+        staleEmbeddingEntries === 0 &&
+        embeddingEntries !== null &&
+        embeddingEntries > 0 &&
+        indexableChunks !== null &&
+        indexableChunks > 0,
       compiled_wiki_ready: wikiStatus.compiled_wiki_ready === true || runtime.compiled_wiki_ready === true,
+      corpus_counts_ready:
+        officialSources !== null &&
+        officialSources > 0 &&
+        studySources !== null &&
+        studySources > 0 &&
+        officialChunks !== null &&
+        officialChunks > 0 &&
+        studyChunks !== null &&
+        studyChunks > 0,
       ready_scopes: readyScopes,
       db_corpus: dbCorpus,
       wiki_status: wikiStatus
@@ -1213,6 +1244,7 @@ function pbsRuntimeHealthReady(body) {
     readiness.pgvector_ready === true &&
     readiness.embedding_index_parity === true &&
     readiness.compiled_wiki_ready === true &&
+    readiness.corpus_counts_ready === true &&
     ["official_docs", "study_docs"].every((scope) => readyScopes.includes(scope))
   );
 }
@@ -1220,15 +1252,17 @@ function pbsRuntimeHealthReady(body) {
 function runPbsRuntimeHealthProbe(podName, bearerToken) {
   const probeUrl = `${String(pbsBaseUrl).replace(/\/+$/, "")}/api/health`;
   const script = [
-    "import json, sys, urllib.parse, urllib.request",
+    "import json, os, ssl, sys, urllib.parse, urllib.request",
     "config=json.loads(sys.stdin.read() or '{}')",
     "url=config.get('url')",
+    "service_ca='/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt'",
+    "ssl_context=ssl.create_default_context(cafile=service_ca) if os.path.isfile(service_ca) else ssl.create_default_context()",
     "headers={'Accept':'application/json'}",
     "token=config.get('token','')",
     "headers.update({'Authorization':'Bearer '+token} if token else {})",
     "def fetch_json(target):",
     "    request=urllib.request.Request(target,headers=headers)",
-    "    response=urllib.request.urlopen(request,timeout=10)",
+    "    response=urllib.request.urlopen(request,timeout=10,context=ssl_context)",
     "    text=response.read(1048576).decode('utf-8','replace')",
     "    return response.status, (json.loads(text) if text else {})",
     "try:",
@@ -1315,6 +1349,13 @@ function currentGitHead() {
   return result.ok ? result.stdout.trim() : "";
 }
 
+function currentGitFullHead() {
+  const result = run("git", ["rev-parse", "HEAD"]);
+  return result.ok ? result.stdout.trim() : "";
+}
+
+let releaseImagesEvidenceCurrent = false;
+
 function releaseEvidenceCywellSourceValid(evidence) {
   const source = evidence?.cywellSource ?? {};
   const remoteTime = evidenceTimeMs(source.remoteVerifiedAt);
@@ -1343,22 +1384,25 @@ function loadReleaseImagesEvidence() {
   try {
     const evidence = JSON.parse(readFileSync(releaseImagesEvidencePath, "utf8"));
     const head = currentGitHead();
-    const sourceEvidenceHead = String(evidence.sourceEvidenceHead ?? "");
+    const fullHead = currentGitFullHead();
+    const evidenceFullHead = String(evidence.fullHead ?? "");
+    const sourceEvidenceFullHead = String(evidence.sourceEvidenceFullHead ?? "");
     const valid =
       evidence.status === "PASS" &&
       evidence.namespace === namespace &&
       evidence.releaseTag === "v0.1.4" &&
-      (!head || evidence.head === head) &&
-      (!head || sourceEvidenceHead === head) &&
+      (!fullHead || evidenceFullHead === fullHead) &&
+      (!fullHead || sourceEvidenceFullHead === fullHead) &&
       evidence.staleEvidenceAllowed !== true &&
       releaseEvidenceCywellSourceValid(evidence) &&
       evidence.promotedImages &&
       typeof evidence.promotedImages === "object";
+    releaseImagesEvidenceCurrent = valid;
     expect(
       "cluster:release-images-evidence",
       valid,
       "release image promotion evidence is PASS, current-head, non-stale-source, namespace-scoped, and contains promoted image digests",
-      `${releaseImagesEvidencePath} must be PASS for namespace ${namespace}, current head ${head || "unknown"}, releaseTag v0.1.4, include promotedImages, sourceEvidenceHead must match current head, staleEvidenceAllowed must not be true, and cywellSource must prove the current HEAD is in an approved fetched origin/* ref`
+      `${releaseImagesEvidencePath} must be PASS for namespace ${namespace}, current full head ${fullHead || head || "unknown"}, releaseTag v0.1.4, include promotedImages, fullHead/sourceEvidenceFullHead must match current head, staleEvidenceAllowed must not be true, and cywellSource must prove the current HEAD is in an approved fetched origin/* ref`
     );
     if (requireCluster && evidence.clusterIdentity) {
       expect(
@@ -1368,7 +1412,7 @@ function loadReleaseImagesEvidence() {
         `${releaseImagesEvidencePath} cluster identity must match current context/server/namespace UID/infrastructure`
       );
     }
-    return valid ? evidence : null;
+    return evidence;
   } catch (error) {
     fail("cluster:release-images-evidence", `could not parse ${releaseImagesEvidencePath}: ${error.message}`);
     return null;
@@ -1623,10 +1667,7 @@ if (runtimeService) {
   if (selectorArg) {
     const runtimePods = getJson("cluster:pbs-runtime-pods", ["get", "pods", "-n", "playbookstudio", "-l", selectorArg]);
     if (runtimePods) {
-      const readyPods = (runtimePods.items ?? []).filter((pod) => {
-        const ready = (pod.status?.conditions ?? []).some((condition) => condition.type === "Ready" && condition.status === "True");
-        return pod.status?.phase === "Running" && ready;
-      });
+      const readyPods = (runtimePods.items ?? []).filter((pod) => podReady(pod));
       expect(
         "cluster:pbs-runtime-ready-pods",
         readyPods.length > 0 &&
@@ -1745,9 +1786,9 @@ if (overlay === "pbs-live") {
         );
         expect(
           `cluster:release-image-evidence:${imageName}:v0.1.4`,
-          Boolean(promotedDigest) && clusterDigest === promotedDigest,
+          releaseImagesEvidenceCurrent && Boolean(promotedDigest) && clusterDigest === promotedDigest,
           `${imageName}:v0.1.4 digest matches promoted release image evidence`,
-          `${imageName}:v0.1.4 digest ${clusterDigest || "missing"} must match promoted evidence digest ${promotedDigest || "missing"}`
+          `${imageName}:v0.1.4 digest ${clusterDigest || "missing"} must match current promoted evidence digest ${promotedDigest || "missing"}; regenerate ${releaseImagesEvidencePath} from a clean pushed HEAD if the evidence is stale`
         );
       }
     }

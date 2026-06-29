@@ -152,7 +152,7 @@ function ensureCasReplacesLightspeed() {
   const raw = run("oc", ["get", "console.operator.openshift.io", "cluster", "-o", "json"]);
   const parsed = JSON.parse(raw);
   const plugins = (Array.isArray(parsed?.spec?.plugins) ? parsed.spec.plugins : []).filter(
-    (plugin) => plugin !== "lightspeed-console-plugin"
+    (plugin) => plugin !== "lightspeed-console-plugin" && plugin !== "cywell-opslens"
   );
   if (!plugins.includes("cywell-ai-sentinel")) {
     plugins.push("cywell-ai-sentinel");

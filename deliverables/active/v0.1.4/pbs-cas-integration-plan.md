@@ -314,6 +314,7 @@ Delivered:
 - strict PBS preflight checks that all applied ingress NetworkPolicies selecting knowledge-engine pods only allow Gateway pods on TCP `8080`
 - `deploy:crc` starts OpenShift binary builds without `--follow --wait`, follows build logs separately, and polls final build phase to avoid cancellation after slow uploads
 - `release:crc:v0.1.4` is bound to current PASS CRC deployment evidence, refuses stale or wrong-HEAD evidence, records `promotedImages`, requires app release sources to match verified runtime digests, and records both the verified external Postgres digest and the promoted internal ImageStream digest
+- `deploy:pbs:runtime:crc` now performs a full CRC rehearsal of the approved PBS runtime overlay in namespace `playbookstudio`: source-bound local PBS runtime image build/reuse, ordered DB migration and seed replay from that image digest, pinned source overlay, graph foundation migration, explicit CRC wiki-loop compatibility hotfix stamp, HTTPS Service readiness, ready endpoint check, source revision check, ready runtime pod image digest binding, and `/api/health` readiness for DB, pgvector, zero missing/stale embedding entries, corpus/index counts, required scopes, and compiled wiki.
 
 Still required:
 
@@ -389,8 +390,9 @@ v0.1.4 currently proves:
 - CRC/local pgvector readiness plus rendered and strict-preflight checks for live Postgres service readiness; production live pgvector readiness still requires target-cluster apply and Secrets
 - smoke data persistence and owner-scoped query behavior
 - CRC `v0.1.4` release tags are promoted only from current verified runtime evidence with matching clean git HEAD and cluster identity, and strict live preflight compares applied release ImageStreamTag digests to `test-results/cas-release-images.json`
+- CRC `playbookstudio-runtime` PBS rehearsal with approved source SHA `6604777abb9e6bd44a83c6a12f36e31ac396489e`, Service DNS HTTPS readiness through the OpenShift service CA, official/study corpus readiness, and compiled Wiki readiness
 
-v0.1.4 does not yet prove a production PBS live deployment. Full parity still requires applying the PBS overlay against a real PBS runtime, supplying the Secret material outside git, running PBS migrations/indexers against the target database, and verifying live corpus answers against real customer data.
+v0.1.4 does not yet prove a production PBS live deployment. Full parity still requires applying the PBS overlay in the target production cluster, supplying approved Secret material outside git, refreshing clean-HEAD CRC deployment and release evidence after the final commit, pruning dev-only Secrets before pbs-live cutover, and verifying live corpus answers against real customer data.
 
 ## Phase 1 Implementation Notes
 
