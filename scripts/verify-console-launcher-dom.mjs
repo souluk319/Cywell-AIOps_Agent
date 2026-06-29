@@ -11,9 +11,11 @@ const requireBrowser = process.argv.includes("--require-browser");
 const calls = [];
 const failures = [];
 const pageErrors = [];
+let passCount = 0;
 
 function expect(id, condition, passDetail, failDetail = passDetail) {
   if (condition) {
+    passCount += 1;
     console.log(`[PASS] ${id}: ${passDetail}`);
   } else {
     failures.push({ id, detail: failDetail });
@@ -67,22 +69,9 @@ function harnessHtml() {
   <script>
     (async function mountPlugin() {
       const container = window.__cywellPluginContainer;
-      const modalRoots = new Map();
       const sdkModule = {
         useModal: function useModal() {
-          return function launchModal(Component, props, key) {
-            const modalKey = key || "default";
-            let entry = modalRoots.get(modalKey);
-            if (!entry) {
-              const mount = document.createElement("div");
-              mount.setAttribute("data-modal-key", modalKey);
-              document.getElementById("modal-root").appendChild(mount);
-              entry = { mount, root: window.ReactDOM.createRoot(mount) };
-              modalRoots.set(modalKey, entry);
-            }
-            window.__casLaunchCalls = (window.__casLaunchCalls || 0) + 1;
-            entry.root.render(window.React.createElement(Component, props || {}));
-          };
+          throw new Error("CAS launcher must be rendered by CASContextProvider, not by the modal API.");
         }
       };
       const reactShare = {
@@ -112,12 +101,19 @@ function harnessHtml() {
         }
       };
       await container.init(reactShare);
+      const providerFactory = await container.get("CASContextProvider");
+      const providerModule = providerFactory();
+      const CASContextProvider = providerModule.default || providerModule;
       const factory = await container.get("useCASLauncher");
       const module = factory();
       const useCASLauncher = module.useCASLauncher || module.default || module;
       function Harness() {
-        useCASLauncher();
-        return window.React.createElement("div", { "data-test": "launcher-hook-mounted" }, "mounted");
+        const value = useCASLauncher();
+        return window.React.createElement(
+          CASContextProvider,
+          { value: value },
+          window.React.createElement("div", { "data-test": "launcher-hook-mounted" }, "mounted")
+        );
       }
       let root = window.ReactDOM.createRoot(document.getElementById("root"));
       window.__rerenderLauncher = function rerenderLauncher() {
@@ -392,4 +388,4 @@ if (failures.length > 0) {
   console.error(`Console launcher DOM verification failed with ${failures.length} failures.`);
   process.exit(1);
 }
-console.log("Console launcher DOM verification passed with 10 checks.");
+console.log(`Console launcher DOM verification passed with ${passCount} checks.`);

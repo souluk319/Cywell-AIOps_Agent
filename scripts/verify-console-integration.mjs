@@ -27,6 +27,7 @@ function rejectText(id, text, needle, passDetail, failDetail = passDetail) {
 }
 
 const launcherSource = await readFile("apps/console-plugin/src/plugin/useCASLauncher.tsx", "utf8");
+const contextProviderSource = await readFile("apps/console-plugin/src/plugin/CASContextProvider.tsx", "utf8");
 const knowledgeRouteSource = await readFile("apps/console-plugin/src/plugin/CywellKnowledgeRoute.tsx", "utf8");
 const staticAppSource = await readFile("apps/console-plugin/src/static/app.js", "utf8");
 const manifest = await readFile("apps/console-plugin/dist/plugin-manifest.json", "utf8");
@@ -87,6 +88,18 @@ expectText(
   launcherSource,
   "data-cas-suppressed-lightspeed",
   "launcher suppresses the native OpenShift Lightspeed floating launcher while CAS is mounted"
+);
+rejectText(
+  "console-chat:no-modal-launcher-api",
+  launcherSource,
+  "useModal",
+  "launcher is rendered by the context provider instead of the OpenShift modal API"
+);
+expectText(
+  "console-chat:provider-renders-launcher",
+  contextProviderSource,
+  "<CASLauncher />",
+  "context provider renders the persistent Cywell launcher globally"
 );
 expectText(
   "console-chat:usertoken-copy",

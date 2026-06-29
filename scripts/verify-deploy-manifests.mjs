@@ -28,6 +28,7 @@ const files = [
   "deploy/kustomize/overlays/pbs-live/knowledge-postgres-live-secretrefs-patch.yaml",
   "package.json",
   "scripts/deploy-crc-dev.mjs",
+  "scripts/deploy-pbs-runtime-crc.mjs",
   "scripts/promote-crc-release-images.mjs",
   "scripts/verify-crc-deployment.mjs",
   "scripts/verify-pbs-live-smoke.mjs",
@@ -36,11 +37,14 @@ const files = [
   "scripts/render-pbs-cutover-bundle.mjs",
   "scripts/verify-pbs-source-contract.mjs",
   "scripts/verify-console-launcher-dom.mjs",
+  "scripts/verify-console-integration.mjs",
   "apps/gateway/src/server.mjs",
   "apps/knowledge-engine/src/cas_knowledge_engine/engine.py",
   "apps/knowledge-engine/src/cas_knowledge_engine/pbs_client.py",
   "apps/knowledge-engine/src/cas_knowledge_engine/storage.py",
   "apps/knowledge-engine/src/cas_knowledge_engine/selftest.py",
+  "apps/console-plugin/src/plugin/CASContextProvider.tsx",
+  "apps/console-plugin/src/plugin/useCASLauncher.tsx",
   "apps/console-plugin/console-extensions.json"
 ];
 
@@ -1124,6 +1128,54 @@ for (const file of files) {
         "CRC deploy script must stamp workload pod templates with git source annotations and refuse dirty tracked trees by default"
       );
     }
+    if (file.includes("deploy-pbs-runtime-crc")) {
+      expect(
+        "pbs-runtime-crc-deploy:approved-source-gate",
+        text.includes("approvedPbsSourceHead") &&
+          text.includes("6604777abb9e6bd44a83c6a12f36e31ac396489e") &&
+          text.includes("CAS_PBS_SOURCE_DIR") &&
+          text.includes("pbs-runtime-crc:approved-source-head") &&
+          text.includes("pbs-runtime-crc:source-clean"),
+        "PBS runtime CRC bootstrap verifies the approved clean PBS source before applying the overlay",
+        "PBS runtime CRC bootstrap must verify approved clean PBS source before applying"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:secret-redaction",
+        text.includes("playbookstudio-secret") &&
+          text.includes("POSTGRES_PASSWORD") &&
+          text.includes("OCP_API_TOKEN") &&
+          text.includes("OPENSHIFT_LIGHTSPEED_API_TOKEN") &&
+          text.includes("redacted-secret-evidence") &&
+          text.includes("postgresPasswordSha256") &&
+          text.includes("ocpTokenSha256") &&
+          !text.includes("console.log(postgresPassword)") &&
+          !text.includes("console.log(ocpToken)"),
+        "PBS runtime CRC bootstrap creates local Secret material and records only redacted hashes",
+        "PBS runtime CRC bootstrap must create local Secret material without logging raw values"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:overlay-and-source-stamp",
+        text.includes("openshift-cywell-v014") &&
+          text.includes("oc\", [\"apply\", \"-k\", overlayPath]") &&
+          text.includes("PLAYBOOKSTUDIO_SOURCE_HEAD") &&
+          text.includes("cywell.ai/pbs-source-head") &&
+          text.includes("org.opencontainers.image.revision") &&
+          text.includes("playbookstudio-runtime") &&
+          text.includes("runtime-service-contract"),
+        "PBS runtime CRC bootstrap applies the PBS overlay and stamps runtime pods with the approved source SHA",
+        "PBS runtime CRC bootstrap must apply overlay, stamp source env/annotations, and verify runtime Service contract"
+      );
+      expect(
+        "pbs-runtime-crc-deploy:evidence",
+        text.includes("cas-pbs-runtime-crc-deployment.json") &&
+          text.includes("summary") &&
+          text.includes("overlayPath") &&
+          text.includes("pbsSource") &&
+          text.includes("runtime-endpoints-ready"),
+        "PBS runtime CRC bootstrap writes deployment evidence for downstream live blocker analysis",
+        "PBS runtime CRC bootstrap must write redacted evidence with source, overlay, summary, and endpoint checks"
+      );
+    }
     if (file === "package.json") {
       if (
         text.includes('"verify:console:topology-dom"') &&
@@ -1236,7 +1288,7 @@ for (const file of files) {
       }
       if (
         text.includes('"verify:pbs:preflight:live:site:preapply"') &&
-        text.includes("--overlay-path=test-results/pbs-live-prereqs/pbs-live-site") &&
+        text.includes("--overlay-path=live-prereqs-site") &&
         text.includes('"verify:pbs:preflight:live:site"')
       ) {
         pass("package:pbs-live-site-preflight-script", "package.json exposes strict PBS live preflight against generated site overlay");
@@ -1247,6 +1299,11 @@ for (const file of files) {
         pass("package:release-crc-script", "package.json exposes CRC release image promotion");
       } else {
         fail("package:release-crc-script", "package.json must expose CRC release image promotion");
+      }
+      if (text.includes('"deploy:pbs:runtime:crc"') && text.includes("deploy-pbs-runtime-crc.mjs")) {
+        pass("package:pbs-runtime-crc-deploy-script", "package.json exposes CRC PBS runtime bootstrap with source stamping");
+      } else {
+        fail("package:pbs-runtime-crc-deploy-script", "package.json must expose deploy:pbs:runtime:crc for PBS runtime overlay bootstrap");
       }
       if (text.includes('"verify:pbs:source-contract"') && text.includes("verify-pbs-source-contract.mjs")) {
         pass("package:pbs-source-contract-script", "package.json exposes PBS source contract verification");
@@ -1297,6 +1354,11 @@ for (const file of files) {
           text.includes("sha256(inputs.token)") &&
           text.includes("sha256(inputs.ownerHmacSecret)") &&
           text.includes("passwordSha256") &&
+          text.includes("databaseUrlSha256") &&
+          text.includes("assertRealOutputAllowed") &&
+          text.includes("CAS_PBS_LIVE_PREREQS_OUT_DIR") &&
+          text.includes("CAS_PBS_LIVE_PREREQS_ALLOW_REPO_OUTPUT") &&
+          text.includes("refusing to write raw live Secret manifests inside the repository") &&
           text.includes("cas-pbs-live-prereqs-render.json") &&
           text.includes("fullHead") &&
           text.includes("treeStatus") &&
@@ -1313,6 +1375,8 @@ for (const file of files) {
         "pbs-live-prereqs:self-test",
         text.includes("--self-test") &&
           text.includes("site-overlay-render") &&
+          text.includes("repo-raw-output-rejected") &&
+          text.includes("repo-root-output-rejected") &&
           text.includes("bad-owner-hmac-rejected") &&
           text.includes("wildcard-acl-rejected") &&
           text.includes("string-wildcard-acl-rejected") &&
@@ -1433,8 +1497,14 @@ for (const file of files) {
           text.includes("resolvedPathUnder") &&
           text.includes("isAbsolute") &&
           text.includes("renderedSiteOverlayHash") &&
+          text.includes("generatedSiteOverlayPath") &&
           text.includes("evidence.renderedSiteOverlaySha256 === livePrereqsRender?.renderedSiteOverlaySha256") &&
           text.includes("clusterEvidenceFailures") &&
+          text.includes("cas-pbs-live-smoke-cluster-cutover.json") &&
+          text.includes("live-cluster-cutover-smoke-missing") &&
+          text.includes("live-cluster-cutover-smoke-write-lineage") &&
+          text.includes("live-cluster-cutover-smoke-lineage-check") &&
+          text.includes("pbs-live:cluster-write-lineage") &&
           text.includes("CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON") &&
           text.includes("expected-live-cluster-required") &&
           text.includes("clusterIdentityMatches") &&
@@ -1476,6 +1546,7 @@ for (const file of files) {
           text.includes("self-test-source-contract-hash-set-rejected") &&
           text.includes("self-test-source-remote-proof-rejected") &&
           text.includes("self-test-stale-source-proof-rejected") &&
+          text.includes("self-test-live-ready-smoke-required") &&
           text.includes("self-test-prereq-self-test-rejected") &&
           text.includes("self-test-prereq-output-dir-rejected") &&
           text.includes("self-test-fail-retains-external-blockers"),
@@ -1487,7 +1558,9 @@ for (const file of files) {
       expect(
         "console-launcher-dom:browser-contract",
           text.includes("useCASLauncher") &&
+          text.includes("CASContextProvider") &&
           text.includes("@openshift-console/dynamic-plugin-sdk") &&
+          text.includes("CAS launcher must be rendered by CASContextProvider") &&
           text.includes("cas-launcher-button") &&
           text.includes("console-launcher-dom:bottom-right-fixed") &&
           text.includes("console-launcher-dom:native-lightspeed-suppressed") &&
@@ -1499,8 +1572,42 @@ for (const file of files) {
           text.includes("/api/aiops/brainz") &&
           text.includes("/api/aiops/query") &&
           text.includes("console-launcher-dom:conversation-preserved"),
-        "CAS launcher browser harness checks modal hook, native Lightspeed suppression, bottom-right button, query flow, and conversation preservation",
+        "CAS launcher browser harness checks provider rendering, native Lightspeed suppression, bottom-right button, query flow, and conversation preservation",
         "CAS launcher browser harness must verify the runtime launcher, not only source/bundle strings"
+      );
+    }
+    if (file.includes("verify-console-integration")) {
+      expect(
+        "console-integration:launcher-provider-contract",
+        text.includes("console-chat:no-modal-launcher-api") &&
+          text.includes("console-chat:provider-renders-launcher") &&
+          text.includes("CASContextProvider.tsx") &&
+          text.includes("<CASLauncher />"),
+        "console integration verification rejects modal-mounted launchers and requires provider-rendered CAS launcher",
+        "console integration verification must prove the CAS launcher is provider-rendered, not modal-mounted"
+      );
+    }
+    if (file.includes("CASContextProvider.tsx")) {
+      expect(
+        "console-context-provider:renders-launcher",
+        text.includes('import { CASLauncher } from "./useCASLauncher"') &&
+          text.includes("<CASLauncher />") &&
+          text.includes("{children}"),
+        "CAS context provider renders the persistent launcher alongside console children",
+        "CAS context provider must render the persistent launcher alongside console children"
+      );
+    }
+    if (file.includes("useCASLauncher.tsx")) {
+      expect(
+        "console-launcher-source:provider-owned",
+        text.includes("export function CASLauncher()") &&
+          text.includes('data-test="cas-launcher-root"') &&
+          text.includes('data-test="cas-launcher-button"') &&
+          text.includes("data-cas-suppressed-lightspeed") &&
+          text.includes("export function useCASLauncher()") &&
+          !text.includes("useModal"),
+        "CAS launcher source exports a provider-owned persistent launcher and does not depend on the modal API",
+        "CAS launcher source must be provider-owned and must not depend on the modal API"
       );
     }
     if (file.includes("promote-crc-release-images")) {
@@ -1599,8 +1706,27 @@ for (const file of files) {
       );
       expect(
         "pbs-live-smoke:mode-specific-evidence",
-        text.includes("evidenceMode") && text.includes("cas-pbs-live-smoke-${evidenceMode}.json"),
-        "PBS live smoke writes mode-specific evidence artifacts"
+          text.includes("evidenceMode") &&
+          text.includes('clusterSmoke && cutover ? "cluster-cutover"') &&
+          text.includes('clusterSmoke ? "cluster-diagnostic"') &&
+          text.includes("cas-pbs-live-smoke-${evidenceMode}.json") &&
+          text.includes("fullHead") &&
+          text.includes("treeStatus") &&
+          text.includes("mode: evidenceMode") &&
+          text.includes("cutover") &&
+          text.includes("writeSmoke") &&
+          text.includes("clusterIdentity: currentClusterIdentity()"),
+        "PBS live smoke writes mode-specific current-source and cluster-identity evidence artifacts"
+      );
+      expect(
+        "pbs-live-smoke:no-secret-argv",
+        text.includes('"exec", "-i"') &&
+          text.includes("nodeStdinBootstrap") &&
+          text.includes('"node", "-e", nodeStdinBootstrap') &&
+          text.includes("JSON.stringify({ code, input })") &&
+          text.includes("globalThis.__casInput") &&
+          !text.includes("const smokeToken=${JSON.stringify(smokeToken)}"),
+        "PBS live cluster smoke passes token-bearing payload through stdin, not process argv"
       );
       if (text.includes("compiled_wiki_ready") && text.includes("cutover-topology-ready")) {
         pass("pbs-live-smoke:readiness-topology", "PBS live smoke checks compiled wiki and cutover topology readiness");
@@ -1642,8 +1768,12 @@ for (const file of files) {
         text.includes("cluster:pbs-runtime-service-endpoints-ready") &&
         text.includes("cluster:pbs-runtime-health-ready") &&
         text.includes("runPbsRuntimeHealthProbe") &&
+        text.includes('"exec",') &&
+        text.includes('"-i"') &&
         text.includes("pbsRuntimeHealthReady") &&
         text.includes("pbsRuntimeHealthEvidence") &&
+        text.includes("db_corpus") &&
+        text.includes("/api/wiki-loop/status?user_id=local") &&
         text.includes("Number(port.port) === 8765") &&
         text.includes("pbsBaseUrlTargetsRuntimeService")
       ) {
@@ -1673,6 +1803,7 @@ for (const file of files) {
         text.includes("CAS_PBS_PREFLIGHT_OVERLAY_PATH") &&
         text.includes("currentClusterIdentity") &&
         text.includes("cluster:release-images-evidence-cluster-identity") &&
+        text.includes("remoteTime <= Date.parse(checkedAt) + maxEvidenceFutureSkewMs") &&
         text.includes("evidenceSuffix") &&
         text.includes("service-token-transport") &&
         text.includes("appliedPbsEgressScoped") &&
@@ -1691,6 +1822,12 @@ for (const file of files) {
         text.includes("cluster:knowledge-postgres-live-secret-content") &&
         text.includes("cluster:pbs-auth-secret-content") &&
         text.includes("cluster:internal-owner-auth-secret-content") &&
+        text.includes("livePrereqSecretHashBinding") &&
+        text.includes("cluster:live-prereq-secret-hash-binding") &&
+        text.includes("input: JSON.stringify({ url: probeUrl, token: bearerToken || \"\" })") &&
+        text.includes("DATABASE_URL=$(cat); export DATABASE_URL;") &&
+        text.includes("CAS_PBS_LIVE_PREREQS_EVIDENCE") &&
+        text.includes("databaseUrlSha256") &&
         text.includes("ownerHmacSecretLooksUsable") &&
         text.includes("statefulSetReady") &&
         text.includes("readyPodsUsePromotedDigest") &&

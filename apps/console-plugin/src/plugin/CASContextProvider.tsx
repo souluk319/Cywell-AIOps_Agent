@@ -1,4 +1,5 @@
 import * as React from "react";
+import { CASLauncher } from "./useCASLauncher";
 
 type CASContextProviderProps = {
   children?: React.ReactNode;
@@ -6,5 +7,10 @@ type CASContextProviderProps = {
 };
 
 export default function CASContextProvider({ children }: CASContextProviderProps) {
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <CASLauncher />
+    </>
+  );
 }

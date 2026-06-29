@@ -40,6 +40,12 @@ const livePreapplyEvidence = [
   "strict PBS live generated-site pre-apply evidence"
 ];
 
+const liveClusterCutoverEvidence = [
+  "liveClusterCutover",
+  "cas-pbs-live-smoke-cluster-cutover.json",
+  "strict PBS live cluster cutover smoke evidence"
+];
+
 const expectedLivePrereqOutputDir = "test-results/pbs-live-prereqs";
 const expectedGeneratedSiteOverlayPath = "test-results/pbs-live-prereqs/pbs-live-site";
 const requiredLivePrereqOutputFileKeys = [
@@ -181,6 +187,11 @@ function readEvidence(baseDir, [key, fileName, label]) {
     fullHead: json.fullHead,
     treeStatus: json.treeStatus,
     mode: json.mode,
+    evidenceMode: json.evidenceMode,
+    cutover: json.cutover,
+    clusterSmoke: json.clusterSmoke,
+    writeSmoke: json.writeSmoke,
+    readOnlyException: json.readOnlyException,
     namespace: json.namespace,
     releaseTag: json.releaseTag,
     sourceClusterIdentity: json.sourceClusterIdentity,
@@ -201,6 +212,8 @@ function readEvidence(baseDir, [key, fileName, label]) {
     requireExpectedHead: json.requireExpectedHead,
     summary: json.summary ?? {},
     clusterIdentity: json.clusterIdentity,
+    checkStatuses: checks.map((check) => ({ id: String(check.id ?? ""), status: String(check.status ?? "") })),
+    passedCheckIds: checks.filter((check) => check?.status === "PASS").map((check) => String(check.id ?? "")),
     pbsSource: json.pbsSource
       ? {
           branch: json.pbsSource.branch,
@@ -263,11 +276,14 @@ function commandPlan() {
     "npm run verify",
     "npm run deploy:crc",
     "$env:CAS_RELEASE_FORCE=\"true\"; npm run release:crc:v0.1.4",
+    "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR=\"C:\\\\secure-handoff\\\\pbs-live-prereqs\"",
     "npm run render:pbs:live-prereqs",
     "$env:CAS_PBS_SOURCE_HEAD=\"<approved PBS full git SHA>\"; npm run verify:release:source-pinning",
     "npm run verify:pbs:preflight:live:site:preapply",
+    "oc apply -k \"$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\\pbs-live-site\"",
+    "npm run verify:pbs:preflight:live:site",
+    "npm run verify:pbs:cutover:cluster",
     "node ./scripts/render-pbs-cutover-bundle.mjs --require-live-ready",
-    "oc apply -k .\\test-results\\pbs-live-prereqs\\pbs-live-site",
     "npm run verify:release:pbs-live"
   ];
 }
@@ -348,12 +364,13 @@ function releaseImagesCywellSourcePinned(evidence) {
   );
 }
 
-function clusterEvidenceFailures(artifacts) {
+function clusterEvidenceFailures(artifacts, liveReadyRequired = requireLiveReady) {
   const failures = [];
   const clusterArtifacts = [
     ["crcDeployment", artifacts.crcDeployment],
     ["releaseImages", artifacts.releaseImages],
-    ["livePreapply", artifacts.livePreapply]
+    ["livePreapply", artifacts.livePreapply],
+    ["liveClusterCutover", artifacts.liveClusterCutover]
   ].filter(([, evidence]) => evidence?.exists);
   const anchor = artifacts.crcDeployment?.exists ? artifacts.crcDeployment : clusterArtifacts.find(([, evidence]) => completeClusterIdentity(evidence.clusterIdentity))?.[1];
   if (!anchor) return failures;
@@ -365,7 +382,7 @@ function clusterEvidenceFailures(artifacts) {
     return failures;
   }
   const expectedClusterIdentity = expectedLiveClusterIdentity();
-  if (requireLiveReady && !expectedClusterIdentityJson) {
+  if (liveReadyRequired && !expectedLiveClusterIdentityJson) {
     failures.push({
       id: "cutover-bundle:expected-live-cluster-required",
       detail: "CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON must be set for --require-live-ready so live cutover evidence cannot be assembled for the wrong cluster or namespace"
@@ -431,8 +448,13 @@ function resolvedPathUnder(baseDir, recordedPath, expectedDir) {
   return Boolean(pathRelativeToRoot) && !pathRelativeToRoot.startsWith("..") && !isAbsolute(pathRelativeToRoot);
 }
 
-function renderedSiteOverlayHash(baseDir) {
-  const overlayPath = resolveEvidencePath(baseDir, expectedGeneratedSiteOverlayPath);
+function generatedSiteOverlayPath(livePrereqsRender = {}) {
+  const outputDir = normalizePath(livePrereqsRender.outputDir || expectedLivePrereqOutputDir).replace(/\/+$/, "");
+  return normalizePath(`${outputDir}/pbs-live-site`);
+}
+
+function renderedSiteOverlayHash(baseDir, siteOverlayPath = expectedGeneratedSiteOverlayPath) {
+  const overlayPath = resolveEvidencePath(baseDir, siteOverlayPath);
   const attempts = [
     ["oc", ["kustomize", overlayPath]],
     ["kubectl", ["kustomize", overlayPath]]
@@ -458,14 +480,15 @@ function hasRealRenderHashes(evidence, baseDir) {
   const fileKeys = files && typeof files === "object" ? Object.keys(files).sort() : [];
   const expectedKeys = [...requiredLivePrereqOutputFileKeys].sort();
   const outputDir = normalizePath(evidence.outputDir);
+  const siteOverlayPath = generatedSiteOverlayPath(evidence);
   const pathUnder = (file, expectedDir) => {
     return file?.underOutputDir === true && resolvedPathUnder(baseDir, file?.path, expectedDir);
   };
-  const allFilesUnderOutputDir = Object.values(files ?? {}).every((file) => pathUnder(file, expectedLivePrereqOutputDir));
-  const siteFilesUnderGeneratedOverlay = ["siteKustomization", "siteCustomerAccessJson"].every((key) => pathUnder(files?.[key], expectedGeneratedSiteOverlayPath));
+  const allFilesUnderOutputDir = outputDir && Object.values(files ?? {}).every((file) => pathUnder(file, outputDir));
+  const siteFilesUnderGeneratedOverlay = ["siteKustomization", "siteCustomerAccessJson"].every((key) => pathUnder(files?.[key], siteOverlayPath));
   return (
     evidence.mode === "real-render" &&
-    outputDir === expectedLivePrereqOutputDir &&
+    Boolean(outputDir) &&
     typeof evidence.renderedSiteOverlaySha256 === "string" &&
     evidence.renderedSiteOverlaySha256.length >= 32 &&
     typeof evidence.redactedSummarySha256 === "string" &&
@@ -478,19 +501,20 @@ function hasRealRenderHashes(evidence, baseDir) {
     allFilesUnderOutputDir &&
     siteFilesUnderGeneratedOverlay &&
     recordedFileHashesMatch(evidence, baseDir) &&
-    evidence.renderedSiteOverlaySha256 === renderedSiteOverlayHash(baseDir) &&
+    evidence.renderedSiteOverlaySha256 === renderedSiteOverlayHash(baseDir, siteOverlayPath) &&
     sha256File(resolveEvidencePath(baseDir, files.summary.path)) === evidence.redactedSummarySha256
   );
 }
 
 function isStrictGeneratedSitePreapply(evidence, meta, livePrereqsRender, baseDir) {
-  const currentSiteOverlayHash = renderedSiteOverlayHash(baseDir);
+  const siteOverlayPath = generatedSiteOverlayPath(livePrereqsRender);
+  const currentSiteOverlayHash = renderedSiteOverlayHash(baseDir, siteOverlayPath);
   return Boolean(
     evidence.exists &&
       evidence.fullHead === meta.fullHead &&
       evidence.treeStatus === "clean" &&
       evidence.overlay === "pbs-live" &&
-      normalizePath(evidence.overlayPath) === expectedGeneratedSiteOverlayPath &&
+      normalizePath(evidence.overlayPath) === siteOverlayPath &&
       evidence.renderedSiteOverlaySha256 &&
       evidence.renderedSiteOverlaySha256 === livePrereqsRender?.renderedSiteOverlaySha256 &&
       evidence.renderedSiteOverlaySha256 === currentSiteOverlayHash &&
@@ -544,9 +568,10 @@ function livePreapplyRuntimeSourceMatches(livePreapply, sourceContract) {
   );
 }
 
-function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
+function buildBundle(baseDir = evidenceDir, meta = gitMetadata(), options = {}) {
+  const liveReadyRequired = options.requireLiveReady ?? requireLiveReady;
   const artifacts = Object.fromEntries(
-    [...requiredLocalEvidence, livePreapplyEvidence].map((descriptor) => {
+    [...requiredLocalEvidence, livePreapplyEvidence, liveClusterCutoverEvidence].map((descriptor) => {
       const evidence = readEvidence(baseDir, descriptor);
       return [evidence.key, evidence];
     })
@@ -556,7 +581,7 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
   if (meta.treeStatus !== "clean" && !allowDirty) {
     localGateFailures.push({ id: "cutover-bundle:git-tree-clean", detail: "current git tree is dirty; commit and rerun release evidence before bundling cutover proof" });
   }
-  if (requireLiveReady && allowDirty) {
+  if (liveReadyRequired && allowDirty) {
     localGateFailures.push({ id: "cutover-bundle:allow-dirty-live-ready", detail: "live-ready cutover bundles cannot be rendered with --allow-dirty or CAS_PBS_CUTOVER_BUNDLE_ALLOW_DIRTY" });
   }
   for (const [key] of requiredLocalEvidence) {
@@ -570,7 +595,7 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
       localGateFailures.push({ id: `cutover-bundle:${key}:head`, detail: `${evidence.fileName} head ${evidence.head || evidence.fullHead || "missing"} does not match current HEAD ${meta.head}` });
     }
   }
-  localGateFailures.push(...clusterEvidenceFailures(artifacts));
+  localGateFailures.push(...clusterEvidenceFailures(artifacts, liveReadyRequired));
   const livePrereqsRender = artifacts.livePrereqsRender;
   if (livePrereqsRender?.exists && !hasRealRenderHashes(livePrereqsRender, baseDir)) {
     localGateFailures.push({
@@ -602,7 +627,7 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
   if (livePreapply?.exists && !isStrictGeneratedSitePreapply(livePreapply, meta, livePrereqsRender, baseDir)) {
     localGateFailures.push({
       id: "cutover-bundle:live-preapply-generated-site",
-      detail: `${livePreapply.fileName} must be current clean generated-site preapply evidence for ${expectedGeneratedSiteOverlayPath} with cluster, required-secret, skip-applied flags, and the same rendered site-overlay hash as current live prerequisite evidence`
+      detail: `${livePreapply.fileName} must be current clean generated-site preapply evidence for ${generatedSiteOverlayPath(livePrereqsRender)} with cluster, required-secret, skip-applied flags, and the same rendered site-overlay hash as current live prerequisite evidence`
     });
   }
   if (livePreapply?.exists && !livePreapplyTimingValid(livePreapply, livePrereqsRender, artifacts.releaseImages)) {
@@ -610,6 +635,59 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
       id: "cutover-bundle:live-preapply-fresh",
       detail: `${livePreapply.fileName} must be newer than release/prereq evidence and no older than ${maxLivePreapplyAgeMinutes} minutes`
     });
+  }
+  const liveClusterCutover = artifacts.liveClusterCutover;
+  if (liveReadyRequired) {
+    if (!liveClusterCutover?.exists) {
+      localGateFailures.push({
+        id: "cutover-bundle:live-cluster-cutover-smoke-missing",
+        detail: `${liveClusterCutoverEvidence[1]} is required for --require-live-ready so the bundle proves post-apply upload -> RAG -> LLM Wiki -> topology lineage`
+      });
+    } else if (liveClusterCutover.status !== "PASS") {
+      localGateFailures.push({
+        id: "cutover-bundle:live-cluster-cutover-smoke-status",
+        detail: `${liveClusterCutover.fileName} status is ${liveClusterCutover.status}, expected PASS`
+      });
+    }
+    if (liveClusterCutover?.exists && liveClusterCutover.mode !== "cluster-cutover") {
+      localGateFailures.push({
+        id: "cutover-bundle:live-cluster-cutover-smoke-mode",
+        detail: `${liveClusterCutover.fileName} must be generated by verify-pbs-live-smoke.mjs --cutover --cluster`
+      });
+    }
+    if (
+      liveClusterCutover?.exists &&
+      (liveClusterCutover.cutover !== true ||
+        liveClusterCutover.clusterSmoke !== true ||
+        liveClusterCutover.writeSmoke !== true ||
+        liveClusterCutover.readOnlyException === true)
+    ) {
+      localGateFailures.push({
+        id: "cutover-bundle:live-cluster-cutover-smoke-write-lineage",
+        detail: `${liveClusterCutover.fileName} must be generated by write-enabled verify-pbs-live-smoke.mjs --cutover --cluster without a read-only exception`
+      });
+    }
+    if (
+      liveClusterCutover?.exists &&
+      !liveClusterCutover.checkStatuses?.some((check) => check.id === "pbs-live:cluster-write-lineage" && check.status === "PASS")
+    ) {
+      localGateFailures.push({
+        id: "cutover-bundle:live-cluster-cutover-smoke-lineage-check",
+        detail: `${liveClusterCutover.fileName} must include PASS pbs-live:cluster-write-lineage evidence for upload -> RAG -> LLM Wiki -> topology lineage`
+      });
+    }
+    if (liveClusterCutover?.exists && !currentHeadMatches(liveClusterCutover, meta)) {
+      localGateFailures.push({
+        id: "cutover-bundle:live-cluster-cutover-smoke-head",
+        detail: `${liveClusterCutover.fileName} head ${liveClusterCutover.head || liveClusterCutover.fullHead || "missing"} does not match current HEAD ${meta.head}`
+      });
+    }
+    if (liveClusterCutover?.exists && liveClusterCutover.treeStatus !== "clean") {
+      localGateFailures.push({
+        id: "cutover-bundle:live-cluster-cutover-smoke-clean-source",
+        detail: `${liveClusterCutover.fileName} must be produced from a clean git tree; found ${liveClusterCutover.treeStatus || "missing"}`
+      });
+    }
   }
   const liveBlockers = livePreapply.failedChecks ?? [];
   const localActions = uniqueActions(localGateFailures);
@@ -657,7 +735,7 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
     head: meta.head,
     fullHead: meta.fullHead,
     treeStatus: meta.treeStatus,
-    requireLiveReady,
+    requireLiveReady: liveReadyRequired,
     artifacts,
     artifactSummary,
     localGateFailures,
@@ -669,7 +747,7 @@ function buildBundle(baseDir = evidenceDir, meta = gitMetadata()) {
       "This bundle contains redacted evidence metadata and hashes only; raw Secret values are not copied.",
       "BLOCKED means CRC/release evidence is coherent but strict live pre-apply still needs external PBS runtime or Secret state.",
       "FAIL/local-evidence-invalid means local proof is not live-ready yet; external live pre-apply blockers are still reported separately when evidence exists.",
-      "PASS means local evidence is current and strict live pre-apply evidence is also PASS; live apply still requires verify:release:pbs-live after mutation."
+      "PASS means local evidence is current and strict live pre-apply evidence is PASS; --require-live-ready additionally requires cluster cutover smoke evidence for upload -> RAG -> LLM Wiki -> topology lineage."
     ]
   };
 }
@@ -828,6 +906,18 @@ async function runSelfTest() {
         ],
         ...extra
       });
+    const writeLiveClusterCutoverEvidence = (extra = {}) =>
+      write("cas-pbs-live-smoke-cluster-cutover.json", {
+        ...base,
+        mode: "cluster-cutover",
+        evidenceMode: "cluster-cutover",
+        cutover: true,
+        clusterSmoke: true,
+        writeSmoke: true,
+        summary: { total: 1, passed: 1, failed: 0 },
+        checks: [{ status: "PASS", id: "pbs-live:cluster-write-lineage", detail: "upload -> RAG -> LLM Wiki -> topology lineage passed" }],
+        ...extra
+      });
     for (const [, fileName] of requiredLocalEvidence) write(fileName, base);
     writeLivePrereqEvidence();
     write("cas-pbs-source-contract-pinned.json", {
@@ -845,7 +935,47 @@ async function runSelfTest() {
       ["cutover-bundle:self-test-status", bundle.status === "BLOCKED", "fixture with external live blockers renders BLOCKED"],
       ["cutover-bundle:self-test-blockers", bundle.blockers.length === 2 && bundle.nextActions.length >= 2, "fixture extracts live preapply blockers and next actions"],
       ["cutover-bundle:self-test-redaction", !/raw-secret-value|password-value|owner-hmac-secret-value/.test(text), "bundle does not copy raw Secret material"],
-      ["cutover-bundle:self-test-artifact-hashes", bundle.artifactSummary.every((artifact) => artifact.sha256), "bundle records artifact hashes"],
+      ["cutover-bundle:self-test-artifact-hashes", bundle.artifactSummary.filter((artifact) => artifact.exists).every((artifact) => artifact.sha256), "bundle records artifact hashes for every present artifact"],
+      [
+        "cutover-bundle:self-test-live-ready-smoke-required",
+        (() => {
+          writeLivePreapplyEvidence({
+            status: "PASS",
+            summary: { total: 1, passed: 1, failed: 0 },
+            checks: [{ status: "PASS", id: "preflight:ready", detail: "ready" }]
+          });
+          const missingSmoke = buildBundle(
+            tempRoot,
+            { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" },
+            { requireLiveReady: true }
+          );
+          writeLiveClusterCutoverEvidence({
+            cutover: false,
+            writeSmoke: false,
+            checks: [{ status: "SKIP", id: "pbs-live:cluster-write-smoke", detail: "write smoke skipped" }]
+          });
+          const weakSmoke = buildBundle(
+            tempRoot,
+            { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" },
+            { requireLiveReady: true }
+          );
+          writeLiveClusterCutoverEvidence();
+          const validSmoke = buildBundle(
+            tempRoot,
+            { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" },
+            { requireLiveReady: true }
+          );
+          writeLivePreapplyEvidence();
+          return (
+            missingSmoke.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:live-cluster-cutover-smoke-missing") &&
+            weakSmoke.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:live-cluster-cutover-smoke-write-lineage") &&
+            weakSmoke.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:live-cluster-cutover-smoke-lineage-check") &&
+            !validSmoke.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:live-cluster-cutover-smoke-missing") &&
+            !validSmoke.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:live-cluster-cutover-smoke-lineage-check")
+          );
+        })(),
+        "fixture requires cluster cutover smoke evidence before --require-live-ready can pass"
+      ],
       [
         "cutover-bundle:self-test-prereq-hash-drift-rejected",
         (() => {

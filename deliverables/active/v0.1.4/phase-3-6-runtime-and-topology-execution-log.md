@@ -4,7 +4,7 @@
 
 Implemented after the parallel console/cutover/evidence review pass:
 
-- The CAS launcher now has a browser-backed DOM harness that mounts the real console context-provider hook, suppresses a pre-existing OpenShift Lightspeed launcher, proves exactly one bottom-right `cas-launcher-button` is rendered in the real corner, opens the CAS panel, calls Gateway brain readiness, posts read-only query bodies through `/api/aiops/query`, preserves `conversation_id`, and reports browser/page errors.
+- The CAS launcher now renders directly from `CASContextProvider` instead of the OpenShift modal API. The browser-backed DOM harness mounts the real context provider plus hook, rejects modal-mounted launcher regressions, suppresses a pre-existing OpenShift Lightspeed launcher, proves exactly one bottom-right `cas-launcher-button` is rendered in the real corner, opens the CAS panel, calls Gateway brain readiness, posts read-only query bodies through `/api/aiops/query`, preserves `conversation_id`, and reports browser/page errors.
 - Native OpenShift Lightspeed suppression now resolves child/title/class matches to the nearest launcher control/root and covers late-inserted `lightspeed`/`ols` variants, so Cywell's launcher does not coexist with a changed native launcher selector.
 - Invalid bare `document_id` query params under `/cywell/rag` now get repaired to the loaded upload-report document instead of preserving a missing URL-created viewer target; if reports are empty, the URL-created selected-document scope is cleared before RAG runs. Topology/wiki viewer lineage is still preserved when it originates from an actual selected viewer target.
 - Switching to Full corpus now clears `document_id`, `documentId`, `note_id`, and `noteId` from the URL through the same selected-document cleanup path; browser reload no longer restores a stale selected-document RAG scope after operators unpin scope.
@@ -18,29 +18,37 @@ Implemented after the parallel console/cutover/evidence review pass:
 - The topology browser DOM gate now proves that switching from `workflow-customer` to `workflow-switched` clears stale `workflow-doc-1` selected-document RAG scope before sending `/api/knowledge/rag/query`, that late upload/RAG/topology responses cannot restore stale scope/results, that Wiki-note deep links carry `pbs-rich-upload` into LLM Wiki requests, that invalid query-document deep links are repaired, and that a viewer deep-link back navigation restores route state.
 - PBS preflight evidence for generated-site live checks now writes `test-results/cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json`, preventing generated `pbs-live-site` evidence from overwriting default pbs-live evidence.
 - `render:pbs:live-prereqs:template` now writes non-secret handoff templates under `test-results/pbs-live-prereqs-input-template/`; operators copy them outside the repo before filling approved token, owner-HMAC, ACL, and Postgres values.
-- The cutover bundle now requires current clean `fullHead/treeStatus` evidence, generated-site preapply flags/path, matching CRC/release/preapply cluster identity, exact live prereq output hash keys, recomputed generated-file/site-overlay/redacted-summary hashes, clean real-render prereq evidence bound to `test-results/pbs-live-prereqs`, and strict full-SHA PBS source pinning with successful fresh approved remote ref containment proof.
+- The cutover bundle now requires current clean `fullHead/treeStatus` evidence, generated-site preapply flags/path derived from the live prereq evidence output directory, matching CRC/release/preapply/cluster-smoke identity, exact live prereq output hash keys, recomputed generated-file/site-overlay/redacted-summary hashes, clean real-render prereq evidence from a recorded secure output directory, and strict full-SHA PBS source pinning with successful fresh approved remote ref containment proof. `--require-live-ready` additionally requires cluster cutover smoke evidence for upload -> RAG -> LLM Wiki -> topology lineage.
 - Release promotion and cutover bundling now require the Cywell release HEAD itself to be contained in an approved fetched `origin/*` ref; local-only Cywell commits cannot produce live-ready release evidence.
 - Strict preflight parses rendered Kubernetes objects for the live generated-site overlay and checks the exact NetworkPolicy shape for PBS egress and Knowledge Engine ingress instead of relying on string presence.
 - Strict preflight now treats only real Kubernetes NotFound responses as proof that the legacy `cas-knowledge-postgres` Secret is absent; RBAC/API errors no longer pass the absence check.
 - The tracked pbs-live overlay now fails closed with `customer-access-json=__GENERATED_PBS_LIVE_SITE_OVERLAY_REQUIRED__`; production mappings must come from `render:pbs:live-prereqs` generated site overlay.
 - The v0.1.4 PBS source baseline is now pinned through a clean clone at `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`, branch `kugnus/cywell-v0.1.4-source-contract`, commit `6604777abb9e6bd44a83c6a12f36e31ac396489e`, pushed to approved remote `https://github.com/souluk319/PBS_DEV_Part3.git`.
 - The PBS companion branch now adds `deploy/openshift-cywell-v014`, a real OpenShift overlay that renders namespace `playbookstudio`, Service `playbookstudio-runtime` on port `8765`, and runtime labels `app.kubernetes.io/name=playbookstudio` plus `app.kubernetes.io/component=runtime` without faking `/api/health`.
+- `deploy:pbs:runtime:crc` now bootstraps that approved PBS overlay in CRC, creates only local redacted Secret evidence, applies the overlay, stamps the runtime pod template with the approved PBS SHA via `PLAYBOOKSTUDIO_SOURCE_HEAD`, `cywell.ai/pbs-source-head`, and `org.opencontainers.image.revision`, and verifies the `playbookstudio-runtime` Service contract.
+- PBS live preflight now normalizes the real PBS `/api/health` shape (`runtime.db_corpus`) plus `/api/wiki-loop/status?user_id=local`, so runtime readiness is evaluated against the actual PBS API instead of a synthetic readiness envelope.
+- PBS live preflight now binds live cluster Secret values to the approved `render:pbs:live-prereqs` redacted hashes for PBS bearer token, owner HMAC, Postgres password, and Postgres `database-url`; structurally valid but unapproved Secret material no longer passes.
+- PBS live preflight now rejects future-dated Cywell release remote proof timestamps, matching the strict future-time rejection already used for pinned PBS source and cutover evidence.
+- `render:pbs:live-prereqs` now refuses to write real live Secret manifests inside the repository unless `CAS_PBS_LIVE_PREREQS_ALLOW_REPO_OUTPUT=true` is explicitly set for disposable lab rehearsal. Production runs must set `CAS_PBS_LIVE_PREREQS_OUT_DIR` or `--out-dir` to an approved secure handoff path outside the repo.
+- `render:pbs:live-prereqs` now also rejects the repository root itself as an output directory, preventing `--out-dir=.` from writing raw Secret manifests beside tracked source.
+- PBS live smoke now separates cluster diagnostics from cluster cutover evidence; `cas-pbs-live-smoke-cluster-cutover.json` is produced only by `--cutover --cluster`, and the cutover bundle requires `PASS pbs-live:cluster-write-lineage` before live-ready bundling.
+- PBS live preflight and cluster smoke now pass live bearer token and Postgres `database-url` probe material through stdin payloads instead of process argv.
 
 Proof captured in this pass:
 
 - `node --check` passed for changed verifier/release/cutover scripts.
 - `npm run verify:console-plugin`: PASS.
-- `npm run verify:console:launcher-dom:built`: PASS, 10 browser-backed checks.
+- `npm run verify:console:launcher-dom:built`: PASS, 11 browser-backed checks.
 - `npm run verify:console:topology-dom:built`: PASS, 53 browser-backed checks.
-- `npm run verify:console:integration:built`: PASS, 113 checks.
-- `npm run verify:pbs:cutover-bundle`: PASS, 21 self-test checks.
+- `npm run verify:console:integration:built`: PASS, 121 checks.
+- `npm run verify:pbs:cutover-bundle`: PASS, 25 self-test checks.
 - `$env:CAS_PBS_SOURCE_HEAD="6604777abb9e6bd44a83c6a12f36e31ac396489e"; $env:CAS_PBS_SOURCE_DIR="F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone"; npm run verify:release:source-pinning`: PASS, 62 checks; strict source pin evidence is now PBS-clean, full-SHA, approved-remote, remote-ref-contained, and includes the exact PBS contract file hash set.
 - `npm run render:pbs:cutover-bundle`: expected FAIL in the current handoff evidence, `local-evidence-invalid`. Source pinning is no longer the blocker for the current evidence set. Remaining local blockers are current-head clean `cas-pbs-live-prereqs-render.json` in `input-validation` FAIL mode because approved live Secret/ACL/Postgres inputs are not supplied, missing real-render/hash-bound generated-site preapply evidence, and missing ready PBS runtime pod source stamps for `6604777abb9e6bd44a83c6a12f36e31ac396489e`. External live preapply blockers are retained in the active blocker list even when local evidence is invalid.
-- `npm run verify:deploy:manifests`: PASS, 286 checks.
+- `npm run verify:deploy:manifests`: PASS, 299 checks.
 - `npm run verify:pbs:source-contract:required`: PASS, 60 total checks: 60 PASS / 0 WARN against clean clone `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`; the checked PBS remote is `https://github.com/souluk319/PBS_DEV_Part3.git`.
 - `npm run verify:pbs:preflight:live:site:preapply`: expected FAIL, 48 PASS / 7 FAIL. Current release image evidence and strict pinned PBS source evidence pass; remaining failures are the missing external `playbookstudio` namespace/service, missing `cas-pbs-auth`, missing `cas-knowledge-postgres-live`, legacy dev Secret cleanup, and ready PBS runtime source revision evidence once the Service exists.
 - `npm run render:pbs:live-prereqs`: blocked in the current shell until approved non-placeholder PBS bearer token, owner HMAC, service owner, concrete customer ACL JSON, and live Postgres DB credentials/URL are supplied.
-- `npm run verify:pbs:live-prereqs`: PASS, 13 self-test checks.
+- `npm run verify:pbs:live-prereqs`: PASS, 15 self-test checks.
 - `npm run verify`: PASS.
 
 ## Historical Update - Customer Corpus Workbench and Source-Lane Hardening
@@ -79,7 +87,7 @@ Implemented after the latest parallel review pass:
 - Gateway customer scope parsing now recursively detects customer/workspace/tenant aliases in query/body payloads, rejects mismatches, strips nested scope aliases before proxying, and keeps only the verified canonical top-level `customer_id`.
 - Knowledge Engine PBS response scope validation now covers customer, tenant, workspace, and customer-workspace aliases; the verifier blocks cross-scope RAG citation leakage before answers are exposed.
 - Added `render:pbs:live-prereqs` and `verify:pbs:live-prereqs`.
-- The renderer outputs reviewed live Secret/ConfigMap manifests plus `test-results/pbs-live-prereqs/pbs-live-site`, a generated overlay that replaces `cas-knowledge-live-config` while composing the tracked `pbs-live` overlay.
+- The renderer outputs reviewed live Secret/ConfigMap manifests to the configured secure handoff output directory plus a generated `pbs-live-site` overlay that replaces `cas-knowledge-live-config` while composing the tracked `pbs-live` overlay.
 - Strict live preflight accepts `--overlay-path` / `CAS_PBS_PREFLIGHT_OVERLAY_PATH`, so release gates can validate the generated site overlay instead of the tracked wildcard placeholder.
 - Gateway ACL parsing is now strict: arrays only, no `default`, no wildcard/string ACL values, no placeholder customer IDs, and no broad system groups such as `system:authenticated`.
 - Private Gateway knowledge requests now fail closed when an invalid ACL is configured, even if `CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS=false`; live ACL mode also returns `400` when `customer_id` is missing.
@@ -610,7 +618,7 @@ This is now a verified v0.1.4 Cywell knowledge integration surface with live CRC
 
 Implemented in this pass:
 
-- Added `render:pbs:live-prereqs` to render reviewed `cas-pbs-auth`, `cas-knowledge-postgres-live`, and `cas-knowledge-live-config` manifests under ignored `test-results/pbs-live-prereqs/`.
+- Added `render:pbs:live-prereqs` to render reviewed `cas-pbs-auth`, `cas-knowledge-postgres-live`, and `cas-knowledge-live-config` manifests. Current policy requires a secure output directory outside the repository for real Secret material; ignored `test-results` is only for templates, self-tests, and redacted evidence unless the lab override is explicit.
 - Added `verify:pbs:live-prereqs` and wired it into `npm run verify`.
 - The renderer rejects placeholder/short PBS token material, wildcard/default customer ACLs, placeholder customer/principal values, non-service Postgres URLs, and Postgres URL values that do not match the individual Secret fields.
 - The renderer writes only a redacted summary and evidence file with hashes and git head metadata.

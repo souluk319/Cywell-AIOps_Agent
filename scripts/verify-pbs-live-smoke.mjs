@@ -28,7 +28,7 @@ const requireLive = cutover || clusterSmoke || envBool("CAS_PBS_LIVE_REQUIRED");
 const writeSmoke = cutover || envBool("CAS_PBS_LIVE_WRITE_SMOKE");
 const requireRuntimeReady = envBool("CAS_PBS_LIVE_REQUIRE_RUNTIME_READY", true);
 const requireCorpusReady = envBool("CAS_PBS_LIVE_REQUIRE_CORPUS_READY", true);
-const evidenceMode = clusterSmoke ? "cluster-cutover" : cutover ? "local-cutover" : requireLive ? "required-diagnostic" : "diagnostic";
+const evidenceMode = clusterSmoke && cutover ? "cluster-cutover" : clusterSmoke ? "cluster-diagnostic" : cutover ? "local-cutover" : requireLive ? "required-diagnostic" : "diagnostic";
 const evidencePath = `test-results/cas-pbs-live-smoke-${evidenceMode}.json`;
 
 function record(status, id, detail) {
@@ -81,8 +81,30 @@ function run(command, args, options = {}) {
     encoding: "utf8",
     timeout: options.timeoutMs ?? 60000,
     windowsHide: true,
-    env: options.env ?? process.env
+    env: options.env ?? process.env,
+    input: options.input
   });
+}
+
+function gitMetadata() {
+  const status = run("git", ["status", "--short"]).stdout.trim();
+  return {
+    branch: run("git", ["branch", "--show-current"]).stdout.trim(),
+    head: run("git", ["rev-parse", "--short", "HEAD"]).stdout.trim(),
+    fullHead: run("git", ["rev-parse", "HEAD"]).stdout.trim(),
+    treeStatus: status ? "dirty" : "clean",
+    statusShort: status
+  };
+}
+
+function currentClusterIdentity() {
+  if (!clusterSmoke) return undefined;
+  return {
+    server: run("oc", ["whoami", "--show-server"], { timeoutMs: 10000 }).stdout.trim(),
+    namespace,
+    namespaceUid: run("oc", ["get", "namespace", namespace, "-o", "jsonpath={.metadata.uid}"], { timeoutMs: 10000 }).stdout.trim(),
+    infrastructureName: run("oc", ["get", "infrastructure", "cluster", "-o", "jsonpath={.status.infrastructureName}"], { timeoutMs: 10000 }).stdout.trim()
+  };
 }
 
 function getJson(id, args, { required = true, timeoutMs = 30000 } = {}) {
@@ -206,8 +228,28 @@ function appliedPbsEgressScoped(policy) {
   );
 }
 
-function execNode(podName, code, timeoutMs = 60000) {
-  return run("oc", ["exec", "-n", namespace, podName, "--", "node", "-e", code], { timeoutMs });
+const nodeStdinBootstrap = [
+  "const vm=require('vm');",
+  "let stdin='';",
+  "process.stdin.setEncoding('utf8');",
+  "process.stdin.on('data',chunk=>{stdin+=chunk});",
+  "process.stdin.on('end',()=>{",
+  "  try {",
+  "    const payload=JSON.parse(stdin||'{}');",
+  "    globalThis.__casInput=payload.input||{};",
+  "    vm.runInThisContext(String(payload.code||''),{filename:'cas-pbs-live-smoke.js'});",
+  "  } catch (error) {",
+  "    console.error(error&&error.stack?error.stack:String(error));",
+  "    process.exit(1);",
+  "  }",
+  "});"
+].join("");
+
+function execNode(podName, code, timeoutMs = 60000, input = {}) {
+  return run("oc", ["exec", "-i", "-n", namespace, podName, "--", "node", "-e", nodeStdinBootstrap], {
+    timeoutMs,
+    input: JSON.stringify({ code, input })
+  });
 }
 
 function findPython() {
@@ -357,17 +399,24 @@ async function stopChildren() {
 }
 
 function writeEvidence(status) {
+  const git = gitMetadata();
   mkdirSync("test-results", { recursive: true });
   writeFileSync(
     evidencePath,
     JSON.stringify(
       {
         checkedAt,
-        branch: run("git", ["branch", "--show-current"]).stdout.trim(),
-        head: run("git", ["rev-parse", "--short", "HEAD"]).stdout.trim(),
+        branch: git.branch,
+        head: git.head,
+        fullHead: git.fullHead,
+        treeStatus: git.treeStatus,
+        statusShort: git.statusShort,
         status,
+        mode: evidenceMode,
+        evidenceMode,
         pbsBaseUrl: pbsBaseUrl ? "<configured>" : "",
         namespace,
+        clusterIdentity: currentClusterIdentity(),
         cutover,
         clusterSmoke,
         readOnlyException,
@@ -509,7 +558,7 @@ async function runClusterSmoke() {
   const smokeCode = [
     "const https=require('https');",
     "const http=require('http');",
-    `const smokeToken=${JSON.stringify(smokeToken)};`,
+    "const smokeToken=String(globalThis.__casInput.smokeToken||'');",
     "const customerId='pbs-live-cluster-smoke';",
     "const lineageToken=`pbs-live-cluster-lineage-${Date.now()}`;",
     "const fileName=`cas-pbs-live-cluster-${lineageToken}.txt`; ",
@@ -570,7 +619,7 @@ async function runClusterSmoke() {
     "console.log(JSON.stringify(result));",
     "})().catch(e=>{console.error(e.stack||e.message);process.exit(1);});"
   ].join("");
-  const smoke = execNode(gatewayPod.metadata.name, smokeCode, 120000);
+  const smoke = execNode(gatewayPod.metadata.name, smokeCode, 120000, { smokeToken });
   const smokeBody = parseLastJsonLine(smoke.stdout);
   expect(
     "pbs-live:cluster-gateway-health",
@@ -637,14 +686,15 @@ async function runClusterSmoke() {
       consolePod.metadata.name,
       [
         "const https=require('https');",
-        `const smokeToken=${JSON.stringify(smokeToken)};`,
+        "const smokeToken=String(globalThis.__casInput.smokeToken||'');",
         `const gatewayHost=${JSON.stringify(gatewayHost)};`,
         "function parse(body){try{return JSON.parse(body||'{}')}catch{return {parse_error:body}}}",
         "const req=https.request(`https://${gatewayHost}:9443/api/knowledge/healthz`,{method:'GET',rejectUnauthorized:false,headers:{authorization:`Bearer ${smokeToken}`,accept:'application/json'}},res=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{const body=parse(b);console.log(JSON.stringify({status:res.statusCode,body,provider:body.provider,engineProvider:body.engine&&body.engine.provider}));});});",
         "req.on('error',e=>{console.log(JSON.stringify({error:e.code||e.message}));process.exit(1);});",
         "req.end();"
       ].join(""),
-      10000
+      10000,
+      { smokeToken }
     );
     const serviceBody = parseLastJsonLine(serviceCheck.stdout);
     expect(

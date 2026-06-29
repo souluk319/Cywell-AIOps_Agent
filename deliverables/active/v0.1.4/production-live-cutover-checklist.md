@@ -39,6 +39,7 @@ These values must come from the target environment. Do not commit any secret val
   - the PBS checkout must be clean, its `remote.origin.url` must match the approved PBS GitHub host/repository, `git fetch --prune origin` must succeed, at least one fetched `origin/*` branch must contain the pinned SHA, and the pinned contract file hash set must match the expected PBS runtime/API contract files
   - current v0.1.4 source-pin candidate: `https://github.com/souluk319/PBS_DEV_Part3.git`, branch `kugnus/cywell-v0.1.4-source-contract`, SHA `6604777abb9e6bd44a83c6a12f36e31ac396489e`
   - current PBS branch includes `deploy/openshift-cywell-v014` for the real `playbookstudio` namespace and `playbookstudio-runtime` Service contract; apply it on the PBS side and stamp `PLAYBOOKSTUDIO_SOURCE_HEAD` with the same approved full SHA before running Cywell live preflight
+  - for CRC rehearsal only, `npm run deploy:pbs:runtime:crc` can apply the approved PBS overlay, create local-only PBS runtime Secret material, stamp the runtime pod template with the approved SHA, and write redacted evidence; this does not replace production Secret approval or live cutover evidence
 - Expected live cluster identity for live-ready cutover bundling:
   - `CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON={"server":"https://api...:6443","namespace":"cywell-ai-sentinel","namespaceUid":"...","infrastructureName":"..."}`
   - obtain `server` from `oc whoami --show-server`, `namespaceUid` from `oc get namespace cywell-ai-sentinel -o jsonpath='{.metadata.uid}'`, and `infrastructureName` from `oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}'`
@@ -97,22 +98,25 @@ $env:CAS_KNOWLEDGE_POSTGRES_DB="cas_knowledge_live"
 $env:CAS_KNOWLEDGE_POSTGRES_USER="cas_knowledge_live"
 $env:CAS_KNOWLEDGE_POSTGRES_PASSWORD="<from-secret-manager>"
 $env:CAS_KNOWLEDGE_POSTGRES_DATABASE_URL="postgresql://cas_knowledge_live:<url-encoded-password>@cas-knowledge-postgres.cywell-ai-sentinel.svc.cluster.local:5432/cas_knowledge_live"
+$env:CAS_PBS_LIVE_PREREQS_OUT_DIR="C:\secure-handoff\pbs-live-prereqs"
 
 npm run render:pbs:live-prereqs
 
-oc diff -f .\test-results\pbs-live-prereqs\cas-pbs-auth.secret.yaml
-oc diff -f .\test-results\pbs-live-prereqs\cas-knowledge-internal-auth.secret.yaml
-oc diff -f .\test-results\pbs-live-prereqs\cas-knowledge-postgres-live.secret.yaml
-oc diff -f .\test-results\pbs-live-prereqs\cas-knowledge-live-config.configmap.yaml
-oc diff -k .\test-results\pbs-live-prereqs\pbs-live-site
+oc diff -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-pbs-auth.secret.yaml"
+oc diff -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-knowledge-internal-auth.secret.yaml"
+oc diff -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-knowledge-postgres-live.secret.yaml"
+oc diff -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-knowledge-live-config.configmap.yaml"
+oc diff -k "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\pbs-live-site"
 
-oc apply -f .\test-results\pbs-live-prereqs\cas-pbs-auth.secret.yaml
-oc apply -f .\test-results\pbs-live-prereqs\cas-knowledge-internal-auth.secret.yaml
-oc apply -f .\test-results\pbs-live-prereqs\cas-knowledge-postgres-live.secret.yaml
-oc apply -f .\test-results\pbs-live-prereqs\cas-knowledge-live-config.configmap.yaml
+oc apply -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-pbs-auth.secret.yaml"
+oc apply -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-knowledge-internal-auth.secret.yaml"
+oc apply -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-knowledge-postgres-live.secret.yaml"
+oc apply -f "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\cas-knowledge-live-config.configmap.yaml"
 ```
 
-If those Secrets or the ConfigMap already exist, compare keys and rotation plan before applying the reviewed manifests. The renderer also writes a site overlay to `test-results/pbs-live-prereqs/pbs-live-site`; use that overlay for preflight and live apply so the rendered `pbs-live` ConfigMap replacement is the same one you reviewed. The renderer writes a redacted summary to `test-results/pbs-live-prereqs/pbs-live-prereqs.summary.json`; verify hashes and metadata there, not raw Secret values.
+Strict live preflight compares the live cluster Secret values back to the redacted hashes in `test-results/cas-pbs-live-prereqs-render.json` and `$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\pbs-live-prereqs.summary.json`. If an operator changes `cas-pbs-auth`, `cas-knowledge-internal-auth`, or `cas-knowledge-postgres-live` outside this renderer, `cluster:live-prereq-secret-hash-binding` must fail until the approved renderer is rerun and the changed manifests are reviewed.
+
+If those Secrets or the ConfigMap already exist, compare keys and rotation plan before applying the reviewed manifests. The renderer refuses to write real live Secret manifests inside the repository unless the disposable lab override is explicit. It also writes a site overlay to `$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\pbs-live-site`; use that overlay for preflight and live apply so the rendered `pbs-live` ConfigMap replacement is the same one you reviewed. The renderer writes a redacted summary to `$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\pbs-live-prereqs.summary.json`; verify hashes and metadata there, not raw Secret values.
 
 Customer ACL example:
 
@@ -144,7 +148,7 @@ npm run verify:deploy:manifests
 npm run release:crc:v0.1.4
 npm run verify:pbs:preflight:live:site:preapply
 $env:CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON='{"server":"https://api...:6443","namespace":"cywell-ai-sentinel","namespaceUid":"...","infrastructureName":"..."}'
-node ./scripts/render-pbs-cutover-bundle.mjs --require-live-ready
+node ./scripts/render-pbs-cutover-bundle.mjs
 ```
 
 Required result:
@@ -152,17 +156,16 @@ Required result:
 - `verify` passes.
 - `verify:release:source-pinning` passes against the pinned PBS source checkout before live feature parity is claimed. For the current v0.1.4 candidate this has passed against `6604777abb9e6bd44a83c6a12f36e31ac396489e`, but rerun it close to cutover if evidence freshness windows expire. `CAS_PBS_SOURCE_HEAD` must be the approved full PBS git SHA, the PBS checkout must be clean, and dirty PBS source is not acceptable for live cutover.
 - `verify:pbs:live-prereqs` passes as a renderer self-test and writes `test-results/cas-pbs-live-prereqs-self-test.json`.
-- `render:pbs:live-prereqs` writes the real reviewed live prereq manifests, generated `pbs-live-site` overlay, redacted summary, and `test-results/cas-pbs-live-prereqs-render.json`.
+- `render:pbs:live-prereqs` writes the real reviewed live prereq manifests, generated `pbs-live-site` overlay, redacted summary, and `test-results/cas-pbs-live-prereqs-render.json`; `CAS_PBS_LIVE_PREREQS_OUT_DIR` must point outside the repository for real Secret output.
 - `verify:deploy:manifests` passes.
 - `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags. Run it normally when publishing empty or already-matching tags. If `v0.1.4` tags already exist and must intentionally move, rerun as `$env:CAS_RELEASE_FORCE="true"; npm run release:crc:v0.1.4` and capture the old/new image evidence. Release promotion must prove the current Cywell HEAD is present in an approved fetched `origin/*` ref; local-only release heads are not acceptable.
 - `verify:pbs:preflight:live:site:preapply` passes with no missing namespace, service, Secret, release image, Cywell source proof, PBS source proof, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
-- `render-pbs-cutover-bundle.mjs --require-live-ready` writes canonical evidence to `test-results/pbs-cutover-bundle/cutover-bundle.json` with `status=PASS` and `phase=live-preapply-ready`; it also writes `test-results/cas-pbs-cutover-bundle.json` as a compatibility copy.
-- `render-pbs-cutover-bundle.mjs --require-live-ready` confirms CRC deployment, release-image, and generated-site preapply evidence share the same cluster identity.
-- `render-pbs-cutover-bundle.mjs --require-live-ready` requires `CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON` with the intended `server`, `namespace`, `namespaceUid`, and `infrastructureName`, then checks all cluster evidence against it.
-- `render-pbs-cutover-bundle.mjs --require-live-ready` confirms generated-site preapply evidence is fresh, newer than the release/prereq evidence it depends on, and not older than the configured live preapply freshness window.
-- `render-pbs-cutover-bundle.mjs --require-live-ready` recomputes the current generated live-prereq file hashes, generated `pbs-live-site` render hash, and redacted-summary hash before accepting the evidence.
-- `render-pbs-cutover-bundle.mjs --require-live-ready` accepts PBS source evidence only from `test-results/cas-pbs-source-contract-pinned.json`, where `CAS_PBS_SOURCE_HEAD` is a full 40-character approved SHA, the PBS checkout is clean, the PBS remote is approved, `git fetch --prune origin` succeeded recently, at least one fetched `origin/*` branch contains the pinned SHA, and every required PBS contract file has a 64-character SHA-256 hash.
-- `render-pbs-cutover-bundle.mjs --require-live-ready` confirms every ready PBS runtime pod in live preapply evidence is stamped with the same approved PBS source SHA.
+- `render-pbs-cutover-bundle.mjs` writes canonical pre-apply evidence to `test-results/pbs-cutover-bundle/cutover-bundle.json`; it also writes `test-results/cas-pbs-cutover-bundle.json` as a compatibility copy.
+- `render-pbs-cutover-bundle.mjs` confirms CRC deployment, release-image, and generated-site preapply evidence share the same cluster identity.
+- `render-pbs-cutover-bundle.mjs` confirms generated-site preapply evidence is fresh, newer than the release/prereq evidence it depends on, and not older than the configured live preapply freshness window.
+- `render-pbs-cutover-bundle.mjs` recomputes the current generated live-prereq file hashes, generated `pbs-live-site` render hash, and redacted-summary hash before accepting the evidence.
+- `render-pbs-cutover-bundle.mjs` accepts PBS source evidence only from `test-results/cas-pbs-source-contract-pinned.json`, where `CAS_PBS_SOURCE_HEAD` is a full 40-character approved SHA, the PBS checkout is clean, the PBS remote is approved, `git fetch --prune origin` succeeded recently, at least one fetched `origin/*` branch contains the pinned SHA, and every required PBS contract file has a 64-character SHA-256 hash.
+- `render-pbs-cutover-bundle.mjs` confirms every ready PBS runtime pod in live preapply evidence is stamped with the same approved PBS source SHA.
 - `verify:pbs:preflight:live:site:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
 - `verify:pbs:preflight:live:site:preapply` confirms release-image evidence is current-head and sourced from non-stale CRC deployment evidence.
 - `verify:pbs:preflight:live:site:preapply` confirms the Gateway Kubernetes API NetworkPolicy allows the API IP and port in the same egress rule.
@@ -195,7 +198,7 @@ Required result:
 Only proceed after shadow read smoke is accepted.
 
 ```powershell
-oc apply -k .\test-results\pbs-live-prereqs\pbs-live-site
+oc apply -k "$env:CAS_PBS_LIVE_PREREQS_OUT_DIR\pbs-live-site"
 npm run verify:release
 ```
 
@@ -219,6 +222,7 @@ Required result:
 - Gateway rejects a valid owner requesting an unmapped customer with `403` before PBS, and rejects conflicting nested `source_metadata.customer_id` with `400` before PBS.
 - Upload -> RAG -> wiki vault -> topology lineage passes through the Gateway with exact document/customer/source IDs and a direct topology document-note edge.
 - Direct console-plugin pod access to `cas-knowledge-engine` remains blocked.
+- `verify:release` finishes by writing `test-results/pbs-cutover-bundle/cutover-bundle.json` with `--require-live-ready`; this requires `test-results/cas-pbs-live-smoke-cluster-cutover.json` from write-enabled `verify-pbs-live-smoke.mjs --cutover --cluster` with `PASS pbs-live:cluster-write-lineage`, proving post-apply upload -> RAG -> LLM Wiki -> topology lineage through the cluster Gateway and console-plugin path.
 
 ## Rollback Criteria
 
@@ -255,7 +259,7 @@ Save command output or JSON artifacts for the release record:
 - `test-results/cas-pbs-source-contract-required.json`, required source/API contract evidence
 - `test-results/cas-pbs-source-contract-pinned.json`, strict release pinning evidence including `pbsSource.expectedHead`, `pbsSource.fullHead`, approved `pbsSource.remoteOriginUrl`, `pbsSource.remoteFetchOk=true`, fresh `pbsSource.remoteVerifiedAt`, `pbsSource.remoteContainsExpectedHead=true`, `pbsSource.remoteRefsContainingExpectedHead`, clean `pbsSource.treeStatus`, and the exact `pbsSource.contractFileSha256` set
 - `test-results/cas-release-images.json`, release evidence including `cywellSource.remoteFetchOk=true`, fresh `cywellSource.remoteVerifiedAt`, `cywellSource.remoteContainsHead=true`, and `cywellSource.remoteRefsContainingHead` for an approved `origin/*` ref
-- `test-results/pbs-cutover-bundle/cutover-bundle.json`, canonical cutover bundle evidence with `status=PASS` and `phase=live-preapply-ready`
+- `test-results/pbs-cutover-bundle/cutover-bundle.json`, canonical cutover bundle evidence with `status=PASS`; with `--require-live-ready`, this also proves cluster cutover smoke evidence is present, current, write-enabled, and includes `PASS pbs-live:cluster-write-lineage`
 - `test-results/cas-pbs-cutover-bundle.json`, compatibility copy of the same bundle for older handoff paths
 
 ## Completion Definition

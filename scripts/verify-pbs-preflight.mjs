@@ -5,7 +5,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const namespace = process.env.CAS_PBS_PREFLIGHT_NAMESPACE || "cywell-ai-sentinel";
 const overlayArg = process.argv.find((arg) => arg.startsWith("--overlay="))?.split("=")[1] ?? process.env.CAS_PBS_PREFLIGHT_OVERLAY ?? "pbs-live";
-const overlayPathArg = process.argv.find((arg) => arg.startsWith("--overlay-path="))?.split("=")[1] ?? process.env.CAS_PBS_PREFLIGHT_OVERLAY_PATH ?? "";
+const rawOverlayPathArg = process.argv.find((arg) => arg.startsWith("--overlay-path="))?.split("=")[1] ?? process.env.CAS_PBS_PREFLIGHT_OVERLAY_PATH ?? "";
+const livePrereqsOutputDir = process.env.CAS_PBS_LIVE_PREREQS_OUT_DIR || "test-results/pbs-live-prereqs";
+const livePrereqsSiteOverlayPath = normalizePath(`${livePrereqsOutputDir.replace(/[\\/]+$/, "")}/pbs-live-site`);
+const overlayPathArg = rawOverlayPathArg === "live-prereqs-site" ? livePrereqsSiteOverlayPath : rawOverlayPathArg;
 const validOverlays = new Set(["pbs-shadow", "pbs-live"]);
 const overlayNameValid = validOverlays.has(overlayArg);
 const overlay = overlayNameValid ? overlayArg : overlayArg || "invalid";
@@ -17,6 +20,7 @@ const checkedAt = new Date().toISOString();
 const checks = [];
 const releaseImagesEvidencePath = process.env.CAS_RELEASE_IMAGES_EVIDENCE || "test-results/cas-release-images.json";
 const pbsPinnedSourceEvidencePath = process.env.CAS_PBS_SOURCE_EVIDENCE || "test-results/cas-pbs-source-contract-pinned.json";
+const livePrereqsEvidencePath = process.env.CAS_PBS_LIVE_PREREQS_EVIDENCE || "test-results/cas-pbs-live-prereqs-render.json";
 const maxPinnedSourceEvidenceAgeMinutesInput = Number(process.env.CAS_PBS_PREFLIGHT_MAX_SOURCE_PROOF_AGE_MINUTES || 120);
 const maxPinnedSourceEvidenceAgeMinutes = Number.isFinite(maxPinnedSourceEvidenceAgeMinutesInput) && maxPinnedSourceEvidenceAgeMinutesInput > 0 ? maxPinnedSourceEvidenceAgeMinutesInput : 120;
 const evidencePhase = skipApplied ? "preapply" : overlay === "pbs-shadow" && !requireCluster ? "diagnostic" : "applied";
@@ -91,7 +95,8 @@ function run(command, args, options = {}) {
     cwd: process.cwd(),
     encoding: "utf8",
     timeout: options.timeoutMs ?? 60000,
-    windowsHide: true
+    windowsHide: true,
+    input: options.input
   });
   return {
     ok: result.status === 0,
@@ -284,6 +289,60 @@ function decodeSecretValue(secret, key) {
   } catch {
     return "";
   }
+}
+
+function readJsonFile(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    return { __error: error.message };
+  }
+}
+
+function livePrereqSecretHashBinding(authSecret, ownerAuthSecret, liveDbSecret) {
+  const reasons = [];
+  const evidence = existsSync(livePrereqsEvidencePath) ? readJsonFile(livePrereqsEvidencePath) : null;
+  if (!evidence) reasons.push(`${livePrereqsEvidencePath} is missing`);
+  if (evidence?.__error) reasons.push(`${livePrereqsEvidencePath} could not be parsed: ${evidence.__error}`);
+  if (evidence && evidence.status !== "PASS") reasons.push(`live prerequisite evidence status is ${evidence.status || "missing"}`);
+  if (evidence && evidence.mode !== "real-render") reasons.push(`live prerequisite evidence mode is ${evidence.mode || "missing"}`);
+  if (evidence && evidence.treeStatus !== "clean") reasons.push(`live prerequisite evidence source tree is ${evidence.treeStatus || "missing"}`);
+  const summaryPath = evidence?.outputFileSha256?.summary?.path;
+  const summary = summaryPath && existsSync(summaryPath) ? readJsonFile(summaryPath) : null;
+  if (!summaryPath) reasons.push("live prerequisite evidence does not record the redacted summary path");
+  if (summary?.__error) reasons.push(`${summaryPath} could not be parsed: ${summary.__error}`);
+  if (summaryPath && !summary) reasons.push(`${summaryPath} is missing`);
+  if (summary && sha256Text(JSON.stringify(summary, null, 2)) !== evidence?.redactedSummarySha256) {
+    reasons.push("live prerequisite redacted summary hash does not match evidence");
+  }
+  const bearerToken = decodeSecretValue(authSecret, "bearer-token");
+  const ownerHmacSecret = decodeSecretValue(ownerAuthSecret, "owner-hmac-secret");
+  const liveDbValues = {
+    database: decodeSecretValue(liveDbSecret, "database"),
+    username: decodeSecretValue(liveDbSecret, "username"),
+    password: decodeSecretValue(liveDbSecret, "password"),
+    databaseUrl: decodeSecretValue(liveDbSecret, "database-url")
+  };
+  if (summary) {
+    if (sha256Text(bearerToken) !== summary.casPbsAuth?.bearerTokenSha256) reasons.push("cas-pbs-auth bearer-token does not match the approved live prereq render hash");
+    if (sha256Text(ownerHmacSecret) !== summary.casKnowledgeInternalAuth?.ownerHmacSecretSha256) reasons.push("cas-knowledge-internal-auth owner-hmac-secret does not match the approved live prereq render hash");
+    if (liveDbValues.database !== summary.casKnowledgePostgresLive?.database) reasons.push("cas-knowledge-postgres-live database does not match the approved live prereq render");
+    if (liveDbValues.username !== summary.casKnowledgePostgresLive?.username) reasons.push("cas-knowledge-postgres-live username does not match the approved live prereq render");
+    if (sha256Text(liveDbValues.password) !== summary.casKnowledgePostgresLive?.passwordSha256) reasons.push("cas-knowledge-postgres-live password does not match the approved live prereq render hash");
+    if (sha256Text(liveDbValues.databaseUrl) !== summary.casKnowledgePostgresLive?.databaseUrlSha256) reasons.push("cas-knowledge-postgres-live database-url does not match the approved live prereq render hash");
+  }
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    evidencePath: livePrereqsEvidencePath,
+    summaryPath: summaryPath || "",
+    secretHashes: {
+      bearerTokenSha256: bearerToken ? sha256Text(bearerToken) : "",
+      ownerHmacSecretSha256: ownerHmacSecret ? sha256Text(ownerHmacSecret) : "",
+      postgresPasswordSha256: liveDbValues.password ? sha256Text(liveDbValues.password) : "",
+      postgresDatabaseUrlSha256: liveDbValues.databaseUrl ? sha256Text(liveDbValues.databaseUrl) : ""
+    }
+  };
 }
 
 function valueLooksPlaceholder(value) {
@@ -1124,7 +1183,25 @@ function runtimePodSourceSummary(pod) {
 }
 
 function pbsRuntimeHealthReadiness(body) {
-  return body?.provider_config?.pbs_http?.readiness ?? body?.readiness ?? body?.runtime?.readiness ?? body ?? {};
+  const explicit = body?.provider_config?.pbs_http?.readiness ?? body?.readiness ?? body?.runtime?.readiness;
+  if (explicit) return explicit;
+  const runtime = body?.runtime && typeof body.runtime === "object" ? body.runtime : {};
+  const dbCorpus = runtime?.db_corpus && typeof runtime.db_corpus === "object" ? runtime.db_corpus : {};
+  if (Object.keys(dbCorpus).length > 0) {
+    const wikiStatus = body?.__casWikiLoopStatus && typeof body.__casWikiLoopStatus === "object" ? body.__casWikiLoopStatus : {};
+    const readyScopes = Array.isArray(dbCorpus.ready_scopes) ? dbCorpus.ready_scopes.map(String) : [];
+    return {
+      database_runtime: runtime.database_runtime === true,
+      db_ready: dbCorpus.database === "postgres" || dbCorpus.ready === true,
+      pgvector_ready: dbCorpus.vector_backend === "pgvector" || dbCorpus.pgvector_ready === true,
+      embedding_index_parity: dbCorpus.embedding_index_parity === true,
+      compiled_wiki_ready: wikiStatus.compiled_wiki_ready === true || runtime.compiled_wiki_ready === true,
+      ready_scopes: readyScopes,
+      db_corpus: dbCorpus,
+      wiki_status: wikiStatus
+    };
+  }
+  return body ?? {};
 }
 
 function pbsRuntimeHealthReady(body) {
@@ -1143,17 +1220,24 @@ function pbsRuntimeHealthReady(body) {
 function runPbsRuntimeHealthProbe(podName, bearerToken) {
   const probeUrl = `${String(pbsBaseUrl).replace(/\/+$/, "")}/api/health`;
   const script = [
-    "import json, os, sys, urllib.request",
-    "url=os.environ.get('CAS_PBS_PROBE_URL')",
+    "import json, sys, urllib.parse, urllib.request",
+    "config=json.loads(sys.stdin.read() or '{}')",
+    "url=config.get('url')",
     "headers={'Accept':'application/json'}",
-    "token=os.environ.get('CAS_PBS_PROBE_BEARER_TOKEN','')",
+    "token=config.get('token','')",
     "headers.update({'Authorization':'Bearer '+token} if token else {})",
-    "request=urllib.request.Request(url,headers=headers)",
-    "try:",
+    "def fetch_json(target):",
+    "    request=urllib.request.Request(target,headers=headers)",
     "    response=urllib.request.urlopen(request,timeout=10)",
     "    text=response.read(1048576).decode('utf-8','replace')",
-    "    body=json.loads(text) if text else {}",
-    "    print(json.dumps({'ok':200 <= response.status < 300,'status':response.status,'body':body}))",
+    "    return response.status, (json.loads(text) if text else {})",
+    "try:",
+    "    status, body=fetch_json(url)",
+    "    base=url.rsplit('/api/health',1)[0]",
+    "    wiki_status_code, wiki_status=fetch_json(base + '/api/wiki-loop/status?user_id=local')",
+    "    if isinstance(body, dict):",
+    "        body['__casWikiLoopStatus']=wiki_status",
+    "    print(json.dumps({'ok':200 <= status < 300 and 200 <= wiki_status_code < 300,'status':status,'wikiStatus':wiki_status_code,'body':body}))",
     "except Exception as error:",
     "    print(json.dumps({'ok':False,'error':str(error)}))",
     "    sys.exit(2)"
@@ -1163,18 +1247,16 @@ function runPbsRuntimeHealthProbe(podName, bearerToken) {
       "oc",
       [
         "exec",
+        "-i",
         "-n",
         "playbookstudio",
         podName,
         "--",
-        "env",
-        `CAS_PBS_PROBE_URL=${probeUrl}`,
-        `CAS_PBS_PROBE_BEARER_TOKEN=${bearerToken || ""}`,
         python,
         "-c",
         script
       ],
-      { timeoutMs: 30000 }
+      { timeoutMs: 30000, input: JSON.stringify({ url: probeUrl, token: bearerToken || "" }) }
     );
     if (!result.ok && /executable file not found|not found|No such file/i.test(result.stderr)) continue;
     try {
@@ -1245,6 +1327,7 @@ function releaseEvidenceCywellSourceValid(evidence) {
       source.remoteRefsContainingHead.some((ref) => typeof ref === "string" && ref.startsWith("origin/")) &&
       approvedCywellRemotePattern.test(String(source.remoteOriginUrl ?? "")) &&
       remoteTime &&
+      remoteTime <= Date.parse(checkedAt) + maxEvidenceFutureSkewMs &&
       Date.parse(checkedAt) - remoteTime <= maxAgeMs
   );
 }
@@ -1708,6 +1791,16 @@ if (overlay === "pbs-live") {
   } else {
     warn("cluster:knowledge-postgres-live-secret-optional", "cas-knowledge-postgres-live Secret is absent; live cutover must create it or run preflight with --require-secret");
   }
+  if (requireSecret) {
+    const binding = livePrereqSecretHashBinding(authSecret, ownerAuthSecret, liveDbSecret);
+    expect(
+      "cluster:live-prereq-secret-hash-binding",
+      binding.ok,
+      "live cluster Secret values match the approved render:pbs:live-prereqs redacted hashes",
+      `live cluster Secret values must match ${livePrereqsEvidencePath} and its redacted summary: ${binding.reasons.join("; ")}`,
+      { livePrereqSecretHashBinding: binding }
+    );
+  }
   const legacyDbSecret = getJsonOptional("cluster:legacy-postgres-secret", ["get", "secret", "-n", namespace, "cas-knowledge-postgres"]);
   if (legacyDbSecret.value) {
     const detail = "legacy cas-knowledge-postgres Secret exists in the cluster; prune/delete it before pbs-live cutover so dev credentials cannot be reused";
@@ -1900,22 +1993,22 @@ if (overlay === "pbs-live") {
             "oc",
             [
               "exec",
+              "-i",
               "-n",
               namespace,
               readyPostgresPod.metadata.name,
               "--",
-              "env",
-              `DATABASE_URL=${liveDatabaseUrl}`,
               "sh",
               "-ec",
               [
+                "DATABASE_URL=$(cat); export DATABASE_URL;",
                 "psql -v ON_ERROR_STOP=1 \"$DATABASE_URL\" -tAc \"",
                 "SELECT 'engine_url_identity=' || CASE WHEN current_database() <> '' AND current_user <> '' THEN 't' ELSE 'f' END; ",
                 "SELECT 'engine_url_vector_ext=' || CASE WHEN EXISTS (SELECT 1 FROM pg_extension WHERE extname='vector') THEN 't' ELSE 'f' END;",
                 "\""
               ].join(" ")
             ],
-            { timeoutMs: 30000 }
+            { timeoutMs: 30000, input: liveDatabaseUrl }
           );
           expect(
             "cluster:applied-engine-database-url-tcp",

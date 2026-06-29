@@ -26,6 +26,12 @@ function sha256File(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+function envBool(name, defaultValue = false) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return defaultValue;
+  return ["1", "true", "yes", "y", "on"].includes(String(raw).trim().toLowerCase());
+}
+
 function runGit(args) {
   const result = spawnSync("git", args, {
     cwd: process.cwd(),
@@ -177,6 +183,29 @@ function assertOutputUnderTestResults(outDir) {
   }
 }
 
+function pathInside(parent, child) {
+  const relativePath = relative(resolve(parent), resolve(child));
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+}
+
+function evidencePath(path) {
+  const target = resolve(path);
+  const repoRelative = relative(process.cwd(), target);
+  if (repoRelative && !repoRelative.startsWith("..") && !isAbsolute(repoRelative)) return repoRelative;
+  return target;
+}
+
+function assertRealOutputAllowed(outDir, { allowRepoOutput = false } = {}) {
+  const target = resolve(outDir);
+  const repoRoot = resolve(".");
+  if (pathInside(repoRoot, target)) {
+    if (allowRepoOutput) return;
+    throw new Error(
+      "refusing to write raw live Secret manifests inside the repository; set CAS_PBS_LIVE_PREREQS_OUT_DIR or --out-dir to an approved secure handoff path outside the repo, or explicitly set CAS_PBS_LIVE_PREREQS_ALLOW_REPO_OUTPUT=true only for disposable lab rehearsal"
+    );
+  }
+}
+
 function liveDatabaseUrlUsesService(urlText, targetNamespace = namespace) {
   try {
     const url = new URL(urlText);
@@ -324,6 +353,7 @@ function redactedSummary(inputs, files) {
       database: inputs.postgresValues.database,
       username: inputs.postgresValues.username,
       passwordSha256: sha256(inputs.postgresValues.password),
+      databaseUrlSha256: sha256(inputs.postgresValues.databaseUrl),
       databaseUrlHost: postgresUrl.hostname,
       databaseUrlPort: postgresUrl.port || "5432",
       databaseUrlDatabase: decodeURIComponent(postgresUrl.pathname.replace(/^\//, ""))
@@ -336,7 +366,7 @@ function redactedSummary(inputs, files) {
   };
 }
 
-function render(inputs, outDir, { write = true } = {}) {
+function render(inputs, outDir, { write = true, allowRepoOutput = false } = {}) {
   const errors = validateInputs(inputs);
   if (errors.length) return { ok: false, errors, files: {} };
   const files = {
@@ -351,7 +381,11 @@ function render(inputs, outDir, { write = true } = {}) {
     summary: resolve(outDir, "pbs-live-prereqs.summary.json")
   };
   if (write) {
-    assertOutputUnderTestResults(outDir);
+    try {
+      assertRealOutputAllowed(outDir, { allowRepoOutput });
+    } catch (error) {
+      return { ok: false, errors: [error instanceof Error ? error.message : String(error)], files };
+    }
     mkdirSync(outDir, { recursive: true });
     mkdirSync(files.siteOverlay, { recursive: true });
     const pbsAuthSecret = secretYaml("cas-pbs-auth", { "bearer-token": inputs.token }, inputs.namespace);
@@ -563,9 +597,9 @@ function outputFileEvidence(files, rootDir) {
     outputFiles.map((key) => [
       key,
       {
-        path: relative(process.cwd(), files[key]),
+        path: evidencePath(files[key]),
         sha256: existsSync(files[key]) ? sha256File(files[key]) : "",
-        underOutputDir: relative(rootDir, files[key]).startsWith("..") === false
+        underOutputDir: pathInside(rootDir, files[key])
       }
     ])
   );
@@ -601,7 +635,7 @@ function recordRenderEvidence(inputs, result, outputDir, mode = "real-render") {
   recordEvidence(status, checks, {
     mode,
     namespace: inputs.namespace,
-    outputDir: relative(process.cwd(), outputDir),
+    outputDir: evidencePath(outputDir),
     outputFileSha256: outputFileEvidence(result.files, outputDir),
     renderedSiteOverlaySha256: siteRender.ok ? sha256(siteRender.stdout) : "",
     renderedSiteOverlayCommand: `${siteRender.command} ${siteRender.commandArgs.join(" ")}`,
@@ -620,8 +654,28 @@ function selfTest() {
   const tmp = join("test-results", `pbs-live-prereqs-self-test-${Date.now()}-${process.pid}`);
   try {
     const inputs = buildInputs(sampleEnv());
-    const rendered = render(inputs, tmp);
+    const rendered = render(inputs, tmp, { allowRepoOutput: true });
     record(rendered.ok ? "PASS" : "FAIL", "pbs-live-prereqs:sample-render", rendered.ok ? "sample live prerequisite manifests render" : rendered.errors.join("; "));
+    const repoOutputRejected = render(inputs, join(tmp, "raw-secret-output"));
+    const repoRootOutputRejected = render(inputs, ".");
+    record(
+      !repoOutputRejected.ok && repoOutputRejected.errors.some((error) => error.includes("refusing to write raw live Secret manifests inside the repository"))
+        ? "PASS"
+        : "FAIL",
+      "pbs-live-prereqs:repo-raw-output-rejected",
+      "real live prerequisite Secret manifests require an approved secure output path outside the repository unless lab override is explicit"
+    );
+    record(
+      !repoRootOutputRejected.ok &&
+        repoRootOutputRejected.errors.some((error) => error.includes("refusing to write raw live Secret manifests inside the repository")) &&
+        !existsSync("cas-pbs-auth.secret.yaml") &&
+        !existsSync("cas-knowledge-internal-auth.secret.yaml") &&
+        !existsSync("cas-knowledge-postgres-live.secret.yaml")
+        ? "PASS"
+        : "FAIL",
+      "pbs-live-prereqs:repo-root-output-rejected",
+      "real live prerequisite Secret manifests cannot be written directly to the repository root"
+    );
     const summary = rendered.ok ? JSON.parse(readFileSync(rendered.files.summary, "utf8")) : {};
     record(
       summary?.casPbsAuth?.bearerTokenSha256 && !JSON.stringify(summary).includes(inputs.token) ? "PASS" : "FAIL",
@@ -712,9 +766,12 @@ if (args.has("--self-test")) {
   console.log("[PASS] PBS live prerequisite input template written");
   for (const file of files) console.log(`  ${file}`);
 } else {
-  const outDir = resolve(outDirArg || defaultOutDir);
+  const outDir = resolve(outDirArg || process.env.CAS_PBS_LIVE_PREREQS_OUT_DIR || defaultOutDir);
   const inputs = buildInputs(process.env);
-  const result = render(inputs, outDir, { write: !args.has("--validate-only") });
+  const result = render(inputs, outDir, {
+    write: !args.has("--validate-only"),
+    allowRepoOutput: args.has("--allow-repo-output") || envBool("CAS_PBS_LIVE_PREREQS_ALLOW_REPO_OUTPUT")
+  });
   if (!result.ok) {
     for (const error of result.errors) console.error(`[FAIL] ${error}`);
     recordInputValidationEvidence(inputs, result.errors, outDir);

@@ -1,5 +1,4 @@
 import * as React from "react";
-import { useModal } from "@openshift-console/dynamic-plugin-sdk";
 
 const API_BASE = "/api/proxy/plugin/cywell-ai-sentinel/cas-api";
 
@@ -448,7 +447,7 @@ function EvidenceSummary({ result }: { result: RCAResult }) {
   );
 }
 
-function CASLauncher() {
+export function CASLauncher() {
   const [isOpen, setIsOpen] = React.useState(false);
   const [question, setQuestion] = React.useState(initialQuestion);
   const [namespace, setNamespace] = React.useState("default");
@@ -736,21 +735,7 @@ function CASLauncher() {
   );
 }
 
-function CASLauncherMount() {
-  return <CASLauncher />;
-}
-
 export function useCASLauncher() {
-  const launchModal = useModal();
-  const launchedRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!launchedRef.current && launchModal) {
-      launchModal(CASLauncherMount, {}, "cywell-ai-sentinel-launcher");
-      launchedRef.current = true;
-    }
-  }, [launchModal]);
-
   return null;
 }
 
