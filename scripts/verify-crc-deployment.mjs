@@ -560,6 +560,12 @@ expect(
   "cas-gateway Lightspeed brain env is missing"
 );
 expect(
+  "runtime:gateway-lightspeed-tls-insecure-crc",
+  gatewayEnvByName.get("CAS_LIGHTSPEED_TLS_INSECURE") === "true",
+  "cas-gateway applies the CRC-only Lightspeed TLS insecure override",
+  "cas-gateway is missing the CRC-only CAS_LIGHTSPEED_TLS_INSECURE=true override"
+);
+expect(
   "runtime:gateway-evidence-env",
   gatewayEnvByName.get("CAS_EVIDENCE_PROVIDER") === "openshift-api" &&
     gatewayEnvByName.get("CAS_OPENSHIFT_API_URL")?.includes("kubernetes.default.svc") &&

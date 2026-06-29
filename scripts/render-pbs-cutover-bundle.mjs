@@ -23,6 +23,8 @@ const maxSourceProofAgeMinutes = Number.isFinite(maxSourceProofAgeMinutesInput) 
 const expectedLiveClusterIdentityJson = String(process.env.CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON || "").trim();
 const strictApprovedPbsRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/PBS_DEV_Part3(?:\.git)?$/i;
 const approvedCywellRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/Cywell-AIOps_Agent(?:\.git)?$/i;
+const approvedPbsSourceHead = "6604777abb9e6bd44a83c6a12f36e31ac396489e";
+const maxEvidenceFutureSkewMs = 5 * 60 * 1000;
 
 const requiredLocalEvidence = [
   ["crcDeployment", "cas-crc-deployment.json", "CRC deployment evidence"],
@@ -307,8 +309,11 @@ function livePreapplyTimingValid(livePreapply, livePrereqsRender, releaseImages)
   const preapplyTime = evidenceTimeMs(livePreapply);
   if (!preapplyTime) return false;
   const maxAgeMs = Math.max(1, maxLivePreapplyAgeMinutes) * 60 * 1000;
-  if (Date.parse(checkedAt) - preapplyTime > maxAgeMs) return false;
+  const now = Date.parse(checkedAt);
+  if (preapplyTime > now + maxEvidenceFutureSkewMs) return false;
+  if (now - preapplyTime > maxAgeMs) return false;
   const prerequisiteTimes = [livePrereqsRender, releaseImages].map(evidenceTimeMs).filter(Boolean);
+  if (prerequisiteTimes.some((time) => time > now + maxEvidenceFutureSkewMs)) return false;
   return prerequisiteTimes.every((time) => preapplyTime >= time);
 }
 
@@ -318,6 +323,7 @@ function sourceContractTimingValid(evidence) {
   if (!sourceTime || !Number.isFinite(remoteTime)) return false;
   const maxAgeMs = Math.max(1, maxSourceProofAgeMinutes) * 60 * 1000;
   const now = Date.parse(checkedAt);
+  if (sourceTime > now + maxEvidenceFutureSkewMs || remoteTime > now + maxEvidenceFutureSkewMs) return false;
   if (now - sourceTime > maxAgeMs || now - remoteTime > maxAgeMs) return false;
   const oneMinuteMs = 60 * 1000;
   return Math.abs(remoteTime - sourceTime) <= oneMinuteMs;
@@ -327,6 +333,7 @@ function releaseImagesCywellSourcePinned(evidence) {
   const source = evidence?.cywellSource ?? {};
   const remoteTime = evidenceTimeMs({ checkedAt: source.remoteVerifiedAt });
   const maxAgeMs = Math.max(1, maxSourceProofAgeMinutes) * 60 * 1000;
+  const now = Date.parse(checkedAt);
   return Boolean(
     source.remoteApproved === true &&
       source.remoteFetchOk === true &&
@@ -335,7 +342,8 @@ function releaseImagesCywellSourcePinned(evidence) {
       source.remoteRefsContainingHead.some((ref) => typeof ref === "string" && ref.startsWith("origin/")) &&
       typeof source.remoteVerifiedAt === "string" &&
       remoteTime &&
-      Date.parse(checkedAt) - remoteTime <= maxAgeMs &&
+      remoteTime <= now + maxEvidenceFutureSkewMs &&
+      now - remoteTime <= maxAgeMs &&
       approvedCywellRemotePattern.test(String(source.remoteOriginUrl ?? "").trim())
   );
 }
@@ -509,6 +517,7 @@ function sourceContractPinned(evidence) {
       /^[a-f0-9]{40}$/i.test(String(pbsSource?.expectedHead ?? "")) &&
       /^[a-f0-9]{40}$/i.test(String(pbsSource?.fullHead ?? "")) &&
       pbsSource.fullHead === pbsSource.expectedHead &&
+      pbsSource.expectedHead === approvedPbsSourceHead &&
       approvedPbsRemoteUrl(pbsSource?.remoteOriginUrl) &&
       pbsSource.remoteFetchOk === true &&
       pbsSource.remoteContainsExpectedHead === true &&
@@ -732,7 +741,7 @@ async function runSelfTest() {
         remoteVerifiedAt: checkedAt
       }
     };
-    const pbsFullHead = "d".repeat(40);
+    const pbsFullHead = approvedPbsSourceHead;
     const pbsShortHead = pbsFullHead.slice(0, 7);
     const contractFileSha256 = Object.fromEntries(requiredPbsContractFiles.map((file) => [file, sha256Text(file)]));
     const approvedPbsRemote = "git@github.com:souluk319/PBS_DEV_Part3.git";
@@ -894,6 +903,17 @@ async function runSelfTest() {
         "fixture rejects generated-site preapply evidence older than the cutover freshness window"
       ],
       [
+        "cutover-bundle:self-test-future-preapply-rejected",
+        (() => {
+          const futureCheckedAt = new Date(Date.parse(checkedAt) + maxEvidenceFutureSkewMs + 60 * 1000).toISOString();
+          writeLivePreapplyEvidence({ checkedAt: futureCheckedAt });
+          const future = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          writeLivePreapplyEvidence();
+          return future.status === "FAIL" && future.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:live-preapply-fresh");
+        })(),
+        "fixture rejects generated-site preapply evidence future-dated beyond clock skew"
+      ],
+      [
         "cutover-bundle:self-test-cluster-mismatch-rejected",
         (() => {
           writeLivePreapplyEvidence({ clusterIdentity: { ...clusterIdentity, namespaceUid: "other-namespace" } });
@@ -975,6 +995,31 @@ async function runSelfTest() {
           return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
         })(),
         "fixture rejects PBS source-contract evidence when fullHead differs from expectedHead"
+      ],
+      [
+        "cutover-bundle:self-test-unapproved-source-head-rejected",
+        (() => {
+          const wrongHead = "e".repeat(40);
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: pinnedPbsSource({ head: wrongHead.slice(0, 7), fullHead: wrongHead, expectedHead: wrongHead }),
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          const unapproved = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: pinnedPbsSource(),
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          return unapproved.status === "FAIL" && unapproved.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:source-contract-pinned");
+        })(),
+        "fixture rejects PBS source-contract evidence for a full but unapproved release SHA"
       ],
       [
         "cutover-bundle:self-test-source-contract-hash-set-rejected",
@@ -1075,6 +1120,32 @@ async function runSelfTest() {
           return stale.status === "FAIL" && stale.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:source-contract-pinned");
         })(),
         "fixture rejects stale pinned PBS source remote proof"
+      ],
+      [
+        "cutover-bundle:self-test-future-source-proof-rejected",
+        (() => {
+          const futureCheckedAt = new Date(Date.parse(checkedAt) + maxEvidenceFutureSkewMs + 60 * 1000).toISOString();
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            checkedAt: futureCheckedAt,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: pinnedPbsSource({ remoteVerifiedAt: futureCheckedAt }),
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          const future = buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" });
+          write("cas-pbs-source-contract-pinned.json", {
+            ...base,
+            requireSource: true,
+            requireCleanSource: true,
+            requireExpectedHead: true,
+            pbsSource: pinnedPbsSource(),
+            checks: [{ status: "PASS", id: "ok", detail: "ok" }]
+          });
+          return future.status === "FAIL" && future.localGateFailures.some((blocker) => blocker.id === "cutover-bundle:source-contract-pinned");
+        })(),
+        "fixture rejects future-dated pinned PBS source remote proof"
       ],
       [
         "cutover-bundle:self-test-prereq-self-test-rejected",

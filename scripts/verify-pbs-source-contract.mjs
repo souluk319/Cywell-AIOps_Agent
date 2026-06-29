@@ -17,6 +17,7 @@ const requireCleanSource = args.has("--require-clean-source") || /^(1|true|yes|y
 const requireExpectedHead = args.has("--require-expected-head") || /^(1|true|yes|y|on)$/i.test(process.env.CAS_PBS_REQUIRE_SOURCE_HEAD || "");
 const expectedSourceHead = String(process.env.CAS_PBS_SOURCE_HEAD || "").trim();
 const selfTest = args.has("--self-test");
+const approvedPbsSourceHead = "6604777abb9e6bd44a83c6a12f36e31ac396489e";
 const strictApprovedRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/PBS_DEV_Part3(?:\.git)?$/i;
 const defaultApprovedRemotePattern = "^(?:git@github\\.com:|https://github\\.com/|ssh://git@github\\.com/)souluk319/PBS_DEV_Part3(?:\\.git)?$";
 const approvedRemotePatterns = (process.env.CAS_PBS_APPROVED_REMOTE_PATTERN || defaultApprovedRemotePattern)
@@ -768,6 +769,8 @@ if (!existsSync(sourceDir)) {
     fail("pbs-source:git-head-expected-required", "CAS_PBS_SOURCE_HEAD is required when --require-expected-head is set");
   } else if (requireExpectedHead && !fullGitSha(expectedSourceHead)) {
     fail("pbs-source:git-head-expected-full-sha", "CAS_PBS_SOURCE_HEAD must be the approved full 40-character PBS git SHA when --require-expected-head is set");
+  } else if (requireExpectedHead && expectedSourceHead !== approvedPbsSourceHead) {
+    fail("pbs-source:git-head-approved-release", `CAS_PBS_SOURCE_HEAD must match the v0.1.4 approved PBS SHA ${approvedPbsSourceHead}`);
   }
   if (metadata.available) {
     pass("pbs-source:git-head", `PBS source git head ${metadata.head} on ${metadata.branch || "detached"}`);
@@ -846,6 +849,7 @@ writeFileSync(
             ...pbsSourceGit,
             ...(typeof remoteHeadProof === "object" && remoteHeadProof ? remoteHeadProof : {}),
             expectedHead: expectedSourceHead || null,
+            approvedHead: approvedPbsSourceHead,
             requireCleanSource,
             contractFileSha256: contractFileHashes(sourceDir)
           }

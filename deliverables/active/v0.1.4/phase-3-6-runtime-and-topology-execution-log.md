@@ -22,7 +22,7 @@ Implemented after the parallel console/cutover/evidence review pass:
 - Release promotion and cutover bundling now require the Cywell release HEAD itself to be contained in an approved fetched `origin/*` ref; local-only Cywell commits cannot produce live-ready release evidence.
 - Strict preflight parses rendered Kubernetes objects for the live generated-site overlay and checks the exact NetworkPolicy shape for PBS egress and Knowledge Engine ingress instead of relying on string presence.
 - Strict preflight now treats only real Kubernetes NotFound responses as proof that the legacy `cas-knowledge-postgres` Secret is absent; RBAC/API errors no longer pass the absence check.
-- The tracked pbs-live overlay now fails closed with `customer-access-json={}`; production mappings must come from `render:pbs:live-prereqs` generated site overlay.
+- The tracked pbs-live overlay now fails closed with `customer-access-json=__GENERATED_PBS_LIVE_SITE_OVERLAY_REQUIRED__`; production mappings must come from `render:pbs:live-prereqs` generated site overlay.
 - The v0.1.4 PBS source baseline is now pinned through a clean clone at `F:\AI_Projects\PBS-Dev3-cywell-v014-source-pin-clone`, branch `kugnus/cywell-v0.1.4-source-contract`, commit `6604777abb9e6bd44a83c6a12f36e31ac396489e`, pushed to approved remote `https://github.com/souluk319/PBS_DEV_Part3.git`.
 - The PBS companion branch now adds `deploy/openshift-cywell-v014`, a real OpenShift overlay that renders namespace `playbookstudio`, Service `playbookstudio-runtime` on port `8765`, and runtime labels `app.kubernetes.io/name=playbookstudio` plus `app.kubernetes.io/component=runtime` without faking `/api/health`.
 

@@ -17,7 +17,7 @@ configMapGenerator:
     namespace: cywell-ai-sentinel
     literals:
       - service-owner=cas-pbs-live
-      - customer-access-json={}
+      - customer-access-json=__GENERATED_PBS_LIVE_SITE_OVERLAY_REQUIRED__
 generatorOptions:
   disableNameSuffixHash: true
 patches:

@@ -500,9 +500,9 @@ function runRenderedChecks() {
     "render:pbs-live:gateway-customer-acl-required",
     envValue(liveGatewayDeployment, "CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS") === "true" &&
       envFromConfig(liveGatewayDeployment, "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON", "cas-knowledge-live-config", "customer-access-json") &&
-      live.includes("customer-access-json: '{}'") &&
+      live.includes("customer-access-json: __GENERATED_PBS_LIVE_SITE_OVERLAY_REQUIRED__") &&
       !live.includes("[\"*\"]"),
-    "PBS live gateway requires customer workspace ACL and the tracked default overlay fails closed"
+    "PBS live gateway requires customer workspace ACL and the tracked default overlay is explicitly non-deployable"
   );
   expect("render:pbs-live:knowledge-deployment", Boolean(liveDeployment), "PBS live renders cas-knowledge-engine Deployment");
   expect(
@@ -950,7 +950,7 @@ for (const file of files) {
         text.includes("newTag: v0.1.4") &&
         text.includes("cas-knowledge-live-config") &&
         text.includes("customer-access-json") &&
-        text.includes("customer-access-json={}") &&
+        text.includes("customer-access-json=__GENERATED_PBS_LIVE_SITE_OVERLAY_REQUIRED__") &&
         text.includes("gateway-customer-access-live-patch.yaml") &&
         text.includes("delete-dev-knowledge-env-patch.yaml") &&
         !text.includes("delete-dev-postgres-secret.yaml") &&
@@ -1110,9 +1110,8 @@ for (const file of files) {
       );
       expect(
         "crc-deploy:crc-only-policies",
-        text.includes("deploy/kustomize/overlays/crc/21-lightspeed-ingress.yaml") &&
-          text.includes("deploy/kustomize/overlays/crc/gateway-crc-api-egress.yaml"),
-        "CRC deploy script applies CRC-only Lightspeed ingress and Kubernetes API egress policies outside base"
+        text.includes("deploy/kustomize/overlays/crc") && text.includes('["apply", "-k", "deploy/kustomize/overlays/crc"]'),
+        "CRC deploy script applies the full CRC overlay, including Lightspeed ingress, Kubernetes API egress, and TLS override"
       );
       expect(
         "crc-deploy:source-annotations",

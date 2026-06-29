@@ -262,9 +262,7 @@ if (operator.ok && operator.stdout) {
   console.log("No v0.1.3 OLM operator found; continuing clean v0.1.4 dev deploy");
 }
 
-run("oc", ["apply", "-k", "deploy/kustomize/base"], { stdio: "inherit" });
-run("oc", ["apply", "-f", "deploy/kustomize/overlays/crc/21-lightspeed-ingress.yaml"], { stdio: "inherit" });
-run("oc", ["apply", "-f", "deploy/kustomize/overlays/crc/gateway-crc-api-egress.yaml"], { stdio: "inherit" });
+run("oc", ["apply", "-k", "deploy/kustomize/overlays/crc"], { stdio: "inherit" });
 
 console.log("Pinning CAS deployments to freshly built dev images");
 run(

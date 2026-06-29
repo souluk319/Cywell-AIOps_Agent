@@ -484,6 +484,12 @@ function gitEvidence() {
 
 function recordEvidence(status, checks, extra = {}, evidencePath = "test-results/cas-pbs-live-prereqs-render.json") {
   const git = gitEvidence();
+  const summary = {
+    total: checks.length,
+    passed: checks.filter((check) => check.status === "PASS").length,
+    warned: checks.filter((check) => check.status === "WARN").length,
+    failed: checks.filter((check) => check.status === "FAIL").length
+  };
   mkdirSync("test-results", { recursive: true });
   writeFileSync(
     evidencePath,
@@ -495,6 +501,7 @@ function recordEvidence(status, checks, extra = {}, evidencePath = "test-results
         fullHead: git.fullHead,
         treeStatus: git.treeStatus,
         status,
+        summary,
         ...extra,
         checks
       },
@@ -679,6 +686,9 @@ function selfTest() {
         invalidEvidence.mode === "input-validation" &&
         invalidEvidence.fullHead &&
         invalidEvidence.inputErrorCount === emptyErrors.length &&
+        invalidEvidence.summary?.total === emptyErrors.length &&
+        invalidEvidence.summary?.failed === emptyErrors.length &&
+        invalidEvidence.summary?.passed === 0 &&
         !JSON.stringify(invalidEvidence).includes("LivePg-") &&
         invalidEvidence.checks.every((check) => check.status === "FAIL")
         ? "PASS"

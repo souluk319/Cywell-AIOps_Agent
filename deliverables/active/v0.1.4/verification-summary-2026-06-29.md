@@ -73,7 +73,7 @@ Current hardening additions after the initial summary:
 - RAG/wiki action callbacks read the latest selected-document scope at click time and ignore late selected-document responses after operators switch to full-corpus or another document scope.
 - PBS preflight evidence names now include the generated site overlay identity, so `verify:pbs:preflight:live:site:preapply` writes `test-results/cas-pbs-preflight-pbs-live-site-preapply-cluster-required-secrets.json` instead of overwriting default pbs-live evidence.
 - The cutover bundle now requires generated-site live preapply evidence with current clean `fullHead`, exact overlay path, `--require-cluster`, `--require-secret`, `--skip-applied`, freshness ordering after release/prereq evidence, and runtime pod source revision evidence; it also requires every required local evidence artifact to come from a clean tree, cluster identity to match CRC deployment/release evidence, recomputes the current generated live-prereq file/site-overlay/redacted-summary hashes, requires strict full-SHA PBS source pinning with approved remote identity, successful fresh remote fetch, approved remote ref containment proof, and exact contract-file hashes, and reports external live blockers in active blockers even when local evidence is invalid.
-- The tracked pbs-live overlay now fails closed with `customer-access-json={}`; production customer/group mapping must come from the reviewed generated `pbs-live-site` overlay.
+- The tracked pbs-live overlay now fails closed with `customer-access-json=__GENERATED_PBS_LIVE_SITE_OVERLAY_REQUIRED__`; production customer/group mapping must come from the reviewed generated `pbs-live-site` overlay.
 - In the current shell, `npm run render:pbs:live-prereqs` real rendering is blocked until approved non-placeholder live Secret material and ACL/DB inputs are provided. The renderer self-test still passes through `npm run verify:pbs:live-prereqs`.
 
 Clean checkout reproduction:
@@ -137,7 +137,7 @@ CRC v0.1.4 dev deployment is verified, PBS-compatible local shadow storage is ex
 
 The current CRC cluster already passes the Gateway Kubernetes API egress check for SelfSubjectReview/OpenShift evidence through the CRC overlay. Non-CRC live clusters still need their own cluster-specific Kubernetes API egress, because standard Kubernetes NetworkPolicy cannot allow `kubernetes.default.svc` by Service name.
 
-The tracked pbs-live overlay fails closed with an empty Gateway customer workspace ACL in `cas-knowledge-live-config/customer-access-json`. For production, use `render:pbs:live-prereqs` and the generated `test-results/pbs-live-prereqs/pbs-live-site` overlay so strict preflight renders the reviewed concrete customer/group mapping.
+The tracked pbs-live overlay fails closed with the sentinel `__GENERATED_PBS_LIVE_SITE_OVERLAY_REQUIRED__` in `cas-knowledge-live-config/customer-access-json`. For production, use `render:pbs:live-prereqs` and the generated `test-results/pbs-live-prereqs/pbs-live-site` overlay so strict preflight renders the reviewed concrete customer/group mapping.
 
 Operational checklist:
 

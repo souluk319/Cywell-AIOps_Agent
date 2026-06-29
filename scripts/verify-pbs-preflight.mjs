@@ -31,6 +31,8 @@ let pbsRuntimeServicePresent = false;
 let strictPinnedPbsSourceEvidence = null;
 const strictApprovedPbsRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/PBS_DEV_Part3(?:\.git)?$/i;
 const approvedCywellRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/Cywell-AIOps_Agent(?:\.git)?$/i;
+const approvedPbsSourceHead = "6604777abb9e6bd44a83c6a12f36e31ac396489e";
+const maxEvidenceFutureSkewMs = 5 * 60 * 1000;
 const requiredPbsContractFiles = [
   "deploy/Dockerfile",
   "deploy/openshift/core.yaml",
@@ -976,6 +978,7 @@ function strictPinnedSourceEvidenceValid(evidence) {
   const evidenceCheckedAtMs = evidenceTimeMs(evidence?.checkedAt);
   const remoteVerifiedAtMs = evidenceTimeMs(source.remoteVerifiedAt);
   const maxAgeMs = Math.max(1, maxPinnedSourceEvidenceAgeMinutes) * 60 * 1000;
+  const nowMs = Date.parse(checkedAt);
   const envHead = String(process.env.CAS_PBS_SOURCE_HEAD || "").trim();
   const exactHashSet =
     hashKeys.length === expectedHashKeys.length &&
@@ -989,8 +992,14 @@ function strictPinnedSourceEvidenceValid(evidence) {
   if (!fullGitSha(source.expectedHead) || !fullGitSha(source.fullHead) || source.fullHead !== source.expectedHead) {
     reasons.push("PBS expectedHead/fullHead must be matching full SHAs");
   }
+  if (source.expectedHead !== approvedPbsSourceHead || source.fullHead !== approvedPbsSourceHead) {
+    reasons.push(`PBS source evidence must match the v0.1.4 approved SHA ${approvedPbsSourceHead}`);
+  }
   if (fullGitSha(envHead) && source.expectedHead !== envHead) {
     reasons.push(`CAS_PBS_SOURCE_HEAD ${envHead} does not match pinned source evidence ${source.expectedHead || "missing"}`);
+  }
+  if (fullGitSha(envHead) && envHead !== approvedPbsSourceHead) {
+    reasons.push(`CAS_PBS_SOURCE_HEAD ${envHead} is not the v0.1.4 approved PBS SHA ${approvedPbsSourceHead}`);
   }
   if (!strictApprovedPbsRemotePattern.test(String(source.remoteOriginUrl ?? "").trim())) {
     reasons.push(`PBS remote is not the approved repository: ${source.remoteOriginUrl || "missing"}`);
@@ -1005,7 +1014,9 @@ function strictPinnedSourceEvidenceValid(evidence) {
   }
   if (!evidenceCheckedAtMs || !remoteVerifiedAtMs) {
     reasons.push("pinned source evidence is missing checkedAt or remoteVerifiedAt");
-  } else if (Date.parse(checkedAt) - evidenceCheckedAtMs > maxAgeMs || Date.parse(checkedAt) - remoteVerifiedAtMs > maxAgeMs) {
+  } else if (evidenceCheckedAtMs > nowMs + maxEvidenceFutureSkewMs || remoteVerifiedAtMs > nowMs + maxEvidenceFutureSkewMs) {
+    reasons.push("pinned source proof is future-dated beyond the accepted clock skew");
+  } else if (nowMs - evidenceCheckedAtMs > maxAgeMs || nowMs - remoteVerifiedAtMs > maxAgeMs) {
     reasons.push(`pinned source proof is older than ${maxPinnedSourceEvidenceAgeMinutes} minutes`);
   } else if (Math.abs(remoteVerifiedAtMs - evidenceCheckedAtMs) > 60 * 1000) {
     reasons.push("remoteVerifiedAt is not from the same strict source pinning run as checkedAt");
@@ -1020,6 +1031,7 @@ function strictPinnedSourceEvidenceValid(evidence) {
     remoteRefsContainingExpectedHead: source.remoteRefsContainingExpectedHead || [],
     remoteFetchOk: source.remoteFetchOk === true,
     remoteVerifiedAt: source.remoteVerifiedAt || "",
+    approvedHead: approvedPbsSourceHead,
     evidenceCheckedAt: evidence?.checkedAt || "",
     reason: reasons.join("; ")
   };
@@ -1067,6 +1079,7 @@ function readPinnedPbsSourceHead() {
       evidence.requireExpectedHead === true &&
       source.treeStatus === "clean" &&
       source.fullHead === source.expectedHead &&
+      source.expectedHead === approvedPbsSourceHead &&
       fullGitSha(source.expectedHead)
     ) {
       return source.expectedHead;
