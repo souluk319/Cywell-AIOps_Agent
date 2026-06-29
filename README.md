@@ -53,7 +53,7 @@ npm run verify:crc:connection
 
 Gateway knowledge private routes verify the incoming OpenShift Console `UserToken` through Kubernetes `SelfSubjectReview`, strip user bearer tokens before the internal Knowledge Engine hop, check the configured customer workspace ACL when enabled, and inject only the Gateway-derived signed owner header. Public Gateway and knowledge health surfaces are sanitized so provider modes, owner identity mode, storage paths, tenant counts, and PBS internals are not exposed through the Console proxy.
 
-The v0.1.4 base deployment uses the local/Postgres PBS-compatible Knowledge Engine. PBS live cutover remains gated on external HTTPS/mTLS `playbookstudio` runtime, `cas-pbs-auth`, live Postgres Secret, reviewed customer ACL mapping, live overlay application, and PBS runtime/corpus readiness. Local `v0.1.4` release ImageStreamTags can be prepared from the verified CRC images with `npm run release:crc:v0.1.4`; retagging an existing release tag requires `CAS_RELEASE_FORCE=true`.
+The v0.1.4 base deployment uses the local/Postgres PBS-compatible Knowledge Engine. PBS live cutover remains gated on external HTTPS/mTLS `playbookstudio` runtime, `cas-pbs-auth`, live Postgres Secret, reviewed customer ACL mapping, strict `CAS_PBS_SOURCE_HEAD` source pinning, live overlay application, and PBS runtime/corpus readiness. Local `v0.1.4` release ImageStreamTags can be prepared from the verified CRC images with `npm run release:crc:v0.1.4`; retagging an existing release tag requires `CAS_RELEASE_FORCE=true`.
 
 For PBS live cutover, use:
 
@@ -66,6 +66,8 @@ npm run verify:release:pbs-live
 ```
 
 Those commands are expected to fail or warn until HTTPS `CAS_PBS_BASE_URL`, PBS bearer token material, the `playbookstudio` runtime, `cas-pbs-auth`, `cas-knowledge-postgres-live`, reviewed `cas-knowledge-live-config/customer-access-json`, live overlay application, and live PBS egress policy are present. `verify:pbs:cutover` is the local PBS API smoke and requires `CAS_PBS_BASE_URL` plus `CAS_PBS_BEARER_TOKEN`, `CAS_PBS_API_KEY`, or `CAS_PBS_BEARER_TOKEN_FILE`; release readiness is proven by non-skipping `verify:release:pbs-live`.
+
+Use `npm run render:pbs:live-prereqs:template` to generate non-secret PBS live input templates under ignored `test-results/pbs-live-prereqs-input-template/`; copy them outside the repo and fill approved token, owner-HMAC, ACL, and Postgres values from the secret manager before running `npm run render:pbs:live-prereqs`.
 
 `npm run verify:pbs:preflight` defaults to pbs-live diagnostics and may exit 0 with WARN entries. Use `npm run verify:pbs:preflight:shadow` for render/config diagnostics and `npm run verify:pbs:preflight:shadow:cluster` after applying `pbs-shadow`. `npm run verify:pbs:live` may exit 0 as SKIP when `CAS_PBS_BASE_URL` is unset. Those are diagnostic states, not PBS live release readiness.
 

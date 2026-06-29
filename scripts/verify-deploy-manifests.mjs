@@ -1151,6 +1151,8 @@ for (const file of files) {
       }
       if (
         text.includes('"render:pbs:live-prereqs"') &&
+        text.includes('"render:pbs:live-prereqs:template"') &&
+        text.includes("--write-input-template") &&
         text.includes("render-pbs-live-prereqs.mjs") &&
         text.includes('"verify:pbs:live-prereqs"') &&
         text.includes("--self-test") &&
@@ -1270,6 +1272,7 @@ for (const file of files) {
           text.includes("hmacSecretLooksUsable") &&
           text.includes("customerAccessPolicyIsConcrete") &&
           text.includes("databaseUrlMatchesSecret") &&
+          text.includes("customerIsString") &&
           text.includes("containsWildcard") &&
           text.includes("broadPrincipal") &&
           text.includes("Object.hasOwn(policy ?? {}, \"default\")") &&
@@ -1303,10 +1306,13 @@ for (const file of files) {
           text.includes("wildcard-acl-rejected") &&
           text.includes("string-wildcard-acl-rejected") &&
           text.includes("broad-group-acl-rejected") &&
+          text.includes("non-string-acl-rejected") &&
           text.includes("db-url-mismatch-rejected") &&
+          text.includes("input-error-env-names") &&
+          text.includes("input-template") &&
           text.includes("redacted-summary"),
-        "PBS live prerequisite renderer has self-tests for rendering, redaction, ACL rejection, and DB URL mismatch",
-        "PBS live prerequisite renderer must self-test render/redaction/ACL/DB URL validation"
+        "PBS live prerequisite renderer has self-tests for rendering, redaction, ACL rejection, DB URL mismatch, env naming, and input templates",
+        "PBS live prerequisite renderer must self-test render/redaction/ACL/DB URL validation, env naming, and input templates"
       );
     }
     if (file.includes("verify-pbs-source-contract")) {
@@ -1379,6 +1385,8 @@ for (const file of files) {
           text.includes("git-tree-clean") &&
           text.includes("sourceContractPinned") &&
           text.includes("hasRealRenderHashes") &&
+          text.includes("expectedLivePrereqOutputDir") &&
+          text.includes("underOutputDir") &&
           text.includes("isStrictGeneratedSitePreapply") &&
           text.includes("requiredLivePrereqOutputFileKeys") &&
           text.includes("expectedGeneratedSiteOverlayPath") &&
@@ -1399,9 +1407,10 @@ for (const file of files) {
           text.includes("self-test-redaction") &&
           text.includes("self-test-artifact-hashes") &&
           text.includes("self-test-dirty-source-rejected") &&
-          text.includes("self-test-prereq-self-test-rejected"),
-        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, dirty source rejection, and self-test evidence rejection",
-        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, dirty source rejection, and self-test evidence rejection"
+          text.includes("self-test-prereq-self-test-rejected") &&
+          text.includes("self-test-prereq-output-dir-rejected"),
+        "PBS cutover bundle renderer self-tests blocker extraction, redaction, artifact hashing, dirty source rejection, self-test evidence rejection, and prereq output directory binding",
+        "PBS cutover bundle renderer must self-test blocker extraction, redaction, artifact hashing, dirty source rejection, self-test evidence rejection, and prereq output directory binding"
       );
     }
     if (file.includes("promote-crc-release-images")) {
@@ -1569,8 +1578,11 @@ for (const file of files) {
         text.includes("preflight:live-customer-acl-concrete") &&
         text.includes('Object.hasOwn(policy, "default")') &&
         text.includes("system:authenticated") &&
+        text.includes('typeof value !== "string"') &&
         text.includes("!Array.isArray(customers)") &&
         text.includes("placeholder(clean)") &&
+        text.includes("resultIsNotFound") &&
+        text.includes("readError") &&
         text.includes("sourceEvidenceHead") &&
         text.includes("staleEvidenceAllowed") &&
         text.includes("non-stale-source") &&

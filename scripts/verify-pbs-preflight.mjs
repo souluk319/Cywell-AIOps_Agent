@@ -57,6 +57,10 @@ function run(command, args, options = {}) {
   };
 }
 
+function resultIsNotFound(result) {
+  return /not\s*found|NotFound/i.test(`${result.stderr}\n${result.stdout}`);
+}
+
 function currentClusterIdentity() {
   const value = (args) => {
     const result = run("oc", args, { timeoutMs: 10000 });
@@ -277,7 +281,8 @@ function customerAccessPolicyIsConcrete(jsonText) {
       for (const [principal, customers] of Object.entries(map)) {
         if (broadPrincipal(table, principal) || !Array.isArray(customers)) return false;
         for (const value of customers) {
-          const clean = String(value).trim();
+          if (typeof value !== "string") return false;
+          const clean = value.trim();
           entries += 1;
           if (!clean || clean.includes("*") || placeholder(clean)) return false;
         }
@@ -593,13 +598,19 @@ function getJson(id, args) {
 
 function getJsonOptional(id, args) {
   const result = run("oc", [...args, "-o", "json"], { timeoutMs: 30000 });
-  if (!result.ok) return undefined;
+  if (!result.ok) {
+    const detail = result.stderr || result.stdout || "oc command failed";
+    if (resultIsNotFound(result)) return { value: undefined, missing: true, readError: false, detail };
+    if (requireCluster) fail(id, detail);
+    else warn(id, detail);
+    return { value: undefined, missing: false, readError: true, detail };
+  }
   try {
-    return JSON.parse(result.stdout);
+    return { value: JSON.parse(result.stdout), missing: false, readError: false, detail: "" };
   } catch (error) {
     if (requireCluster) fail(id, `could not parse JSON: ${error.message}`);
     else warn(id, `could not parse JSON: ${error.message}`);
-    return undefined;
+    return { value: undefined, missing: false, readError: true, detail: error.message };
   }
 }
 
@@ -1262,12 +1273,12 @@ if (overlay === "pbs-live") {
     warn("cluster:knowledge-postgres-live-secret-optional", "cas-knowledge-postgres-live Secret is absent; live cutover must create it or run preflight with --require-secret");
   }
   const legacyDbSecret = getJsonOptional("cluster:legacy-postgres-secret", ["get", "secret", "-n", namespace, "cas-knowledge-postgres"]);
-  if (legacyDbSecret) {
+  if (legacyDbSecret.value) {
     const detail = "legacy cas-knowledge-postgres Secret exists in the cluster; prune/delete it before pbs-live cutover so dev credentials cannot be reused";
     if (requireSecret) fail("cluster:legacy-postgres-secret", detail);
     else warn("cluster:legacy-postgres-secret", detail);
-  } else {
-    pass("cluster:legacy-postgres-secret-absent", "legacy cas-knowledge-postgres Secret is absent or not readable in this preflight context");
+  } else if (!legacyDbSecret.readError) {
+    pass("cluster:legacy-postgres-secret-absent", "legacy cas-knowledge-postgres Secret is absent");
   }
   if (requireCluster && !skipApplied) {
     let appliedKnowledgeLabels = {

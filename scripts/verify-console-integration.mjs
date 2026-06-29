@@ -422,6 +422,36 @@ expectText(
   "knowledge route note save callback refreshes when selected document changes"
 );
 expectText(
+  "console-knowledge:wiki-note-link-preserves-document",
+  knowledgeRouteSource,
+  "if (target.document_source_id) params.set(\"document_id\", target.document_source_id)",
+  "knowledge route wiki-note deep links preserve source document lineage"
+);
+expectText(
+  "console-knowledge:initial-document-excludes-bare-note",
+  knowledgeRouteSource,
+  "return documentIdFromParams(currentSearchParams())",
+  "knowledge route derives selected document only from document query params"
+);
+expectText(
+  "console-knowledge:stale-action-scope-guard",
+  knowledgeRouteSource,
+  "scope.isStale()",
+  "knowledge route ignores stale async action results after customer scope changes"
+);
+expectText(
+  "console-knowledge:customer-change-invalidates-topology",
+  knowledgeRouteSource,
+  "topologyRequestSequence.current += 1",
+  "customer changes invalidate in-flight topology requests"
+);
+expectText(
+  "console-knowledge:popstate-route-sync",
+  knowledgeRouteSource,
+  "window.addEventListener(\"popstate\", onPopState)",
+  "knowledge route reconciles browser back/forward URL state"
+);
+expectText(
   "console-knowledge:url-ingest-pbs-pages",
   knowledgeRouteSource,
   "addRecordList(value.pages, \"document\")",

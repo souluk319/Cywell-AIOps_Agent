@@ -9,7 +9,14 @@ const args = new Set(process.argv.slice(2).filter((arg) => !arg.startsWith("--ou
 const outDirArg = process.argv.find((arg) => arg.startsWith("--out-dir="))?.split("=")[1];
 const namespace = process.env.CAS_PBS_LIVE_NAMESPACE || "cywell-ai-sentinel";
 const defaultOutDir = join("test-results", "pbs-live-prereqs");
+const defaultTemplateDir = join("test-results", "pbs-live-prereqs-input-template");
 const checkedAt = new Date().toISOString();
+const postgresEnvNames = {
+  database: "CAS_KNOWLEDGE_POSTGRES_DB",
+  username: "CAS_KNOWLEDGE_POSTGRES_USER",
+  password: "CAS_KNOWLEDGE_POSTGRES_PASSWORD",
+  databaseUrl: "CAS_KNOWLEDGE_POSTGRES_DATABASE_URL"
+};
 
 function sha256(value) {
   return createHash("sha256").update(String(value)).digest("hex");
@@ -87,7 +94,13 @@ function parseCustomerAccessPolicy(text) {
 function entriesFromTable(table) {
   if (!table || typeof table !== "object" || Array.isArray(table)) return [];
   return Object.entries(table).flatMap(([principal, value]) =>
-    Array.isArray(value) ? value.map((customer) => ({ principal, customer: String(customer).trim() })) : []
+    Array.isArray(value)
+      ? value.map((customer) => ({
+          principal,
+          customer: typeof customer === "string" ? customer.trim() : "",
+          customerIsString: typeof customer === "string"
+        }))
+      : []
   );
 }
 
@@ -139,6 +152,7 @@ function customerAccessPolicyIsConcrete(policy) {
     entries.every(
       (entry) =>
         entry.table &&
+        entry.customerIsString &&
         entry.customer &&
         entry.principal &&
         !valueLooksPlaceholder(entry.customer) &&
@@ -226,7 +240,7 @@ function validateInputs(inputs) {
   }
   const postgres = inputs.postgresValues;
   for (const key of ["database", "username", "password", "databaseUrl"]) {
-    if (valueLooksPlaceholder(postgres[key])) errors.push(`CAS_KNOWLEDGE_POSTGRES_${key === "databaseUrl" ? "DATABASE_URL" : key.toUpperCase()} must be non-placeholder`);
+    if (valueLooksPlaceholder(postgres[key])) errors.push(`${postgresEnvNames[key]} must be non-placeholder`);
   }
   if (postgres.password && postgres.password.length < 16) errors.push("CAS_KNOWLEDGE_POSTGRES_PASSWORD must be at least 16 characters");
   if (!liveDatabaseUrlUsesService(postgres.databaseUrl, inputs.namespace)) errors.push("CAS_KNOWLEDGE_POSTGRES_DATABASE_URL must target cas-knowledge-postgres Service DNS on port 5432");
@@ -387,6 +401,69 @@ function sampleEnv() {
   };
 }
 
+function inputTemplateFiles(targetNamespace = namespace) {
+  const readme = [
+    "# PBS Live Prerequisite Input Template",
+    "",
+    "Copy these files to an approved secure handoff location, replace placeholders there, and keep raw Secret values out of git.",
+    "",
+    "1. Store the PBS bearer token in `pbs-live-token.txt`.",
+    "2. Store the Gateway -> Knowledge Engine owner HMAC secret in `cas-owner-hmac-secret.txt`.",
+    "3. Review and replace `customer-access.example.json` with explicit owners/users/groups to customer workspace mappings.",
+    "4. Set a live Postgres password from the target secret manager.",
+    "5. Run `set-pbs-live-prereqs.template.ps1` after replacing placeholder paths and values.",
+    "",
+    "The renderer rejects wildcard/default ACLs, placeholder values, short tokens, weak HMAC material, and Postgres URLs that do not match the DB Secret fields.",
+    ""
+  ].join("\n");
+  const powershell = [
+    "# Copy this file outside the repository before filling real values.",
+    "# Do not commit the filled copy.",
+    `$env:CAS_PBS_LIVE_NAMESPACE="${targetNamespace}"`,
+    '$env:CAS_PBS_BEARER_TOKEN_FILE="C:\\secure-handoff\\pbs-live-token.txt"',
+    '$env:CAS_KNOWLEDGE_OWNER_HMAC_SECRET_FILE="C:\\secure-handoff\\cas-owner-hmac-secret.txt"',
+    '$env:CAS_KNOWLEDGE_SERVICE_OWNER="cas-pbs-live"',
+    '$env:CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE="C:\\secure-handoff\\customer-access.json"',
+    '$env:CAS_KNOWLEDGE_POSTGRES_DB="cas_knowledge_live"',
+    '$env:CAS_KNOWLEDGE_POSTGRES_USER="cas_knowledge_live"',
+    '$env:CAS_KNOWLEDGE_POSTGRES_PASSWORD="<replace-with-secret-manager-value>"',
+    `$env:CAS_KNOWLEDGE_POSTGRES_DATABASE_URL="postgresql://cas_knowledge_live:<url-encoded-password>@cas-knowledge-postgres.${targetNamespace}.svc.cluster.local:5432/cas_knowledge_live"`,
+    "",
+    "npm run render:pbs:live-prereqs",
+    ""
+  ].join("\n");
+  const customerAccess = JSON.stringify(
+    {
+      groups: {
+        "customer-a-ops": ["customer-a"],
+        "customer-b-ops": ["customer-b"]
+      },
+      users: {
+        "alice@example.com": ["customer-a"]
+      }
+    },
+    null,
+    2
+  );
+  return {
+    "README.md": readme,
+    "set-pbs-live-prereqs.template.ps1": powershell,
+    "customer-access.example.json": `${customerAccess}\n`,
+    "pbs-live-token.txt.example": "<replace-with-approved-pbs-bearer-token>\n",
+    "cas-owner-hmac-secret.txt.example": "<replace-with-approved-32-plus-character-hmac-secret>\n"
+  };
+}
+
+function writeInputTemplate(templateDir) {
+  assertOutputUnderTestResults(templateDir);
+  mkdirSync(templateDir, { recursive: true });
+  const files = inputTemplateFiles();
+  for (const [name, content] of Object.entries(files)) {
+    writeFileSync(join(templateDir, name), content);
+  }
+  return Object.keys(files).map((name) => join(templateDir, name));
+}
+
 function gitEvidence() {
   const status = runGit(["status", "--short"]);
   return {
@@ -514,7 +591,7 @@ function selfTest() {
     );
     const badHmac = buildInputs({ ...sampleEnv(), CAS_KNOWLEDGE_OWNER_HMAC_SECRET: "change-me" });
     record(validateInputs(badHmac).some((error) => error.includes("CAS_KNOWLEDGE_OWNER_HMAC_SECRET")) ? "PASS" : "FAIL", "pbs-live-prereqs:bad-owner-hmac-rejected", "placeholder owner HMAC secret is rejected");
-    const siteRender = rendered.ok ? runCommand("oc", ["kustomize", rendered.files.siteOverlay], { timeoutMs: 90000 }) : { ok: false, stdout: "", stderr: "render failed" };
+    const siteRender = rendered.ok ? siteRenderCommand(rendered.files.siteOverlay) : { ok: false, stdout: "", stderr: "render failed" };
     record(
       siteRender.ok &&
         siteRender.stdout.includes("name: cas-knowledge-live-config") &&
@@ -532,8 +609,34 @@ function selfTest() {
     record(validateInputs(stringWildcard).some((error) => error.includes("customer access policy")) ? "PASS" : "FAIL", "pbs-live-prereqs:string-wildcard-acl-rejected", "string wildcard ACL policy is rejected");
     const broadGroup = buildInputs({ ...sampleEnv(), CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({ groups: { "system:authenticated": ["customer-a"] } }) });
     record(validateInputs(broadGroup).some((error) => error.includes("customer access policy")) ? "PASS" : "FAIL", "pbs-live-prereqs:broad-group-acl-rejected", "broad Kubernetes system groups are rejected");
+    const nonStringAcl = buildInputs({ ...sampleEnv(), CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON: JSON.stringify({ groups: { "customer-a-ops": ["customer-a", { id: "customer-b" }, 42] } }) });
+    record(validateInputs(nonStringAcl).some((error) => error.includes("customer access policy")) ? "PASS" : "FAIL", "pbs-live-prereqs:non-string-acl-rejected", "non-string customer ACL entries are rejected");
     const mismatch = buildInputs({ ...sampleEnv(), CAS_KNOWLEDGE_POSTGRES_DATABASE_URL: "postgresql://wrong:wrong@cas-knowledge-postgres.cywell-ai-sentinel.svc.cluster.local:5432/wrong" });
     record(validateInputs(mismatch).some((error) => error.includes("credentials/database")) ? "PASS" : "FAIL", "pbs-live-prereqs:db-url-mismatch-rejected", "database-url must match individual DB Secret fields");
+    const emptyErrors = validateInputs(buildInputs({}));
+    record(
+      emptyErrors.includes("CAS_KNOWLEDGE_POSTGRES_DB must be non-placeholder") &&
+        emptyErrors.includes("CAS_KNOWLEDGE_POSTGRES_USER must be non-placeholder") &&
+        !emptyErrors.some((error) => error.includes("POSTGRES_DATABASE must be non-placeholder") || error.includes("POSTGRES_USERNAME"))
+        ? "PASS"
+        : "FAIL",
+      "pbs-live-prereqs:input-error-env-names",
+      "input validation errors name the actual supported Postgres env vars"
+    );
+    const templateDir = join(tmp, "input-template");
+    const templateFiles = writeInputTemplate(templateDir);
+    const templateText = templateFiles.map((file) => readFileSync(file, "utf8")).join("\n");
+    record(
+      templateFiles.length === 5 &&
+        templateText.includes("CAS_PBS_BEARER_TOKEN_FILE") &&
+        templateText.includes("CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE") &&
+        !templateText.includes("live-token-") &&
+        !templateText.includes("LivePg-")
+        ? "PASS"
+        : "FAIL",
+      "pbs-live-prereqs:input-template",
+      "input template writes non-secret handoff files under ignored test-results"
+    );
   } finally {
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   }
@@ -544,6 +647,11 @@ function selfTest() {
 
 if (args.has("--self-test")) {
   selfTest();
+} else if (args.has("--write-input-template")) {
+  const templateDir = resolve(outDirArg || defaultTemplateDir);
+  const files = writeInputTemplate(templateDir);
+  console.log("[PASS] PBS live prerequisite input template written");
+  for (const file of files) console.log(`  ${file}`);
 } else {
   const outDir = resolve(outDirArg || defaultOutDir);
   const inputs = buildInputs(process.env);

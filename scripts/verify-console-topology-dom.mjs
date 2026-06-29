@@ -424,6 +424,9 @@ function createHarnessServer() {
         return;
       }
       if (request.method === "POST" && knowledgePath === "/api/knowledge/uploads/ingest") {
+        if (body?.customer_id === "slow-upload") {
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+        }
         sendJson(response, 200, {
           status: "indexed",
           document: {
@@ -724,6 +727,35 @@ try {
         uploadResultHighlights.includes("2 chunks indexed"),
       "upload browser flow sends private upload payload, selects corpus item, and surfaces indexed result",
       JSON.stringify({ body: uploadCall?.body, uploadCorpusText, uploadResultHighlights })
+    );
+
+    await page.goto(`${serverHandle.url}/cywell/customer-data?customer_id=slow-upload`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-test="cas-knowledge-panel-customer-data"]', { timeout: 15000 });
+    await page.getByLabel("Document title").fill("Slow Upload Evidence");
+    const slowUploadResponse = page.waitForResponse(
+      (response) => response.url().includes("/api/knowledge/uploads/ingest") && response.status() === 200
+    );
+    await page.locator('[data-test="cas-knowledge-upload"]').click();
+    await page.getByLabel("Customer ID").fill("upload-switched");
+    await slowUploadResponse;
+    await page.waitForTimeout(100);
+    const staleUploadScopeText = await page.locator('[data-test="cas-knowledge-scope-bar"]').innerText();
+    const staleUploadCorpus =
+      (await page.locator('[data-test="cas-corpus-workbench"]').count()) > 0
+        ? await page.locator('[data-test="cas-corpus-workbench"]').innerText()
+        : "";
+    const staleUploadResultText =
+      (await page.locator('[data-test="cas-knowledge-result"]').count()) > 0
+        ? await page.locator('[data-test="cas-knowledge-result"]').innerText()
+        : "";
+    expect(
+      "console-topology-dom:late-upload-response-ignored",
+      staleUploadScopeText.includes("Full corpus") &&
+        !staleUploadScopeText.includes("uploaded-workflow-doc") &&
+        !staleUploadCorpus.includes("uploaded-workflow-doc") &&
+        !staleUploadResultText.includes("uploaded-workflow-doc"),
+      "late upload responses cannot restore a previous customer corpus selection",
+      JSON.stringify({ staleUploadScopeText, staleUploadCorpus, staleUploadResultText })
     );
 
     const selectedRagReports = page.waitForResponse(
@@ -1122,10 +1154,30 @@ try {
       "console-topology-dom:pbs-rich-viewer-links",
       richViewerText.includes("Rich Wiki Note") &&
         richViewerText.includes("/wiki/rich") &&
-        String(richWikiViewerHref ?? "").includes("/cywell/llm-wiki?customer_id=pbs-rich-topology&note_id=pbs-rich-note"),
-      "PBS-rich topology exposes Wiki note viewer deep links",
+        String(richWikiViewerHref ?? "").includes("/cywell/llm-wiki?customer_id=pbs-rich-topology") &&
+        String(richWikiViewerHref ?? "").includes("note_id=pbs-rich-note") &&
+        String(richWikiViewerHref ?? "").includes("document_id=pbs-rich-upload"),
+      "PBS-rich topology exposes Wiki note viewer deep links with source document lineage",
       JSON.stringify({ richViewerText, richWikiViewerHref })
     );
+    const richTopologyUrl = page.url();
+    await page.locator('[data-test="cas-knowledge-viewer-link"]').filter({ hasText: "Rich Wiki Note" }).first().click();
+    await page.waitForFunction(() => window.location.href.includes("/cywell/llm-wiki") && window.location.href.includes("document_id=pbs-rich-upload"));
+    await page.goBack();
+    await page.waitForFunction(
+      (expectedUrl) =>
+        window.location.href === expectedUrl &&
+        document.querySelector('nav[aria-label="Cywell Knowledge"] a[aria-current="page"]')?.textContent === "Topology",
+      richTopologyUrl
+    );
+    expect(
+      "console-topology-dom:popstate-restores-route-state",
+      (await page.locator('nav[aria-label="Cywell Knowledge"] a[aria-current="page"]').innerText()) === "Topology" &&
+        page.url() === richTopologyUrl,
+      "browser back reconciles URL state after an in-app viewer deep link",
+      JSON.stringify({ url: page.url(), richTopologyUrl })
+    );
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 6);
     await page.getByRole("button", { name: "Links", exact: true }).click();
     expect(
       "console-topology-dom:pbs-rich-link-filter",

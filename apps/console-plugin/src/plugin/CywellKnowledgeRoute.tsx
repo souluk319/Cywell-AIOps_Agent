@@ -971,38 +971,56 @@ function currentSearchParams() {
   return typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
 }
 
-function initialCustomerId() {
-  const params = currentSearchParams();
+function currentLocationSnapshot() {
+  return {
+    pathname: typeof window === "undefined" ? "/cywell/customer-data" : window.location.pathname,
+    search: typeof window === "undefined" ? "" : window.location.search
+  };
+}
+
+function customerIdFromParams(params: URLSearchParams) {
   return params.get("customer_id") || params.get("customerId") || "default";
 }
 
-function initialViewerTarget(): ViewerTarget | null {
-  const params = currentSearchParams();
+function documentIdFromParams(params: URLSearchParams) {
+  return stringValue(params.get("document_id") || params.get("documentId")) || "";
+}
+
+function viewerTargetFromParams(params: URLSearchParams, viewerPath?: string): ViewerTarget | null {
   const documentId = stringValue(params.get("document_id") || params.get("documentId"));
-  if (documentId) {
-    return {
-      kind: "document",
-      id: documentId,
-      title: documentId,
-      document_source_id: documentId,
-      viewer_path: typeof window === "undefined" ? undefined : `${window.location.pathname}${window.location.search}`
-    };
-  }
   const noteId = stringValue(params.get("note_id") || params.get("noteId"));
   if (noteId) {
     return {
       kind: "wiki-note",
       id: noteId,
       title: noteId,
-      viewer_path: typeof window === "undefined" ? undefined : `${window.location.pathname}${window.location.search}`
+      document_source_id: documentId || undefined,
+      viewer_path: viewerPath
+    };
+  }
+  if (documentId) {
+    return {
+      kind: "document",
+      id: documentId,
+      title: documentId,
+      document_source_id: documentId,
+      viewer_path: viewerPath
     };
   }
   return null;
 }
 
+function initialCustomerId() {
+  return customerIdFromParams(currentSearchParams());
+}
+
+function initialViewerTarget(): ViewerTarget | null {
+  const snapshot = currentLocationSnapshot();
+  return viewerTargetFromParams(currentSearchParams(), `${snapshot.pathname}${snapshot.search}`);
+}
+
 function initialDocumentId() {
-  const target = initialViewerTarget();
-  return target?.document_source_id || target?.id || "";
+  return documentIdFromParams(currentSearchParams());
 }
 
 function viewerTargetFromRecord(record: ActionResult | null | undefined, fallbackKind: ViewerKind = "document"): ViewerTarget | null {
@@ -1071,6 +1089,7 @@ function viewerHref(target: ViewerTarget, customerId: string) {
   params.set("customer_id", customerId);
   if (target.kind === "wiki-note") {
     params.set("note_id", target.id);
+    if (target.document_source_id) params.set("document_id", target.document_source_id);
     return `/cywell/llm-wiki?${params.toString()}`;
   }
   const documentId = target.document_source_id || target.id;
@@ -1108,6 +1127,12 @@ function mergeViewerTarget(left: ViewerTarget, right: ViewerTarget) {
     metadata: left.metadata ?? right.metadata
   };
 }
+
+type ActionScope = {
+  customerId: string;
+  revision: number;
+  isStale: () => boolean;
+};
 
 function collectViewerTargets(value: ActionResult | null, topology: TopologyPayload | null, customerId: string) {
   const targets: ViewerTarget[] = [];
@@ -1851,7 +1876,19 @@ function TopologyDashboard({
   const positionById = new Map(positioned.map((item) => [item.node.id, item]));
   const renderedNodeIds = new Set(positioned.map((item) => item.node.id));
   const selectedNode = visibleNodes.find((node) => node.id === selectedNodeId) ?? null;
-  const selectedViewerTarget = selectedNode ? viewerTargetFromTopologyNode(selectedNode) : null;
+  const selectedContext = topology?.selected_context ?? [];
+  const selectedContextTarget = selectedNode
+    ? viewerTargetFromRecord(
+        recordValue(selectedContext.find((context) => context.id === selectedNode.id || context.title === selectedNode.label)),
+        "wiki-note"
+      )
+    : null;
+  const selectedViewerTarget =
+    selectedNode && selectedContextTarget
+      ? mergeViewerTarget(viewerTargetFromTopologyNode(selectedNode), selectedContextTarget)
+      : selectedNode
+        ? viewerTargetFromTopologyNode(selectedNode)
+        : null;
   const selectedRelations = selectedNode
     ? visibleEdges
         .filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id)
@@ -1872,7 +1909,6 @@ function TopologyDashboard({
   const topWikilinks = topology?.top_wikilinks ?? [];
   const topTags = topology?.top_tags ?? [];
   const selectedUploads = topology?.selected_uploads ?? [];
-  const selectedContext = topology?.selected_context ?? [];
   const vaultRelations = topology?.relations ?? [];
   const counts = {
     nodes: topology?.counts?.nodes ?? topologyNodes.length,
@@ -2258,9 +2294,12 @@ export default function CywellKnowledgeRoute() {
   const [scopeMode, setScopeMode] = React.useState<"all" | "selected">(initialDocumentId() ? "selected" : "all");
   const [topologyTypeFilter, setTopologyTypeFilter] = React.useState("all");
   const [selectedTopologyNodeId, setSelectedTopologyNodeId] = React.useState<string | null>(null);
+  const [locationState, setLocationState] = React.useState(currentLocationSnapshot);
   const autoTopologyLoadKey = React.useRef("");
   const topologyRequestSequence = React.useRef(0);
-  const pathname = typeof window === "undefined" ? "/cywell/customer-data" : window.location.pathname;
+  const scopeRevision = React.useRef(0);
+  const customerIdRef = React.useRef(customerId);
+  const pathname = locationState.pathname;
   const activeKey = currentRouteKey(pathname);
   const activeRoute = routeItems.find((item) => item.key === activeKey) ?? routeItems[0];
   const capabilities = health?.capabilities?.length ? health.capabilities : fallbackCapabilities;
@@ -2277,8 +2316,47 @@ export default function CywellKnowledgeRoute() {
   const activeSourceScopes =
     scopeMode === "selected" && selectedCorpusTarget?.source_scope ? [selectedCorpusTarget.source_scope] : ["user_upload", "wiki_vault"];
 
-  const changeCustomerId = React.useCallback((nextCustomerId: string) => {
+  React.useEffect(() => {
+    customerIdRef.current = customerId;
+  }, [customerId]);
+
+  const invalidateScope = React.useCallback(() => {
+    scopeRevision.current += 1;
+    topologyRequestSequence.current += 1;
+    autoTopologyLoadKey.current = "";
+  }, []);
+
+  const syncLocationState = React.useCallback((snapshot = currentLocationSnapshot()) => {
+    const params = new URLSearchParams(snapshot.search);
+    const nextCustomerId = customerIdFromParams(params);
+    const nextDocumentId = documentIdFromParams(params);
+    const nextViewerTarget = viewerTargetFromParams(params, `${snapshot.pathname}${snapshot.search}`);
+    invalidateScope();
+    customerIdRef.current = nextCustomerId;
+    setLocationState(snapshot);
     setCustomerId(nextCustomerId);
+    setIsRunning(false);
+    setActionResult(null);
+    setTopologyData(null);
+    setCorpusTargets([]);
+    setSelectedDocumentId(nextDocumentId);
+    setSelectedViewerTarget(nextViewerTarget);
+    setScopeMode(nextDocumentId ? "selected" : "all");
+    setSelectedTopologyNodeId(null);
+  }, [invalidateScope]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onPopState = () => syncLocationState();
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [syncLocationState]);
+
+  const changeCustomerId = React.useCallback((nextCustomerId: string) => {
+    invalidateScope();
+    customerIdRef.current = nextCustomerId;
+    setCustomerId(nextCustomerId);
+    setIsRunning(false);
     setActionResult(null);
     setTopologyData(null);
     setCorpusTargets([]);
@@ -2298,15 +2376,20 @@ export default function CywellKnowledgeRoute() {
       params.delete("noteId");
       const query = params.toString();
       window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+      setLocationState(currentLocationSnapshot());
     }
-  }, []);
+  }, [invalidateScope]);
 
   const openViewer = React.useCallback(
     (target: ViewerTarget) => {
       setSelectedViewerTarget(target);
-      if (target.kind === "document") setSelectedDocumentId(target.document_source_id || target.id);
+      if (target.kind === "document" || target.document_source_id) {
+        setSelectedDocumentId(target.document_source_id || target.id);
+        setScopeMode("selected");
+      }
       if (typeof window !== "undefined") {
         window.history.pushState(null, "", viewerHref(target, customerId));
+        setLocationState(currentLocationSnapshot());
       }
     },
     [customerId]
@@ -2351,19 +2434,28 @@ export default function CywellKnowledgeRoute() {
   }, [refreshHealth]);
 
   const runAction = React.useCallback(
-    async (action: () => Promise<ActionResult>) => {
+    async (action: (scope: ActionScope) => Promise<ActionResult>) => {
+      const requestRevision = scopeRevision.current;
+      const requestCustomerId = customerIdRef.current;
+      const scope: ActionScope = {
+        customerId: requestCustomerId,
+        revision: requestRevision,
+        isStale: () => requestRevision !== scopeRevision.current || requestCustomerId !== customerIdRef.current
+      };
       setIsRunning(true);
       try {
-        const result = await action();
+        const result = await action(scope);
+        if (scope.isStale()) return;
         setActionResult(result);
         await refreshHealth();
       } catch (actionError) {
+        if (scope.isStale()) return;
         setActionResult({
           status: "error",
           error: actionError instanceof Error ? actionError.message : "knowledge action failed"
         });
       } finally {
-        setIsRunning(false);
+        if (!scope.isStale()) setIsRunning(false);
       }
     },
     [refreshHealth]
@@ -2372,24 +2464,29 @@ export default function CywellKnowledgeRoute() {
   const runTopologyRequest = React.useCallback(
     async (requestCustomerId: string, action: () => Promise<ActionResult>, options: { clearFirst?: boolean } = {}) => {
       const requestId = topologyRequestSequence.current + 1;
+      const requestRevision = scopeRevision.current;
       topologyRequestSequence.current = requestId;
+      const isStale = () =>
+        requestId !== topologyRequestSequence.current ||
+        requestRevision !== scopeRevision.current ||
+        requestCustomerId !== customerIdRef.current;
       setIsRunning(true);
       if (options.clearFirst) setTopologyData(emptyTopology(requestCustomerId));
       try {
         const result = await action();
-        if (requestId !== topologyRequestSequence.current) return;
+        if (isStale()) return;
         setTopologyData(topologyPayload(result) ?? emptyTopology(requestCustomerId));
         setActionResult(result);
         await refreshHealth();
       } catch (actionError) {
-        if (requestId !== topologyRequestSequence.current) return;
+        if (isStale()) return;
         setTopologyData(emptyTopology(requestCustomerId));
         setActionResult({
           status: "error",
           error: actionError instanceof Error ? actionError.message : "knowledge action failed"
         });
       } finally {
-        if (requestId === topologyRequestSequence.current) setIsRunning(false);
+        if (!isStale()) setIsRunning(false);
       }
     },
     [refreshHealth]
@@ -2397,18 +2494,18 @@ export default function CywellKnowledgeRoute() {
 
   const uploadDocument = React.useCallback(
     () =>
-      runAction(async () => {
+      runAction(async (scope) => {
         const result = await requestJson("/api/knowledge/uploads/ingest", {
           method: "POST",
           body: JSON.stringify({
-            customer_id: customerId,
+            customer_id: scope.customerId,
             file_name: uploadTitle,
             filename: uploadTitle,
             source_scope: "user_upload",
             visibility: "private_user",
             source_kind: "upload",
             source_metadata: {
-              customer_id: customerId,
+              customer_id: scope.customerId,
               selected_file_name: selectedFileName || uploadTitle
             },
             force_reingest: false,
@@ -2421,7 +2518,8 @@ export default function CywellKnowledgeRoute() {
               : { content: uploadContent })
           })
         });
-        const targets = collectViewerTargets(result, null, customerId).filter((target) => target.kind === "document");
+        const targets = collectViewerTargets(result, null, scope.customerId).filter((target) => target.kind === "document");
+        if (scope.isStale()) return result;
         if (targets.length > 0) {
           setCorpusTargets((current) => mergeViewerTargets(targets, current));
           selectCorpusDocument(targets[0]);
@@ -2433,24 +2531,25 @@ export default function CywellKnowledgeRoute() {
 
   const ingestUrl = React.useCallback(
     () =>
-      runAction(async () => {
+      runAction(async (scope) => {
         const result = await requestJson("/api/knowledge/uploads/url-ingest", {
           method: "POST",
           body: JSON.stringify({
-            customer_id: customerId,
+            customer_id: scope.customerId,
             url: urlValue,
             source_scope: "user_upload",
             visibility: "private_user",
             source_kind: "url",
             source_metadata: {
-              customer_id: customerId
+              customer_id: scope.customerId
             },
             force_reingest: false,
             index: true,
             auto_compile_wiki: true
           })
         });
-        const targets = collectViewerTargets(result, null, customerId).filter((target) => target.kind === "document");
+        const targets = collectViewerTargets(result, null, scope.customerId).filter((target) => target.kind === "document");
+        if (scope.isStale()) return result;
         if (targets.length > 0) {
           setCorpusTargets((current) => mergeViewerTargets(targets, current));
           selectCorpusDocument(targets[0]);
@@ -2462,9 +2561,10 @@ export default function CywellKnowledgeRoute() {
 
   const loadUploadReports = React.useCallback(
     () =>
-      runAction(async () => {
-        const result = await requestJson(`/api/knowledge/uploads/reports?customer_id=${encodeURIComponent(customerId)}`);
-        const targets = collectViewerTargets(result, null, customerId).filter((target) => target.kind === "document");
+      runAction(async (scope) => {
+        const result = await requestJson(`/api/knowledge/uploads/reports?customer_id=${encodeURIComponent(scope.customerId)}`);
+        const targets = collectViewerTargets(result, null, scope.customerId).filter((target) => target.kind === "document");
+        if (scope.isStale()) return result;
         setCorpusTargets(targets);
         if (targets.length > 0 && selectedDocumentId && !targets.some((target) => (target.document_source_id || target.id) === selectedDocumentId)) {
           setSelectedDocumentId(targets[0].document_source_id || targets[0].id);

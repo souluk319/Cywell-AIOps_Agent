@@ -64,6 +64,12 @@ These values must come from the target environment. Do not commit any secret val
 Render these with real values supplied from a secret manager or operator-approved handoff, review the diff, then apply after approval. Do not use one-shot `oc create secret` or `oc create configmap` for live cutover because those paths are easy to mistype and do not run the same input validation.
 
 ```powershell
+npm run render:pbs:live-prereqs:template
+```
+
+This writes non-secret template files under `test-results/pbs-live-prereqs-input-template/`. Copy that directory to an approved secure handoff location outside the repository, fill the copied files from the secret manager, and keep the raw token/HMAC/Postgres values out of git.
+
+```powershell
 $env:CAS_PBS_LIVE_NAMESPACE="cywell-ai-sentinel"
 $env:CAS_PBS_BEARER_TOKEN_FILE="C:\secure-handoff\pbs-live-token.txt"
 $env:CAS_KNOWLEDGE_OWNER_HMAC_SECRET_FILE="C:\secure-handoff\cas-owner-hmac-secret.txt"
@@ -104,7 +110,7 @@ Customer ACL example:
 }
 ```
 
-Do not proceed if the reviewed policy contains `default`, `*`, prefix/suffix wildcard entries, or placeholder customer IDs. The renderer and strict live preflight both require concrete customer IDs in every ACL entry.
+Do not proceed if the reviewed policy contains `default`, `*`, prefix/suffix wildcard entries, placeholder customer IDs, or non-string customer entries. The renderer and strict live preflight both require concrete string customer IDs in every ACL entry.
 
 ## Pre-Apply Gates
 
@@ -113,21 +119,24 @@ Run these before applying live manifests:
 ```powershell
 npm run verify
 npm run render:pbs:live-prereqs
-npm run verify:pbs:source-contract:required
+$env:CAS_PBS_SOURCE_HEAD="<approved PBS full git SHA>"
+npm run verify:release:source-pinning
 npm run verify:deploy:manifests
 npm run release:crc:v0.1.4
 npm run verify:pbs:preflight:live:site:preapply
+node ./scripts/render-pbs-cutover-bundle.mjs --require-live-ready
 ```
 
 Required result:
 
 - `verify` passes.
-- `verify:pbs:source-contract:required` passes against the pinned PBS source checkout before live feature parity is claimed. The evidence must include PBS source branch, HEAD, tree status, and contract file hashes. For strict release, set `CAS_PBS_SOURCE_HEAD` and `CAS_PBS_REQUIRE_CLEAN_SOURCE=true`; otherwise a dirty checkout is recorded as a WARN, not a pass/fail blocker.
+- `verify:release:source-pinning` passes against the pinned PBS source checkout before live feature parity is claimed. `CAS_PBS_SOURCE_HEAD` must be the approved full PBS git SHA, the PBS checkout must be clean, and dirty PBS source is not acceptable for live cutover.
 - `verify:pbs:live-prereqs` passes as a renderer self-test and writes `test-results/cas-pbs-live-prereqs-self-test.json`.
 - `render:pbs:live-prereqs` writes the real reviewed live prereq manifests, generated `pbs-live-site` overlay, redacted summary, and `test-results/cas-pbs-live-prereqs-render.json`.
 - `verify:deploy:manifests` passes.
-- `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags. If `v0.1.4` tags already exist and must intentionally move, rerun as `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` and capture the old/new image evidence.
+- `release:crc:v0.1.4` passes if the target cluster expects local OpenShift ImageStreamTags. Run it normally when publishing empty or already-matching tags. If `v0.1.4` tags already exist and must intentionally move, rerun as `$env:CAS_RELEASE_FORCE="true"; npm run release:crc:v0.1.4` and capture the old/new image evidence.
 - `verify:pbs:preflight:live:site:preapply` passes with no missing namespace, service, Secret, release image, Postgres image pinning, Kubernetes API egress, Postgres credential, or runtime readiness failures.
+- `render-pbs-cutover-bundle.mjs --require-live-ready` writes `test-results/cas-pbs-cutover-bundle.json` with `status=PASS` and `phase=live-preapply-ready`.
 - `verify:pbs:preflight:live:site:preapply` confirms Gateway live customer ACL is enabled and sourced from `cas-knowledge-live-config/customer-access-json`.
 - `verify:pbs:preflight:live:site:preapply` confirms release-image evidence is current-head and sourced from non-stale CRC deployment evidence.
 - `verify:pbs:preflight:live:site:preapply` confirms the Gateway Kubernetes API NetworkPolicy allows the API IP and port in the same egress rule.
@@ -216,6 +225,7 @@ Save command output or JSON artifacts for the release record:
 - `test-results/cas-release-images.json`
 - `test-results/cas-pbs-live-prereqs-render.json`
 - `test-results/cas-pbs-source-contract.json`, including `pbsSource.head`, `pbsSource.treeStatus`, and `pbsSource.contractFileSha256`
+- `test-results/cas-pbs-cutover-bundle.json`, with `status=PASS` and `phase=live-preapply-ready`
 
 ## Completion Definition
 

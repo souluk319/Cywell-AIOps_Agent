@@ -31,6 +31,7 @@ const livePreapplyEvidence = [
   "strict PBS live generated-site pre-apply evidence"
 ];
 
+const expectedLivePrereqOutputDir = "test-results/pbs-live-prereqs";
 const expectedGeneratedSiteOverlayPath = "test-results/pbs-live-prereqs/pbs-live-site";
 const requiredLivePrereqOutputFileKeys = [
   "pbsAuthSecret",
@@ -132,6 +133,7 @@ function readEvidence(baseDir, [key, fileName, label]) {
     mode: json.mode,
     namespace: json.namespace,
     releaseTag: json.releaseTag,
+    outputDir: json.outputDir,
     overlay: json.overlay,
     overlayPath: json.overlayPath,
     requireCluster: json.requireCluster,
@@ -206,8 +208,16 @@ function hasRealRenderHashes(evidence) {
   const files = evidence.outputFileSha256;
   const fileKeys = files && typeof files === "object" ? Object.keys(files).sort() : [];
   const expectedKeys = [...requiredLivePrereqOutputFileKeys].sort();
+  const outputDir = normalizePath(evidence.outputDir);
+  const pathUnder = (file, expectedDir) => {
+    const filePath = normalizePath(file?.path);
+    return file?.underOutputDir === true && filePath.startsWith(`${expectedDir}/`);
+  };
+  const allFilesUnderOutputDir = Object.values(files ?? {}).every((file) => pathUnder(file, expectedLivePrereqOutputDir));
+  const siteFilesUnderGeneratedOverlay = ["siteKustomization", "siteCustomerAccessJson"].every((key) => pathUnder(files?.[key], expectedGeneratedSiteOverlayPath));
   return (
     evidence.mode === "real-render" &&
+    outputDir === expectedLivePrereqOutputDir &&
     typeof evidence.renderedSiteOverlaySha256 === "string" &&
     evidence.renderedSiteOverlaySha256.length >= 32 &&
     typeof evidence.redactedSummarySha256 === "string" &&
@@ -216,7 +226,9 @@ function hasRealRenderHashes(evidence) {
     typeof files === "object" &&
     fileKeys.length === expectedKeys.length &&
     fileKeys.every((key, index) => key === expectedKeys[index]) &&
-    Object.values(files).every((file) => file && typeof file.sha256 === "string" && file.sha256.length >= 32)
+    Object.values(files).every((file) => file && typeof file.sha256 === "string" && file.sha256.length >= 32) &&
+    allFilesUnderOutputDir &&
+    siteFilesUnderGeneratedOverlay
   );
 }
 
@@ -389,20 +401,22 @@ async function runSelfTest() {
   try {
     const write = (name, json) => writeFileSync(join(tempRoot, name), `${JSON.stringify(json, null, 2)}\n`);
     const base = { checkedAt, branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", status: "PASS", summary: { total: 1, passed: 1, failed: 0 }, checks: [{ status: "PASS", id: "ok", detail: "ok" }] };
+    const livePrereqOutputFiles = () => ({
+      pbsAuthSecret: { path: `${expectedLivePrereqOutputDir}/cas-pbs-auth.secret.yaml`, sha256: "a".repeat(64), underOutputDir: true },
+      ownerAuthSecret: { path: `${expectedLivePrereqOutputDir}/cas-knowledge-internal-auth.secret.yaml`, sha256: "b".repeat(64), underOutputDir: true },
+      postgresSecret: { path: `${expectedLivePrereqOutputDir}/cas-knowledge-postgres-live.secret.yaml`, sha256: "c".repeat(64), underOutputDir: true },
+      liveConfig: { path: `${expectedLivePrereqOutputDir}/cas-knowledge-live-config.configmap.yaml`, sha256: "d".repeat(64), underOutputDir: true },
+      customerAccessJson: { path: `${expectedLivePrereqOutputDir}/customer-access.json`, sha256: "e".repeat(64), underOutputDir: true },
+      siteKustomization: { path: `${expectedGeneratedSiteOverlayPath}/kustomization.yaml`, sha256: "f".repeat(64), underOutputDir: true },
+      siteCustomerAccessJson: { path: `${expectedGeneratedSiteOverlayPath}/customer-access.json`, sha256: "g".repeat(64), underOutputDir: true },
+      summary: { path: `${expectedLivePrereqOutputDir}/pbs-live-prereqs.summary.json`, sha256: "h".repeat(64), underOutputDir: true }
+    });
     for (const [, fileName] of requiredLocalEvidence) write(fileName, base);
     write("cas-pbs-live-prereqs-render.json", {
       ...base,
       mode: "real-render",
-      outputFileSha256: {
-        pbsAuthSecret: { path: "a", sha256: "a".repeat(64), underOutputDir: true },
-        ownerAuthSecret: { path: "b", sha256: "b".repeat(64), underOutputDir: true },
-        postgresSecret: { path: "c", sha256: "c".repeat(64), underOutputDir: true },
-        liveConfig: { path: "d", sha256: "d".repeat(64), underOutputDir: true },
-        customerAccessJson: { path: "e", sha256: "e".repeat(64), underOutputDir: true },
-        siteKustomization: { path: "f", sha256: "f".repeat(64), underOutputDir: true },
-        siteCustomerAccessJson: { path: "g", sha256: "g".repeat(64), underOutputDir: true },
-        summary: { path: "h", sha256: "h".repeat(64), underOutputDir: true }
-      },
+      outputDir: expectedLivePrereqOutputDir,
+      outputFileSha256: livePrereqOutputFiles(),
       renderedSiteOverlaySha256: "i".repeat(64),
       redactedSummarySha256: "1".repeat(64)
     });
@@ -496,11 +510,12 @@ async function runSelfTest() {
           write("cas-pbs-live-prereqs-render.json", {
             ...base,
             mode: "real-render",
+            outputDir: expectedLivePrereqOutputDir,
             outputFileSha256: {
-              pbsAuthSecret: { path: "a", sha256: "a".repeat(64), underOutputDir: true },
-              postgresSecret: { path: "c", sha256: "c".repeat(64), underOutputDir: true },
-              liveConfig: { path: "d", sha256: "d".repeat(64), underOutputDir: true },
-              summary: { path: "h", sha256: "h".repeat(64), underOutputDir: true }
+              pbsAuthSecret: { path: `${expectedLivePrereqOutputDir}/cas-pbs-auth.secret.yaml`, sha256: "a".repeat(64), underOutputDir: true },
+              postgresSecret: { path: `${expectedLivePrereqOutputDir}/cas-knowledge-postgres-live.secret.yaml`, sha256: "c".repeat(64), underOutputDir: true },
+              liveConfig: { path: `${expectedLivePrereqOutputDir}/cas-knowledge-live-config.configmap.yaml`, sha256: "d".repeat(64), underOutputDir: true },
+              summary: { path: `${expectedLivePrereqOutputDir}/pbs-live-prereqs.summary.json`, sha256: "h".repeat(64), underOutputDir: true }
             },
             renderedSiteOverlaySha256: "i".repeat(64),
             redactedSummarySha256: "1".repeat(64)
@@ -508,6 +523,21 @@ async function runSelfTest() {
           return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
         })(),
         "fixture rejects prerequisite render evidence missing owner-HMAC and site ACL hashes"
+      ],
+      [
+        "cutover-bundle:self-test-prereq-output-dir-rejected",
+        (() => {
+          write("cas-pbs-live-prereqs-render.json", {
+            ...base,
+            mode: "real-render",
+            outputDir: "test-results/other-prereqs",
+            outputFileSha256: livePrereqOutputFiles(),
+            renderedSiteOverlaySha256: "i".repeat(64),
+            redactedSummarySha256: "1".repeat(64)
+          });
+          return buildBundle(tempRoot, { branch: "v0.1.4", head: "abc1234", fullHead: "abc1234", treeStatus: "clean", statusShort: "" }).status === "FAIL";
+        })(),
+        "fixture rejects prerequisite render evidence from an unexpected output directory"
       ]
     ];
     for (const [id, ok, detail] of checks) {
