@@ -504,6 +504,31 @@ function recordEvidence(status, checks, extra = {}, evidencePath = "test-results
   );
 }
 
+function recordInputValidationEvidence(inputs, errors, outputDir, evidencePath = "test-results/cas-pbs-live-prereqs-render.json") {
+  const checks = errors.map((error, index) => ({
+    status: "FAIL",
+    id: `pbs-live-prereqs:input-validation:${index + 1}`,
+    detail: error
+  }));
+  recordEvidence("FAIL", checks, {
+    mode: "input-validation",
+    namespace: inputs.namespace,
+    outputDir: relative(process.cwd(), outputDir),
+    inputErrorCount: errors.length,
+    inputErrors: errors,
+    requiredInputs: [
+      "CAS_PBS_BEARER_TOKEN or CAS_PBS_BEARER_TOKEN_FILE",
+      "CAS_KNOWLEDGE_OWNER_HMAC_SECRET or CAS_KNOWLEDGE_OWNER_HMAC_SECRET_FILE",
+      "CAS_KNOWLEDGE_SERVICE_OWNER",
+      "CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON or CAS_KNOWLEDGE_CUSTOMER_ACCESS_FILE",
+      "CAS_KNOWLEDGE_POSTGRES_DB",
+      "CAS_KNOWLEDGE_POSTGRES_USER",
+      "CAS_KNOWLEDGE_POSTGRES_PASSWORD",
+      "CAS_KNOWLEDGE_POSTGRES_DATABASE_URL"
+    ]
+  }, evidencePath);
+}
+
 function siteRenderCommand(siteOverlay) {
   const attempts = [
     ["oc", ["kustomize", siteOverlay]],
@@ -646,6 +671,21 @@ function selfTest() {
       "pbs-live-prereqs:input-template",
       "input template writes non-secret handoff files under ignored test-results"
     );
+    const invalidEvidencePath = join(tmp, "input-validation-evidence.json");
+    recordInputValidationEvidence(buildInputs({}), emptyErrors, join(tmp, "invalid-output"), invalidEvidencePath);
+    const invalidEvidence = JSON.parse(readFileSync(invalidEvidencePath, "utf8"));
+    record(
+      invalidEvidence.status === "FAIL" &&
+        invalidEvidence.mode === "input-validation" &&
+        invalidEvidence.fullHead &&
+        invalidEvidence.inputErrorCount === emptyErrors.length &&
+        !JSON.stringify(invalidEvidence).includes("LivePg-") &&
+        invalidEvidence.checks.every((check) => check.status === "FAIL")
+        ? "PASS"
+        : "FAIL",
+      "pbs-live-prereqs:input-validation-evidence",
+      "input validation failures write current-head redacted evidence"
+    );
   } finally {
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   }
@@ -667,6 +707,7 @@ if (args.has("--self-test")) {
   const result = render(inputs, outDir, { write: !args.has("--validate-only") });
   if (!result.ok) {
     for (const error of result.errors) console.error(`[FAIL] ${error}`);
+    recordInputValidationEvidence(inputs, result.errors, outDir);
     process.exitCode = 1;
   } else if (args.has("--validate-only")) {
     console.log("[PASS] PBS live prerequisite inputs validated; no files written");
