@@ -1,6 +1,40 @@
 # Cywell v0.1.4 Phase 3-6 Runtime and Topology Execution Log
 
-## Latest Update - Customer ACL and Live Gate Tightening
+## Latest Update - PBS-Compatible Shadow Schema, Rich Topology Signals, and Release Evidence Binding
+
+Implemented after the backend/frontend/release parallel review pass:
+
+- Local Postgres now creates a PBS-compatible schema subset for tenants, workspaces, document sources, parsed documents, chunks, chunk embeddings, graph entities, mentions, and relations.
+- Local CAS ingest writes PBS-compatible `document_sources`, `parsed_documents`, and `document_chunks` shadow rows in the same transaction as CAS document/chunk persistence.
+- The Knowledge Engine health path reports PBS-compatible schema readiness, shadow row counts, embedding table dimension, and missing embedding parity without fabricating vectors.
+- PBS Wiki Vault topology normalization now preserves PBS summary aliases, relation counts, wikilinks, tags, entity/concept nodes, degree/weight, source/viewer metadata, selected context/uploads, and vault relation signals.
+- The Cywell topology dashboard now renders PBS-rich topology semantics as KPI signals, distinct node tones, type filters, Signal leaders, inspector metadata, relation lines, and node-to-RAG actions.
+- CRC deployment verification now records verified runtime image digest evidence for app `:dev` ImageStreamTags and the running Postgres imageID.
+- CRC release promotion now refuses to move `v0.1.4` tags unless each release source digest matches the PASS CRC deployment evidence in `test-results/cas-crc-deployment.json`.
+
+Current proof:
+
+- `python -m py_compile apps/knowledge-engine/src/cas_knowledge_engine/engine.py apps/knowledge-engine/src/cas_knowledge_engine/storage.py`: PASS.
+- `node --check` passed for changed verification and release scripts.
+- `npm run verify:knowledge-engine`: PASS, 76 checks.
+- `npm run verify:console:topology-dom`: PASS, 31 browser-backed checks.
+- `npm run verify:console:integration`: PASS, 71 checks.
+- `npm run verify:deploy:manifests`: PASS, 257 checks.
+- `npm run verify`: PASS.
+- `npm run deploy:crc`: PASS, 68 runtime checks.
+- `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4`: PASS, 21 release checks.
+- `npm run verify:pbs:preflight:live:preapply`: expected FAIL, `37 PASS / 7 FAIL`; failures remain external live prerequisites in the current CRC cluster.
+
+Latest CRC `v0.1.4` release image references:
+
+```text
+cas-gateway@sha256:2b9ad1fadb5f465e0ea730667fd1e71b39512877f3610e7a7b2c1ab6e9b92689
+cas-console-plugin@sha256:7b0331eff2f7dbf91bce1f977f08f88e86f7c81e5f115e669d3cbd0830028c68
+cas-knowledge-engine@sha256:b986a6da1a2e41c95239a6ca73677a34e030e456c24fcb2ec63c9f95e5ebefa8
+cas-knowledge-postgres@sha256:9073dff8ba54ee8cefcfec5bc2a1269fc9f3aeecbd431eb892549d9b83dc1325
+```
+
+## Previous Update - Customer ACL and Live Gate Tightening
 
 Implemented after the live-readiness parallel audit pass:
 
@@ -17,19 +51,19 @@ Implemented after the live-readiness parallel audit pass:
 Current proof:
 
 - `node --check` passed for Gateway and changed verifier scripts.
-- `npm run verify:knowledge-engine`: PASS, 75 checks.
-- `npm run verify:deploy:manifests`: PASS, 252 checks.
+- `npm run verify:knowledge-engine`: PASS, 76 checks.
+- `npm run verify:deploy:manifests`: PASS, 257 checks.
 - `npm run verify`: PASS.
-- `npm run deploy:crc`: PASS, 62 runtime checks.
-- `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4`: PASS, 16 release checks.
+- `npm run deploy:crc`: PASS, 68 runtime checks.
+- `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4`: PASS, 21 release checks.
 - `npm run verify:pbs:preflight:live:preapply`: expected FAIL, `37 PASS / 7 FAIL`; failures remain external live prerequisites in the current CRC cluster.
 
 Latest CRC `v0.1.4` release image references:
 
 ```text
-cas-gateway@sha256:27650edd220c17dd13a1356c7c69b3ad69a311bf733ec006fc76040492a8596f
-cas-console-plugin@sha256:cd86e87f87a2029db23434dd549f982159ee4e13542db799feca7ace25363ddc
-cas-knowledge-engine@sha256:7b11ffb7ca8d5ac028ba521b30ebbb60a0d35a0063c89518d85268f38376ecc6
+cas-gateway@sha256:2b9ad1fadb5f465e0ea730667fd1e71b39512877f3610e7a7b2c1ab6e9b92689
+cas-console-plugin@sha256:7b0331eff2f7dbf91bce1f977f08f88e86f7c81e5f115e669d3cbd0830028c68
+cas-knowledge-engine@sha256:b986a6da1a2e41c95239a6ca73677a34e030e456c24fcb2ec63c9f95e5ebefa8
 cas-knowledge-postgres@sha256:9073dff8ba54ee8cefcfec5bc2a1269fc9f3aeecbd431eb892549d9b83dc1325
 ```
 
@@ -51,9 +85,9 @@ Current proof:
 
 - Clean clone from `v0.1.4` commit `c335977`: `npm ci` PASS and `npm run verify` PASS.
 - Current working tree verification after hardening: `npm run verify` PASS.
-- `npm run verify:knowledge-engine`: PASS, 62 checks.
-- `npm run verify:deploy:manifests`: PASS, 204 checks.
-- `npm run deploy:crc`: PASS, rebuilt and redeployed `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev`; CRC deployment verification passed, including HMAC Secret refs and topology dashboard bundle.
+- `npm run verify:knowledge-engine`: PASS, latest 76 checks.
+- `npm run verify:deploy:manifests`: PASS, latest 257 checks.
+- `npm run deploy:crc`: PASS, latest 68 runtime checks; rebuilt and redeployed `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev`; CRC deployment verification passed, including HMAC Secret refs, topology dashboard bundle, PBS-compatible schema/shadow rows, and verified image digests.
 - `npm run verify:pbs:cutover`: expected FAIL because local `CAS_PBS_BASE_URL` is not configured.
 - `npm run verify:pbs:cutover:cluster`: expected FAIL because the CRC cluster has no `playbookstudio` namespace/service, no `cas-pbs-auth`, no `cas-knowledge-postgres-live`, and still runs the base dev overlay.
 
@@ -158,8 +192,13 @@ Latest CRC verifier evidence:
 
 - `test-results/cas-crc-deployment.json`
 - status: `PASS`
-- total checks: `43`
+- total checks: `68`
 - live bundle check: `console:topology-dashboard-bundle`
+- verified release-source image checks:
+  - `runtime:verified-image:cas-gateway`
+  - `runtime:verified-image:cas-console-plugin`
+  - `runtime:verified-image:cas-knowledge-engine`
+  - `runtime:verified-image:cas-knowledge-postgres`
 - ingress isolation checks:
   - `runtime:knowledge-ingress-policy`
   - `runtime:knowledge-ingress-gateway-only`
@@ -172,14 +211,16 @@ Latest CRC verifier evidence:
 - database checks:
   - `runtime:knowledge-postgres-extensions`
   - `runtime:knowledge-postgres-tables`
+  - `runtime:knowledge-postgres-pbs-compatible-schema`
   - `runtime:knowledge-postgres-vector-dimension`
+  - `runtime:knowledge-pbs-compat-shadow-persisted`
   - `runtime:knowledge-smoke-persisted`
 
 Latest manifest verifier evidence:
 
 - `test-results/cas-deploy-manifests.json`
 - status: `PASS`
-- total checks: `163`
+- total checks: `257`
 - rendered kustomize checks:
   - `base` remains `pbs-compatible-local`
   - `pbs-shadow` renders `pbs-http-shadow` with no provider env duplication

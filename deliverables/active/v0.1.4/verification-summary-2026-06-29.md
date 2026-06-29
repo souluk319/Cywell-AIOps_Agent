@@ -9,10 +9,10 @@ This summary captures the current v0.1.4 branch verification state for the Cywel
 | Command | Result | Notes |
 | --- | --- | --- |
 | `npm run verify` | PASS | Full local gate including contracts, gateway, knowledge engine, brain, OpenShift evidence, console build, browser topology DOM, console integration, CRC connection preview, and manifest verification |
-| `npm run verify:knowledge-engine` | PASS, 75 checks | Includes Gateway owner verification, signed internal owner headers, ConfigMap-driven customer workspace ACL behavior, internal bearer/header stripping, public health/capabilities sanitization, unsafe upload/URL ingest rejection, PBS shadow/live adapter contracts, PBS live response scope mismatch rejection, topology provenance, orphan endpoint topology normalization, and single-candidate PBS graph normalization |
-| `npm run verify:console:topology-dom` | PASS, 27 checks | Browser-required smoke with topology auto-load, empty/error reload stale-data protection, filter-scoped node index, orphan edge fallback nodes, mixed-scope graph selection, late-response stale-data protection, dense 28-node searchable index, and 1024px/390px overflow/overlap checks |
-| `npm run verify:console:integration` | PASS, 68 checks | Includes static app `innerHTML` rejection, structural `/cywell/topology` manifest routing/navigation, topology auto-load, and built plugin route/bundle checks |
-| `npm run verify:deploy:manifests` | PASS, 252 checks | Includes base/shadow/live/CRC render checks, HMAC Secret refs, no tracked dev DB Secret, pbs-live Gateway customer ACL config, pbs-live Postgres release image pinning, release image promotion force gate coverage, explicit strict shadow preflight script coverage, HTTPS PBS service-token transport, PBS live response scope guard coverage, and direct console script build prerequisites |
+| `npm run verify:knowledge-engine` | PASS, 76 checks | Includes Gateway owner verification, signed internal owner headers, ConfigMap-driven customer workspace ACL behavior, internal bearer/header stripping, public health/capabilities sanitization, unsafe upload/URL ingest rejection, PBS shadow/live adapter contracts, PBS live response scope mismatch rejection, rich PBS topology signal preservation, topology provenance, orphan endpoint topology normalization, and single-candidate PBS graph normalization |
+| `npm run verify:console:topology-dom` | PASS, 31 checks | Browser-required smoke with topology auto-load, empty/error reload stale-data protection, PBS-rich KPI/tone/signal-leader/link-filter rendering, filter-scoped node index, orphan edge fallback nodes, mixed-scope graph selection, late-response stale-data protection, dense 28-node searchable index, and 1024px/390px overflow/overlap checks |
+| `npm run verify:console:integration` | PASS, 71 checks | Includes static app `innerHTML` rejection, structural `/cywell/topology` manifest routing/navigation, topology auto-load, PBS topology signal fields/counts, Signal leaders, and built plugin route/bundle checks |
+| `npm run verify:deploy:manifests` | PASS, 257 checks | Includes base/shadow/live/CRC render checks, HMAC Secret refs, no tracked dev DB Secret, pbs-live Gateway customer ACL config, pbs-live Postgres release image pinning, PBS-compatible local schema checks, release image promotion force/evidence binding coverage, explicit strict shadow preflight script coverage, HTTPS PBS service-token transport, PBS live response scope guard coverage, and direct console script build prerequisites |
 
 Current hardening additions after the initial summary:
 
@@ -37,6 +37,10 @@ Current hardening additions after the initial summary:
 - Strict live preflight checks the live customer ACL env wiring and confirms all applied ingress NetworkPolicies selecting knowledge-engine pods only allow Gateway pods on TCP `8080`.
 - PBS live release smoke no longer permits read-only exception bypass for cutover/release checks, and direct-engine block verification requires an actual in-cluster blocked result instead of accepting any non-200 response.
 - Preflight and live-smoke evidence artifacts are mode-specific, so shadow, live preapply, live applied, local cutover, and cluster cutover runs do not overwrite each other.
+- Local Postgres now creates PBS-compatible `tenants`, `workspaces`, `document_sources`, `parsed_documents`, `document_chunks`, `chunk_embeddings`, and graph tables; CAS ingest writes PBS-compatible document/chunk shadow rows without fabricating embeddings.
+- PBS Wiki Vault topology normalization now preserves PBS summary aliases, wikilinks, tags, entity/concept nodes, degree/weight, source/viewer fields, selected context/uploads, and relation signals.
+- The Cywell topology dashboard renders PBS-rich graph semantics as KPIs, node tones, type filters, Signal leaders, inspector metadata, relation lines, and node-to-RAG actions in the browser-backed release gate.
+- CRC release promotion is now bound to `test-results/cas-crc-deployment.json`; app release sources and the Postgres release source must match the verified runtime digest evidence before `v0.1.4` tags move.
 
 Clean checkout reproduction:
 
@@ -50,16 +54,16 @@ npm run verify: PASS
 
 | Command | Result | Notes |
 | --- | --- | --- |
-| `npm run deploy:crc` | PASS, 62 runtime checks | Mutating deploy action; rebuilt and deployed `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev` to CRC, created/preserved local Secrets, applied CRC-only API/Lightspeed policies, and reran CRC deployment verification |
-| `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` | PASS, 16 release checks | Mutating release action; force-promoted `cas-gateway`, `cas-console-plugin`, `cas-knowledge-engine`, and digest-pinned `cas-knowledge-postgres` to local `v0.1.4` ImageStreamTags |
+| `npm run deploy:crc` | PASS, 68 runtime checks | Mutating deploy action; rebuilt and deployed `cas-gateway:dev`, `cas-console-plugin:dev`, and `cas-knowledge-engine:dev` to CRC, created/preserved local Secrets, applied CRC-only API/Lightspeed policies, verified app pod imageID digests against dev ImageStreamTags, verified PBS-compatible Postgres schema/shadow rows, and reran CRC deployment verification |
+| `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4` | PASS, 21 release checks | Mutating release action; loaded PASS CRC deployment evidence, verified each release source digest against runtime evidence, and force-promoted `cas-gateway`, `cas-console-plugin`, `cas-knowledge-engine`, and digest-pinned `cas-knowledge-postgres` to local `v0.1.4` ImageStreamTags |
 | `npm run verify:pbs:preflight:shadow` | PASS/WARN | Render/config checks pass for `pbs-shadow`; current CRC warns because external `playbookstudio` namespace/service and optional `cas-pbs-auth` are absent |
 
-Latest CRC `v0.1.4` release image references after commit `7b9d555`:
+Latest CRC `v0.1.4` release image references:
 
 ```text
-cas-gateway@sha256:27650edd220c17dd13a1356c7c69b3ad69a311bf733ec006fc76040492a8596f
-cas-console-plugin@sha256:cd86e87f87a2029db23434dd549f982159ee4e13542db799feca7ace25363ddc
-cas-knowledge-engine@sha256:7b11ffb7ca8d5ac028ba521b30ebbb60a0d35a0063c89518d85268f38376ecc6
+cas-gateway@sha256:2b9ad1fadb5f465e0ea730667fd1e71b39512877f3610e7a7b2c1ab6e9b92689
+cas-console-plugin@sha256:7b0331eff2f7dbf91bce1f977f08f88e86f7c81e5f115e669d3cbd0830028c68
+cas-knowledge-engine@sha256:b986a6da1a2e41c95239a6ca73677a34e030e456c24fcb2ec63c9f95e5ebefa8
 cas-knowledge-postgres@sha256:9073dff8ba54ee8cefcfec5bc2a1269fc9f3aeecbd431eb892549d9b83dc1325
 ```
 
@@ -94,7 +98,7 @@ Diagnostic non-ready states:
 
 ## Release Boundary
 
-CRC v0.1.4 dev deployment is verified and local `v0.1.4` release ImageStreamTags exist. Production PBS live cutover is not complete until the external HTTPS/mTLS PBS runtime, live Secrets, live overlay, PBS egress policy, live DB credential rotation/fresh PVC decision, runtime/corpus readiness, and `npm run verify:release:pbs-live` success are present.
+CRC v0.1.4 dev deployment is verified, PBS-compatible local shadow storage is exercised, and local `v0.1.4` release ImageStreamTags are bound to verified CRC runtime digest evidence. Production PBS live cutover is not complete until the external HTTPS/mTLS PBS runtime, live Secrets, live overlay, PBS egress policy, live DB credential rotation/fresh PVC decision, runtime/corpus readiness, and `npm run verify:release:pbs-live` success are present.
 
 The current CRC cluster already passes the Gateway Kubernetes API egress check for SelfSubjectReview/OpenShift evidence through the CRC overlay. Non-CRC live clusters still need their own cluster-specific Kubernetes API egress, because standard Kubernetes NetworkPolicy cannot allow `kubernetes.default.svc` by Service name.
 

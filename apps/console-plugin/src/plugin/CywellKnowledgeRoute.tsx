@@ -33,6 +33,15 @@ type TopologyNode = {
   summary?: string;
   status?: string;
   degree?: number;
+  weight?: number;
+  viewer_path?: string;
+  note_type?: string;
+  compiled_wiki?: boolean;
+  entity_kind?: string;
+  source_kind?: string;
+  source_url?: string;
+  ready_for_chat?: boolean;
+  basic_index_ready?: boolean;
   revision?: number;
   previous_revision?: number;
   document_id?: string;
@@ -68,6 +77,11 @@ type TopologyPayload = {
     edges?: number;
     relations?: number;
     uploads?: number;
+    compiled?: number;
+    wikilinks?: number;
+    tags?: number;
+    entities?: number;
+    concepts?: number;
   };
 };
 
@@ -125,7 +139,7 @@ function emptyTopology(customerId: string): TopologyPayload {
   return {
     status: "empty",
     customer_id: customerId,
-    counts: { nodes: 0, edges: 0, documents: 0, notes: 0 },
+    counts: { nodes: 0, edges: 0, documents: 0, notes: 0, uploads: 0, compiled: 0, wikilinks: 0, tags: 0, entities: 0 },
     nodes: [],
     edges: []
   };
@@ -552,6 +566,22 @@ const styles = `
   border-color: #a66200;
 }
 
+.cas-topology-node[data-tone="link"] {
+  border-color: #4c6ef5;
+}
+
+.cas-topology-node[data-tone="tag"] {
+  border-color: #c2255c;
+}
+
+.cas-topology-node[data-tone="entity"] {
+  border-color: #2f6f4e;
+}
+
+.cas-topology-node[data-tone="concept"] {
+  border-color: #0b7285;
+}
+
 .cas-topology-node[data-tone="image"] {
   border-color: #7866d9;
 }
@@ -787,6 +817,15 @@ function countAtLeast(value: unknown, minimum: number) {
   return Math.max(Number.isFinite(count) ? count : 0, minimum);
 }
 
+function countAlias(source: ActionResult | undefined, keys: string[], fallback: number) {
+  if (!source) return fallback;
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null) return countAtLeast(value, fallback);
+  }
+  return fallback;
+}
+
 function topologyPayload(value: ActionResult | null): TopologyPayload | null {
   if (!value) return null;
   const candidates = topologyCandidates(value);
@@ -815,6 +854,15 @@ function topologyPayload(value: ActionResult | null): TopologyPayload | null {
         summary: node.summary || node.body || node.image_summary ? String(node.summary ?? node.body ?? node.image_summary) : undefined,
         status: node.status || node.source || node.vision_status ? String(node.status ?? node.source ?? node.vision_status) : undefined,
         degree: Number.isFinite(Number(node.degree)) ? Number(node.degree) : undefined,
+        weight: Number.isFinite(Number(node.weight)) ? Number(node.weight) : undefined,
+        viewer_path: node.viewer_path ? String(node.viewer_path) : undefined,
+        note_type: node.note_type ? String(node.note_type) : undefined,
+        compiled_wiki: typeof node.compiled_wiki === "boolean" ? node.compiled_wiki : undefined,
+        entity_kind: node.entity_kind ? String(node.entity_kind) : undefined,
+        source_kind: node.source_kind ? String(node.source_kind) : undefined,
+        source_url: node.source_url ? String(node.source_url) : undefined,
+        ready_for_chat: typeof node.ready_for_chat === "boolean" ? node.ready_for_chat : undefined,
+        basic_index_ready: typeof node.basic_index_ready === "boolean" ? node.basic_index_ready : undefined,
         revision: Number.isFinite(Number(node.revision)) ? Number(node.revision) : undefined,
         previous_revision: Number.isFinite(Number(node.previous_revision)) ? Number(node.previous_revision) : undefined,
         document_id: node.document_id ? String(node.document_id) : undefined,
@@ -851,9 +899,29 @@ function topologyPayload(value: ActionResult | null): TopologyPayload | null {
     })
     .filter((edge) => edge.source && edge.target);
   const nodes = [...nodesById.values()];
+  const documentCount = countAlias(
+    countsCandidate,
+    ["documents", "documents_count", "document_count", "document_node_count", "upload_node_count"],
+    nodes.filter((node) => nodeTone(node.type) === "document").length
+  );
+  const noteCount = countAlias(
+    countsCandidate,
+    ["notes", "notes_count", "note_count", "wiki_note_count"],
+    nodes.filter((node) => nodeTone(node.type) === "wiki-note").length
+  );
   const counts = countsCandidate
     ? {
         ...countsCandidate,
+        documents: documentCount,
+        uploads: countAlias(countsCandidate, ["uploads", "uploads_count", "upload_count", "upload_node_count"], 0),
+        notes: noteCount,
+        compiled: countAlias(countsCandidate, ["compiled", "compiled_count", "compiled_note_count"], 0),
+        wikilinks: countAlias(countsCandidate, ["wikilinks", "wikilinks_count", "wikilink_count"], nodes.filter((node) => nodeTone(node.type) === "link").length),
+        tags: countAlias(countsCandidate, ["tags", "tags_count", "tag_count"], nodes.filter((node) => nodeTone(node.type) === "tag").length),
+        entities:
+          countAlias(countsCandidate, ["entities", "entities_count", "entity_count", "entity_node_count"], nodes.filter((node) => nodeTone(node.type) === "entity").length) +
+          countAlias(countsCandidate, ["concepts", "concepts_count", "concept_count", "concept_node_count"], nodes.filter((node) => nodeTone(node.type) === "concept").length),
+        relations: countAlias(countsCandidate, ["relations", "relations_count", "relation_count", "graph_relation_count", "edge_count"], edges.length),
         nodes: countAtLeast(countsCandidate.nodes, nodes.length),
         edges: countAtLeast(countsCandidate.edges, edges.length)
       }
@@ -868,12 +936,20 @@ function topologyPayload(value: ActionResult | null): TopologyPayload | null {
 }
 
 function nodeTone(type: string) {
-  const normalized = type.toLowerCase();
+  return normalizeTopologyKind(type);
+}
+
+function normalizeTopologyKind(type: string) {
+  const normalized = type.toLowerCase().replace(/_/g, "-");
   if (normalized.includes("document") || normalized.includes("upload") || normalized.includes("source")) return "document";
+  if (normalized.includes("wikilink") || normalized === "link" || normalized.includes("link")) return "link";
   if (normalized.includes("wiki") || normalized.includes("note")) return "wiki-note";
-  if (normalized.includes("term") || normalized.includes("tag") || normalized.includes("link")) return "term";
+  if (normalized.includes("tag")) return "tag";
+  if (normalized.includes("concept")) return "concept";
+  if (normalized.includes("entity")) return "entity";
+  if (normalized.includes("term")) return "term";
   if (normalized.includes("image") || normalized.includes("figure")) return "image";
-  if (normalized.includes("entity") || normalized.includes("runtime")) return "runtime";
+  if (normalized.includes("runtime")) return "runtime";
   return "unknown";
 }
 
@@ -897,7 +973,7 @@ function layoutTopology(nodes: TopologyNode[], edges: TopologyEdge[]) {
   const degreeById = nodeDegreeMap(edges);
   const ordered = [...nodes]
     .map((node) => ({ ...node, degree: node.degree ?? degreeById.get(node.id) ?? 0 }))
-    .sort((left, right) => (right.degree ?? 0) - (left.degree ?? 0) || left.label.localeCompare(right.label))
+    .sort((left, right) => (right.degree ?? 0) - (left.degree ?? 0) || (right.weight ?? 0) - (left.weight ?? 0) || left.label.localeCompare(right.label))
     .slice(0, TOPOLOGY_CANVAS_NODE_LIMIT);
   const total = Math.max(ordered.length, 1);
   return ordered.map((node, index) => {
@@ -994,18 +1070,33 @@ function TopologyDashboard({
       if (!normalizedQuery) return true;
       return `${node.label} ${node.id} ${node.type} ${node.summary ?? ""}`.toLowerCase().includes(normalizedQuery);
     })
-    .sort((left, right) => (right.degree ?? 0) - (left.degree ?? 0) || left.label.localeCompare(right.label));
+    .sort((left, right) => (right.degree ?? 0) - (left.degree ?? 0) || (right.weight ?? 0) - (left.weight ?? 0) || left.label.localeCompare(right.label));
+  const signalLeaders = [...nodesWithDegree]
+    .sort((left, right) => (right.degree ?? 0) - (left.degree ?? 0) || (right.weight ?? 0) - (left.weight ?? 0) || left.label.localeCompare(right.label))
+    .slice(0, 8);
   const counts = {
     nodes: topology?.counts?.nodes ?? topologyNodes.length,
     edges: topology?.counts?.edges ?? topologyEdges.length,
     documents: topology?.counts?.documents ?? topologyNodes.filter((node) => nodeTone(node.type) === "document").length,
-    notes: topology?.counts?.notes ?? topologyNodes.filter((node) => nodeTone(node.type) === "wiki-note").length
+    uploads: topology?.counts?.uploads ?? 0,
+    notes: topology?.counts?.notes ?? topologyNodes.filter((node) => nodeTone(node.type) === "wiki-note").length,
+    compiled: topology?.counts?.compiled ?? topologyNodes.filter((node) => node.compiled_wiki).length,
+    wikilinks: topology?.counts?.wikilinks ?? topologyNodes.filter((node) => nodeTone(node.type) === "link").length,
+    tags: topology?.counts?.tags ?? topologyNodes.filter((node) => nodeTone(node.type) === "tag").length,
+    entities:
+      topology?.counts?.entities ??
+      topologyNodes.filter((node) => ["entity", "concept"].includes(nodeTone(node.type))).length,
+    relations: topology?.counts?.relations ?? topologyEdges.length
   };
   const typeOptions = [
     { key: "all", label: "All" },
     { key: "document", label: "Docs" },
     { key: "wiki-note", label: "Wiki" },
     { key: "term", label: "Terms" },
+    { key: "link", label: "Links" },
+    { key: "tag", label: "Tags" },
+    { key: "entity", label: "Entities" },
+    { key: "concept", label: "Concepts" },
     { key: "runtime", label: "Runtime" },
     { key: "image", label: "Images" }
   ];
@@ -1049,6 +1140,26 @@ function TopologyDashboard({
           <div className="cas-topology-metric">
             <strong>{counts.notes}</strong>
             <span>notes</span>
+          </div>
+          <div className="cas-topology-metric">
+            <strong>{counts.compiled}</strong>
+            <span>compiled</span>
+          </div>
+          <div className="cas-topology-metric">
+            <strong>{counts.entities}</strong>
+            <span>entities</span>
+          </div>
+          <div className="cas-topology-metric">
+            <strong>{counts.wikilinks}</strong>
+            <span>wikilinks</span>
+          </div>
+          <div className="cas-topology-metric">
+            <strong>{counts.tags}</strong>
+            <span>tags</span>
+          </div>
+          <div className="cas-topology-metric">
+            <strong>{counts.relations}</strong>
+            <span>relations</span>
           </div>
         </div>
         <div className="cas-topology-segments" aria-label="Topology node type filter">
@@ -1169,6 +1280,14 @@ function TopologyDashboard({
                 <div className="cas-knowledge-endpoint">{`source ${selectedNode.source_document_id}`}</div>
               )}
               {selectedNode.summary && <p className="cas-topology-node-summary">{selectedNode.summary}</p>}
+              {(selectedNode.entity_kind || selectedNode.source_kind || selectedNode.viewer_path || selectedNode.source_url) && (
+                <div className="cas-topology-relations">
+                  {selectedNode.entity_kind && <span className="cas-knowledge-badge">entity {selectedNode.entity_kind}</span>}
+                  {selectedNode.source_kind && <span className="cas-knowledge-badge">source {selectedNode.source_kind}</span>}
+                  {selectedNode.viewer_path && <div className="cas-knowledge-endpoint">{selectedNode.viewer_path}</div>}
+                  {selectedNode.source_url && <div className="cas-knowledge-endpoint">{selectedNode.source_url}</div>}
+                </div>
+              )}
               <button
                 className="cas-knowledge-button"
                 data-secondary="true"
@@ -1180,6 +1299,22 @@ function TopologyDashboard({
               </button>
             </>
           )}
+          <div className="cas-topology-relations" data-test="cas-topology-signal-leaders">
+            <h3>Signal leaders</h3>
+            {signalLeaders.map((node) => (
+              <button
+                className="cas-topology-node-list-item"
+                data-selected={selectedNode?.id === node.id}
+                key={`leader-${node.id}`}
+                onClick={() => setSelectedNodeId(node.id)}
+                type="button"
+              >
+                <strong>{node.label}</strong>
+                <span>{nodeTone(node.type)}</span>
+                <span>{node.degree ?? 0} links</span>
+              </button>
+            ))}
+          </div>
           <div className="cas-topology-relations">
             {selectedRelations.length === 0 && <p className="cas-knowledge-muted">No direct relations in the current view.</p>}
             {selectedRelations.map((edge, index) => (

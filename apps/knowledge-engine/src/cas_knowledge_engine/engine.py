@@ -673,10 +673,13 @@ class KnowledgeEngine:
         return []
 
     def _pbs_count(self, candidate: dict[str, Any], body: dict[str, Any], key: str, fallback: int) -> int:
+        return self._pbs_count_any(candidate, body, [key, f"{key}_count", f"graph_{key}_count"], fallback)
+
+    def _pbs_count_any(self, candidate: dict[str, Any], body: dict[str, Any], keys: list[str], fallback: int) -> int:
         for source in [candidate.get("counts") if isinstance(candidate.get("counts"), dict) else None, body.get("counts") if isinstance(body.get("counts"), dict) else None, body.get("summary") if isinstance(body.get("summary"), dict) else None]:
             if not isinstance(source, dict):
                 continue
-            for count_key in [key, f"{key}_count", f"graph_{key}_count"]:
+            for count_key in keys:
                 try:
                     if count_key in source:
                         return max(fallback, int(source[count_key] or 0))
@@ -723,7 +726,23 @@ class KnowledgeEngine:
                 payload["provenance"] = provenance
             if source_document_id:
                 payload["source_document_id"] = str(source_document_id)
-            for key in ["revision", "previous_revision", "document_id", "document_source_id", "updated_at"]:
+            for key in [
+                "revision",
+                "previous_revision",
+                "document_id",
+                "document_source_id",
+                "updated_at",
+                "degree",
+                "weight",
+                "viewer_path",
+                "note_type",
+                "compiled_wiki",
+                "entity_kind",
+                "source_kind",
+                "source_url",
+                "ready_for_chat",
+                "basic_index_ready",
+            ]:
                 if key in value:
                     payload[key] = value[key]
             return payload
@@ -774,6 +793,25 @@ class KnowledgeEngine:
                 edges.append(edge_payload)
             elif len(nodes) > 1:
                 edges.append({"source": nodes[0]["id"], "target": nodes[(index % (len(nodes) - 1)) + 1]["id"], "type": "relates"})
+        document_count = self._pbs_count_any(
+            candidate,
+            body,
+            ["documents", "documents_count", "document_count", "document_node_count", "upload_node_count", "source_count"],
+            len([node for node in nodes if str(node["type"]) in {"document", "upload", "source", "upload_document", "web_url_source"}]),
+        )
+        upload_count = self._pbs_count_any(candidate, body, ["uploads", "uploads_count", "upload_count", "upload_node_count"], 0)
+        note_count = self._pbs_count_any(
+            candidate,
+            body,
+            ["notes", "notes_count", "note_count", "wiki_note_count"],
+            len([node for node in nodes if str(node["type"]).replace("_", "-") in {"note", "wiki-note"}]),
+        )
+        compiled_count = self._pbs_count_any(candidate, body, ["compiled", "compiled_count", "compiled_note_count"], 0)
+        wikilink_count = self._pbs_count_any(candidate, body, ["wikilinks", "wikilinks_count", "wikilink_count"], len([node for node in nodes if str(node["type"]) in {"wikilink", "link"}]))
+        tag_count = self._pbs_count_any(candidate, body, ["tags", "tags_count", "tag_count"], len([node for node in nodes if str(node["type"]) == "tag"]))
+        entity_count = self._pbs_count_any(candidate, body, ["entities", "entities_count", "entity_count", "entity_node_count"], len([node for node in nodes if str(node["type"]) == "entity"]))
+        concept_count = self._pbs_count_any(candidate, body, ["concepts", "concepts_count", "concept_count", "concept_node_count"], len([node for node in nodes if str(node["type"]) == "concept"]))
+        relation_count = self._pbs_count_any(candidate, body, ["relations", "relations_count", "relation_count", "graph_relation_count", "edge_count"], len(edges))
         return {
             "status": "ok",
             "customer_id": customer_id,
@@ -782,14 +820,26 @@ class KnowledgeEngine:
             "nodes": nodes,
             "edges": edges,
             "counts": {
-                "documents": self._pbs_count(candidate, body, "documents", len([node for node in nodes if node["type"] in {"document", "upload", "source"}])),
-                "notes": self._pbs_count(candidate, body, "notes", len([node for node in nodes if "note" in node["type"] or "wiki" in node["type"]])),
+                "documents": document_count,
+                "uploads": upload_count,
+                "notes": note_count,
+                "compiled": compiled_count,
+                "wikilinks": wikilink_count,
+                "tags": tag_count,
+                "entities": entity_count + concept_count,
+                "concepts": concept_count,
+                "relations": relation_count,
                 "nodes": len(nodes),
                 "edges": len(edges),
             },
             "pbs": {
                 "schema_version": body.get("schema_version", ""),
                 "summary": body.get("summary", {}),
+                "top_wikilinks": body.get("top_wikilinks", []),
+                "top_tags": body.get("top_tags", []),
+                "relations": body.get("relations", []),
+                "selected_context": body.get("selected_context", []),
+                "selected_uploads": body.get("selected_uploads", []),
             },
         }
 

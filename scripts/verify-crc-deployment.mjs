@@ -6,6 +6,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 const namespace = "cywell-ai-sentinel";
 const checks = [];
 const checkedAt = new Date().toISOString();
+const appRuntimeImages = [
+  { imageStream: "cas-gateway", podPrefix: "cas-gateway-", container: "gateway" },
+  { imageStream: "cas-console-plugin", podPrefix: "cas-console-plugin-", container: "console-plugin" },
+  { imageStream: "cas-knowledge-engine", podPrefix: "cas-knowledge-engine-", container: "knowledge-engine" }
+];
+const verifiedImages = {};
 
 function run(command, args, timeoutMs = 30000) {
   const result = spawnSync(command, args, {
@@ -86,6 +92,11 @@ function expect(id, condition, passDetail, failDetail = passDetail, extra = {}) 
   else fail(id, failDetail, extra);
 }
 
+function extractDigest(value) {
+  const match = String(value ?? "").match(/sha256:[a-f0-9]{32,}/i);
+  return match ? match[0].toLowerCase() : "";
+}
+
 function getJson(id, args) {
   const result = run("oc", [...args, "-o", "json"]);
   if (!result.ok) {
@@ -138,6 +149,66 @@ function podReady(pod) {
     !pod?.metadata?.deletionTimestamp &&
     pod?.status?.conditions?.some((condition) => condition.type === "Ready" && condition.status === "True") &&
     pod?.status?.containerStatuses?.every((container) => container.ready && container.state?.running)
+  );
+}
+
+function imageStreamDigestReference(imageStreamTag) {
+  return imageStreamTag?.image?.dockerImageReference ?? imageStreamTag?.image?.metadata?.name ?? "";
+}
+
+function verifyAppRuntimeImage({ imageStream, container }, pod, imageStreamTagByName) {
+  const imageStreamTagName = `${imageStream}:dev`;
+  const imageStreamTag = imageStreamTagByName.get(imageStreamTagName);
+  const imageStreamReference = imageStreamDigestReference(imageStreamTag);
+  const imageStreamDigest = extractDigest(imageStreamReference);
+  const containerStatus = (pod?.status?.containerStatuses ?? []).find((status) => status.name === container);
+  const runtimeDigest = extractDigest(containerStatus?.imageID);
+  const matched = Boolean(pod && imageStreamTag && imageStreamDigest && runtimeDigest && imageStreamDigest === runtimeDigest);
+  verifiedImages[imageStream] = {
+    tag: "dev",
+    imageStreamTag: imageStreamTagName,
+    imageStreamReference,
+    imageStreamDigest,
+    pod: pod?.metadata?.name ?? "",
+    container,
+    image: containerStatus?.image ?? "",
+    imageID: containerStatus?.imageID ?? "",
+    runtimeDigest,
+    digest: imageStreamDigest,
+    verified: matched
+  };
+  expect(
+    `runtime:verified-image:${imageStream}`,
+    matched,
+    `${imageStream}:dev ImageStreamTag digest matches the ready runtime pod imageID`,
+    `${imageStream}:dev ImageStreamTag digest does not match the ready runtime pod imageID`,
+    verifiedImages[imageStream]
+  );
+}
+
+function verifyPostgresRuntimeImage(pod) {
+  const containerStatus = (pod?.status?.containerStatuses ?? []).find((status) => status.name === "postgres");
+  const runtimeDigest = extractDigest(containerStatus?.imageID);
+  const matched = Boolean(pod && runtimeDigest);
+  verifiedImages["cas-knowledge-postgres"] = {
+    tag: "running",
+    imageStreamTag: "",
+    imageStreamReference: "",
+    imageStreamDigest: "",
+    pod: pod?.metadata?.name ?? "",
+    container: "postgres",
+    image: containerStatus?.image ?? "",
+    imageID: containerStatus?.imageID ?? "",
+    runtimeDigest,
+    digest: runtimeDigest,
+    verified: matched
+  };
+  expect(
+    "runtime:verified-image:cas-knowledge-postgres",
+    matched,
+    "running cas-knowledge-postgres imageID is digest-pinned for release promotion evidence",
+    "running cas-knowledge-postgres pod does not expose a digest-pinned imageID",
+    verifiedImages["cas-knowledge-postgres"]
   );
 }
 
@@ -268,6 +339,7 @@ function policiesSelectingLabels(policies, labels) {
 
 const images = getJson("images:istags", ["get", "istag", "-n", namespace]);
 const imageNames = (images?.items ?? []).map((item) => item.metadata?.name);
+const imageStreamTagByName = new Map((images?.items ?? []).map((item) => [item.metadata?.name, item]));
 expect("images:gateway", imageNames.includes("cas-gateway:dev"), "cas-gateway:dev exists", "cas-gateway:dev missing");
 expect(
   "runtime:crc-user-token",
@@ -575,6 +647,12 @@ const consolePod = pods?.items?.find((pod) => pod.metadata?.name?.startsWith("ca
 const knowledgePod = pods?.items?.find((pod) => pod.metadata?.name?.startsWith("cas-knowledge-engine-") && podReady(pod));
 const postgresPod = pods?.items?.find((pod) => pod.metadata?.name?.startsWith("cas-knowledge-postgres-") && podReady(pod));
 
+for (const image of appRuntimeImages) {
+  const pod = pods?.items?.find((item) => item.metadata?.name?.startsWith(image.podPrefix) && podReady(item));
+  verifyAppRuntimeImage(image, pod, imageStreamTagByName);
+}
+verifyPostgresRuntimeImage(postgresPod);
+
 expect("runtime:knowledge-pod", Boolean(knowledgePod), "knowledge engine pod is running", "no running knowledge engine pod");
 expect("runtime:knowledge-postgres-pod", Boolean(postgresPod), "knowledge Postgres pod is running", "no running knowledge Postgres pod");
 
@@ -601,6 +679,18 @@ if (postgresPod) {
     postgresTables.ok && postgresTables.stdout.trim() === "5",
     "knowledge Postgres has CAS knowledge tables",
     postgresTables.stderr || postgresTables.stdout
+  );
+
+  const pbsCompatTables = execPod(postgresPod.metadata.name, [
+    "sh",
+    "-ec",
+    "psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tAc \"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('tenants','workspaces','document_sources','parsed_documents','document_chunks','chunk_embeddings','graph_entities','graph_entity_mentions','graph_entity_relations')\""
+  ]);
+  expect(
+    "runtime:knowledge-postgres-pbs-compatible-schema",
+    pbsCompatTables.ok && pbsCompatTables.stdout.trim() === "9",
+    "knowledge Postgres has PBS-compatible document/chunk/embedding/graph tables",
+    pbsCompatTables.stderr || pbsCompatTables.stdout
   );
 
   const vectorColumn = execPod(postgresPod.metadata.name, [
@@ -752,6 +842,23 @@ if (gatewayPod) {
       "knowledge smoke persists exact uploaded document, chunks, note, and event rows in Postgres owner scope",
       persistedExactSmoke.stderr || persistedExactSmoke.stdout
     );
+    const pbsCompatPersisted = execPod(postgresPod.metadata.name, [
+      "sh",
+      "-ec",
+      `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT (SELECT COUNT(*) FROM document_sources WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND metadata->>'customer_id'='crc-smoke' AND metadata->>'owner_id'='${crcKnowledgeSmokeOwner}') || ',' || (SELECT COUNT(*) FROM parsed_documents WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}') || ',' || (SELECT COUNT(*) FROM document_chunks WHERE metadata->>'cas_document_id'='${knowledgeSmokeBody.uploadedDocumentId}' AND metadata->>'customer_id'='crc-smoke' AND metadata->>'owner_id'='${crcKnowledgeSmokeOwner}') || ',' || (SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid='chunk_embeddings'::regclass AND attname='embedding')"`
+    ]);
+    const pbsCompatParts = pbsCompatPersisted.stdout.trim().split(",");
+    expect(
+      "runtime:knowledge-pbs-compat-shadow-persisted",
+      pbsCompatPersisted.ok &&
+        pbsCompatParts.length === 4 &&
+        Number(pbsCompatParts[0]) === 1 &&
+        Number(pbsCompatParts[1]) === 1 &&
+        Number(pbsCompatParts[2]) >= 1 &&
+        pbsCompatParts[3] === "vector(768)",
+      "knowledge smoke also writes PBS-compatible document source, parsed document, and chunk shadow rows",
+      pbsCompatPersisted.stderr || pbsCompatPersisted.stdout
+    );
     const persistedSmoke = execPod(postgresPod.metadata.name, [
       "sh",
       "-ec",
@@ -888,6 +995,7 @@ writeFileSync(
       branch: run("git", ["branch", "--show-current"]).stdout,
       head: run("git", ["rev-parse", "--short", "HEAD"]).stdout,
       namespace,
+      verifiedImages,
       status: finalStatus,
       summary: {
         total: checks.length,

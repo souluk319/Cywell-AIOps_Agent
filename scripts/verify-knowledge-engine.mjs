@@ -320,24 +320,94 @@ function startFakePbsServer(port) {
                 node_id: "pbs-note-1",
                 kind: "wiki-note",
                 title: "PBS Note",
+                degree: 9,
+                weight: 0.92,
+                viewer_path: "/wiki/pbs-note-1",
+                note_type: "source",
+                compiled_wiki: true,
+                ready_for_chat: true,
                 revision: 7,
                 previous_revision: 6,
                 provenance: { source_document_id: "pbs-doc-1", source: "pbs-wiki-loop" },
                 metadata: { customer_id: url.searchParams.get("customer_id") }
               },
-              { node_id: "pbs-term-router", kind: "term", title: "router", metadata: { source_document_id: "pbs-doc-1" } }
+              {
+                node_id: "pbs-doc-1",
+                kind: "upload_document",
+                title: "PBS Upload Document",
+                degree: 3,
+                source_kind: "upload",
+                source_url: "cas://pbs/upload/pbs-doc-1",
+                basic_index_ready: true,
+                metadata: { source_document_id: "pbs-doc-1" }
+              },
+              {
+                node_id: "pbs-link-haproxy",
+                kind: "wikilink",
+                title: "HAProxy",
+                degree: 4,
+                metadata: { source_document_id: "pbs-doc-1" }
+              },
+              {
+                node_id: "pbs-tag-router",
+                kind: "tag",
+                title: "router",
+                degree: 2,
+                metadata: { source_document_id: "pbs-doc-1" }
+              },
+              {
+                node_id: "pbs-entity-route-shard",
+                kind: "entity",
+                entity_kind: "openshift_resource",
+                title: "route shard",
+                degree: 5,
+                metadata: { source_document_id: "pbs-doc-1" }
+              },
+              {
+                node_id: "pbs-concept-latency",
+                kind: "concept",
+                title: "latency",
+                degree: 4,
+                metadata: { source_document_id: "pbs-doc-1" }
+              }
             ],
             links: [
               {
                 source_id: "pbs-note-1",
-                target_id: "pbs-term-router",
-                kind: "tag",
+                target_id: "pbs-link-haproxy",
+                kind: "links_to",
+                provenance: { source_document_id: "pbs-doc-1" }
+              },
+              {
+                source_id: "pbs-note-1",
+                target_id: "pbs-tag-router",
+                kind: "tagged",
+                provenance: { source_document_id: "pbs-doc-1" }
+              },
+              {
+                source_id: "pbs-entity-route-shard",
+                target_id: "pbs-concept-latency",
+                kind: "explains",
                 provenance: { source_document_id: "pbs-doc-1" }
               }
             ]
           }
         },
-        summary: { graph_relation_count: 1 }
+        summary: {
+          document_node_count: 1,
+          upload_node_count: 1,
+          note_count: 1,
+          compiled_note_count: 1,
+          wikilink_count: 1,
+          tag_count: 1,
+          entity_node_count: 1,
+          concept_node_count: 1,
+          graph_relation_count: 3
+        },
+        top_wikilinks: [{ label: "HAProxy", count: 1 }],
+        top_tags: [{ label: "router", count: 1 }],
+        selected_context: [{ title: "PBS Note", body: "PBS body" }],
+        selected_uploads: [{ id: "pbs-doc-1", title: "PBS Upload Document" }]
       });
       return;
     }
@@ -1637,8 +1707,8 @@ try {
     "knowledge:pbs-live-topology-normalized",
     liveTopology.response.status === 200 &&
       liveTopology.body.provider === "pbs-http-live" &&
-      liveTopology.body.counts?.nodes === 2 &&
-      liveTopology.body.counts?.edges === 1 &&
+      liveTopology.body.counts?.nodes === 6 &&
+      liveTopology.body.counts?.edges === 3 &&
       graphIntegrity(liveTopology.body),
     "PBS live nested wiki vault graph is normalized into renderable CAS topology shape"
   );
@@ -1646,16 +1716,34 @@ try {
     ? liveTopology.body.nodes.find((node) => node.id === "pbs-note-1")
     : null;
   const liveTopologyEdge = Array.isArray(liveTopology.body.edges)
-    ? liveTopology.body.edges.find((edge) => edge.source === "pbs-note-1" && edge.target === "pbs-term-router")
+    ? liveTopology.body.edges.find((edge) => edge.source === "pbs-note-1" && edge.target === "pbs-link-haproxy")
     : null;
   expect(
     "knowledge:pbs-live-topology-provenance",
     liveTopologyNote?.revision === 7 &&
       liveTopologyNote?.previous_revision === 6 &&
+      liveTopologyNote?.degree === 9 &&
+      liveTopologyNote?.viewer_path === "/wiki/pbs-note-1" &&
+      liveTopologyNote?.compiled_wiki === true &&
       liveTopologyNote?.provenance?.source_document_id === "pbs-doc-1" &&
       liveTopologyEdge?.provenance?.source_document_id === "pbs-doc-1",
-    "PBS live topology normalization preserves revision and provenance metadata",
+    "PBS live topology normalization preserves revision, provenance, and PBS node signal metadata",
     JSON.stringify({ liveTopologyNote, liveTopologyEdge })
+  );
+  expect(
+    "knowledge:pbs-live-topology-pbs-summary-counts",
+    liveTopology.body.counts?.documents === 1 &&
+      liveTopology.body.counts?.uploads === 1 &&
+      liveTopology.body.counts?.notes === 1 &&
+      liveTopology.body.counts?.compiled === 1 &&
+      liveTopology.body.counts?.wikilinks === 1 &&
+      liveTopology.body.counts?.tags === 1 &&
+      liveTopology.body.counts?.entities === 2 &&
+      liveTopology.body.counts?.relations === 3 &&
+      liveTopology.body.pbs?.top_wikilinks?.[0]?.label === "HAProxy" &&
+      liveTopology.body.pbs?.selected_uploads?.[0]?.id === "pbs-doc-1",
+    "PBS live topology normalization preserves PBS summary counts and vault context signals",
+    JSON.stringify(liveTopology.body.counts)
   );
   const liveOrphanTopology = await fetchJson(`${liveBase}/api/knowledge/topology?customer_id=orphan-live`, {
     headers: liveHeaders
@@ -1707,10 +1795,10 @@ try {
   });
   expect(
     "knowledge:pbs-live-vault-topology-normalized",
-    liveVault.response.status === 200 &&
+      liveVault.response.status === 200 &&
       liveVault.body.provider === "pbs-http-live" &&
-      liveVault.body.topology?.counts?.nodes === 2 &&
-      liveVault.body.topology?.counts?.edges === 1 &&
+      liveVault.body.topology?.counts?.nodes === 6 &&
+      liveVault.body.topology?.counts?.edges === 3 &&
       graphIntegrity(liveVault.body.topology),
     "PBS live wiki vault route exposes CAS-normalized topology even when PBS returns nested topology graph"
   );

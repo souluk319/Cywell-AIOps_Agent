@@ -288,6 +288,8 @@ Delivered:
 - v0.1.3 operator paused during dev deployment
 - UserToken verified through Gateway SelfSubjectReview for trusted-header owner mode
 - verifier checks operator pause, runtime pods, pgvector readiness, live console bundle, upload/RAG/wiki/topology smoke, Lightspeed flow, and rendered PBS shadow/live overlay shape
+- verifier checks local PBS-compatible Postgres schema creation and verifies smoke uploads write PBS-compatible document source, parsed document, and chunk shadow rows
+- verifier records app `:dev` ImageStreamTag digests and running Postgres imageID digest as release-source evidence
 - CRC verifier checks the live `cas-knowledge-engine-ingress` policy and confirms non-gateway direct access is blocked from the console-plugin pod
 - optional `npm run verify:pbs:live` smoke script for a real PBS target; it skips cleanly when `CAS_PBS_BASE_URL` is not set
 - `npm run verify:pbs:preflight` renders the PBS live/shadow overlay and checks config, Secret refs, egress, ingress, runtime service shape, and live readiness gates before a cluster cutover
@@ -298,6 +300,7 @@ Delivered:
 - Gateway can require a ConfigMap-backed customer workspace ACL before proxying private knowledge requests; live mode enables this and verifies mismatched nested `source_metadata.customer_id` is rejected before reaching Knowledge Engine
 - strict PBS preflight checks that all applied ingress NetworkPolicies selecting knowledge-engine pods only allow Gateway pods on TCP `8080`
 - `deploy:crc` starts OpenShift binary builds without `--follow --wait`, follows build logs separately, and polls final build phase to avoid cancellation after slow uploads
+- `release:crc:v0.1.4` is bound to PASS CRC deployment evidence and refuses to promote sources whose digest differs from the verified runtime image digest
 
 Still required:
 
@@ -312,7 +315,7 @@ Still required:
 - real `cas-knowledge-postgres-live` Secret material creation outside git
 - cleanup of legacy CRC `cas-knowledge-postgres` Secret before live apply
 - PBS runtime pod labels matching the CAS egress policy
-- release image publishing/tagging for `v0.1.4`; moving an existing release tag requires `CAS_RELEASE_FORCE=true`
+- production registry/ImageStream publication for any non-CRC target; local CRC `v0.1.4` ImageStreamTags are published and bound to verified deployment evidence
 - applying `pbs-shadow` or `pbs-live` overlay in an environment where PBS is deployed
 - live PBS smoke with HTTPS `CAS_PBS_BASE_URL` set and strict `npm run verify:release:pbs-live`
 - egress controls for URL ingest and LLM/embedding endpoints
@@ -344,8 +347,9 @@ v0.1.4 currently proves:
 - rejection of conflicting top-level and nested customer IDs before indexing or outbound PBS calls
 - CRC deployment of gateway, console plugin, knowledge engine, and Postgres
 - topology dashboard visual design in the live console plugin bundle
-- topology KPI strip, relation grid, selected-node inspector, and node-to-RAG action in the live console plugin bundle
+- topology KPI strip, PBS-rich node tones, type filters, Signal leaders, relation grid, selected-node inspector, source/viewer metadata, and node-to-RAG action in the live console plugin bundle
 - PBS-compatible upload and URL ingest payload metadata
+- PBS-compatible local Postgres schema and ingest shadow rows for document sources, parsed documents, and chunks
 - base64 file upload with lightweight MIME-aware extraction
 - unsafe upload extension/MIME/base64/oversized OOXML rejection before local indexing or PBS-live outbound upload
 - PBS HTTP shadow/live adapter with fake PBS verification for upload, URL ingest, reports, RAG, wiki-loop, wiki status, wiki vault topology, and note save
@@ -355,6 +359,7 @@ v0.1.4 currently proves:
 - rendered PBS shadow/live deployment overlays with HTTPS service-token transport, shadow optional token Secret reference, live required token Secret reference, live required Postgres Secret references, no dev owner/DB Secret material, release image tags, and restricted knowledge-engine egress to labeled PBS runtime pods on `8765`
 - rendered PBS live overlay with Gateway customer ACL required from `cas-knowledge-live-config/customer-access-json`; the default is an admin-all placeholder and target customer/group mapping is still an external cutover input
 - topology normalization across PBS `graph`, `topology.graph`, `links`, `relations`, `relationships`, `node_id`, `source_id`, and `target_id` variants without mixing wrapper and nested graph candidates
+- topology normalization preserves PBS summary counts, wikilinks, tags, entity/concept nodes, relation signals, degree/weight, selected context, and selected upload metadata
 - Knowledge Engine ingress isolation so only the CAS gateway can call scoped data APIs in-cluster
 - optional real PBS live smoke verifier with skip/required modes and strict DB/pgvector/corpus readiness checks
 - owner-required scoped knowledge APIs with Gateway SelfSubjectReview owner mapping and deployed gateway rejection of spoofed owner headers
@@ -362,6 +367,7 @@ v0.1.4 currently proves:
 - request body limits in Gateway and Knowledge Engine
 - pgvector readiness in the live database
 - smoke data persistence and owner-scoped query behavior
+- CRC `v0.1.4` release tags are promoted only when the source digest matches verified runtime evidence
 
 v0.1.4 does not yet prove a production PBS live deployment. Full parity still requires applying the PBS overlay against a real PBS runtime, supplying the Secret material outside git, running PBS migrations/indexers against the target database, and verifying live corpus answers against real customer data.
 

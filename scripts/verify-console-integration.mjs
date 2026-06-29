@@ -362,6 +362,24 @@ expectText(
   "knowledge route preserves topology lineage source_document_id fields"
 );
 expectText(
+  "console-knowledge:topology-pbs-signal-fields",
+  knowledgeRouteSource,
+  "source_kind",
+  "knowledge route preserves PBS topology source_kind, viewer, and entity signal fields"
+);
+expectText(
+  "console-knowledge:topology-pbs-summary-counts",
+  knowledgeRouteSource,
+  "document_node_count",
+  "knowledge route normalizes PBS topology summary count aliases"
+);
+expectText(
+  "console-knowledge:topology-signal-leaders",
+  knowledgeRouteSource,
+  "data-test=\"cas-topology-signal-leaders\"",
+  "knowledge route renders topology signal leaders"
+);
+expectText(
   "console-knowledge:topology-edge-id",
   knowledgeRouteSource,
   "source_id",

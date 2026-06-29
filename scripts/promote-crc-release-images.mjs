@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const namespace = process.env.CAS_RELEASE_NAMESPACE || "cywell-ai-sentinel";
 const releaseTag = process.env.CAS_RELEASE_TAG || "v0.1.4";
+const releaseEvidencePath = process.env.CAS_RELEASE_EVIDENCE || "test-results/cas-crc-deployment.json";
 const forceRelease = ["1", "true", "yes", "y", "on"].includes(String(process.env.CAS_RELEASE_FORCE ?? "").trim().toLowerCase());
 const appImageStreams = ["cas-gateway", "cas-console-plugin", "cas-knowledge-engine"];
 const postgresImageStream = "cas-knowledge-postgres";
 const checks = [];
 const checkedAt = new Date().toISOString();
+let deploymentEvidence = null;
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -32,6 +34,44 @@ function pass(id, detail, extra = {}) {
 
 function getJson(args) {
   return JSON.parse(run("oc", [...args, "-o", "json"]));
+}
+
+function extractDigest(value) {
+  const match = String(value ?? "").match(/sha256:[a-f0-9]{32,}/i);
+  return match ? match[0].toLowerCase() : "";
+}
+
+function loadDeploymentEvidence() {
+  const evidence = JSON.parse(readFileSync(releaseEvidencePath, "utf8"));
+  if (evidence.status !== "PASS") {
+    throw new Error(`${releaseEvidencePath} is not PASS; run npm run deploy:crc before release promotion`);
+  }
+  if (!evidence.verifiedImages || typeof evidence.verifiedImages !== "object") {
+    throw new Error(`${releaseEvidencePath} does not contain verifiedImages; rerun npm run deploy:crc with the current verifier`);
+  }
+  pass("release:evidence:crc-deployment", `loaded PASS CRC deployment evidence from ${releaseEvidencePath}`, {
+    evidenceCheckedAt: evidence.checkedAt,
+    evidenceHead: evidence.head
+  });
+  return evidence;
+}
+
+function assertSourceMatchesDeploymentEvidence(name, sourceRef) {
+  const expectedDigest = deploymentEvidence?.verifiedImages?.[name]?.digest ?? "";
+  const actualDigest = extractDigest(sourceRef);
+  if (!expectedDigest) {
+    throw new Error(`${releaseEvidencePath} is missing verified digest evidence for ${name}`);
+  }
+  if (!actualDigest) {
+    throw new Error(`${name} release source does not resolve to a digest-pinned image reference`);
+  }
+  if (actualDigest !== expectedDigest) {
+    throw new Error(`${name} release source digest ${actualDigest} differs from verified CRC deployment digest ${expectedDigest}`);
+  }
+  pass(`release:evidence:${name}`, `${name} release source matches verified CRC deployment digest`, {
+    image: sourceRef,
+    digest: actualDigest
+  });
 }
 
 function getImageStreamTagReference(name, tag) {
@@ -99,6 +139,7 @@ function promoteAppReleaseTags() {
   for (const name of appImageStreams) {
     ensureImageStream(name);
     const sourceRef = ensureImageStreamTag(name, "dev");
+    assertSourceMatchesDeploymentEvidence(name, sourceRef);
     assertReleaseTargetMutable(name, sourceRef);
     run("oc", ["tag", "-n", namespace, `${name}:dev`, `${name}:${releaseTag}`, "--reference-policy=local"], { stdio: "inherit" });
     ensureImageStreamTag(name, releaseTag);
@@ -136,6 +177,7 @@ function promotePostgresReleaseTag() {
   const { digest, pod } = findRunningPostgresDigest();
   if (!digest) throw new Error("could not resolve a digest-pinned imageID from the running cas-knowledge-postgres pod");
   pass("release:postgres:digest-source", `resolved running Postgres image digest from ${pod}`, { image: digest });
+  assertSourceMatchesDeploymentEvidence(postgresImageStream, digest);
   assertReleaseTargetMutable(postgresImageStream, digest);
   run(
     "oc",
@@ -146,6 +188,7 @@ function promotePostgresReleaseTag() {
 }
 
 try {
+  deploymentEvidence = loadDeploymentEvidence();
   promoteAppReleaseTags();
   promotePostgresReleaseTag();
   mkdirSync("test-results", { recursive: true });
@@ -156,6 +199,7 @@ try {
         checkedAt,
         namespace,
         releaseTag,
+        releaseEvidencePath,
         forceRelease,
         status: "PASS",
         summary: { total: checks.length, passed: checks.length, failed: 0 },
@@ -176,6 +220,7 @@ try {
         checkedAt,
         namespace,
         releaseTag,
+        releaseEvidencePath,
         status: "FAIL",
         error: error instanceof Error ? error.message : String(error),
         checks

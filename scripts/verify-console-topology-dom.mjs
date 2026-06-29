@@ -164,6 +164,42 @@ function topologyResponse(customerId) {
       }
     };
   }
+  if (customerId === "pbs-rich-topology") {
+    return {
+      status: "ok",
+      customer_id: customerId,
+      topology: {
+        graph: {
+          counts: {
+            nodes: 6,
+            edges: 3,
+            document_node_count: 1,
+            upload_node_count: 1,
+            note_count: 1,
+            compiled_note_count: 1,
+            wikilink_count: 1,
+            tag_count: 1,
+            entity_node_count: 1,
+            concept_node_count: 1,
+            graph_relation_count: 3
+          },
+          nodes: [
+            { node_id: "pbs-rich-note", kind: "note", title: "Rich Wiki Note", degree: 9, weight: 0.92, compiled_wiki: true, viewer_path: "/wiki/rich" },
+            { node_id: "pbs-rich-upload", kind: "upload_document", title: "Rich Upload", degree: 3, source_kind: "upload", source_url: "cas://pbs/rich-upload" },
+            { node_id: "pbs-rich-link", kind: "wikilink", title: "HAProxy", degree: 4 },
+            { node_id: "pbs-rich-tag", kind: "tag", title: "router", degree: 2 },
+            { node_id: "pbs-rich-entity", kind: "entity", entity_kind: "openshift_resource", title: "route shard", degree: 5 },
+            { node_id: "pbs-rich-concept", kind: "concept", title: "latency", degree: 4 }
+          ],
+          links: [
+            { source_id: "pbs-rich-note", target_id: "pbs-rich-link", kind: "links_to" },
+            { source_id: "pbs-rich-note", target_id: "pbs-rich-tag", kind: "tagged" },
+            { source_id: "pbs-rich-entity", target_id: "pbs-rich-concept", kind: "explains" }
+          ]
+        }
+      }
+    };
+  }
   const graph =
     customerId === "dense-topology"
       ? denseTopologyGraph()
@@ -681,6 +717,48 @@ try {
       "topology normalization derives nodes and edges from the same nested graph candidate",
       mixedScopeText
     );
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=pbs-rich-topology") && response.status() === 200),
+      page.getByLabel("Customer ID").fill("pbs-rich-topology")
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-test="cas-topology-node"]').length === 6);
+    const richKpiText = await page.locator('[data-test="cas-topology-kpis"]').innerText();
+    const richLeaderText = await page.locator('[data-test="cas-topology-signal-leaders"]').innerText();
+    expect(
+      "console-topology-dom:pbs-rich-kpis",
+      richKpiText.toLowerCase().includes("6\nnodes") &&
+        richKpiText.toLowerCase().includes("3\nedges") &&
+        richKpiText.toLowerCase().includes("1\ncompiled") &&
+        richKpiText.toLowerCase().includes("2\nentities") &&
+        richKpiText.toLowerCase().includes("1\nwikilinks") &&
+        richKpiText.toLowerCase().includes("1\ntags") &&
+        richKpiText.toLowerCase().includes("3\nrelations"),
+      "PBS-rich topology summary counts render as dashboard signal KPIs",
+      richKpiText
+    );
+    const richTones = await page.locator('[data-test="cas-topology-node"]').evaluateAll((nodes) =>
+      Array.from(new Set(nodes.map((node) => node.getAttribute("data-tone")).filter(Boolean))).sort()
+    );
+    expect(
+      "console-topology-dom:pbs-rich-node-tones",
+      ["concept", "document", "entity", "link", "tag", "wiki-note"].every((tone) => richTones.includes(tone)),
+      "PBS-rich topology renders document, wiki, link, tag, entity, and concept tones",
+      JSON.stringify(richTones)
+    );
+    expect(
+      "console-topology-dom:pbs-rich-signal-leaders",
+      richLeaderText.includes("Rich Wiki Note") && richLeaderText.includes("9 links") && richLeaderText.includes("route shard"),
+      "PBS-rich topology exposes high-signal nodes in Signal leaders",
+      richLeaderText
+    );
+    await page.getByRole("button", { name: "Links", exact: true }).click();
+    expect(
+      "console-topology-dom:pbs-rich-link-filter",
+      (await page.locator('[data-test="cas-topology-node"]').count()) === 1 &&
+        (await page.locator('[data-test="cas-topology-dashboard"]').innerText()).includes("HAProxy"),
+      "PBS wikilink nodes can be filtered independently from generic terms"
+    );
+    await page.getByRole("button", { name: "All" }).click();
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/knowledge/topology?customer_id=vault-empty-topology") && response.status() === 200),
       page.getByLabel("Customer ID").fill("vault-empty-topology")

@@ -29,11 +29,13 @@ const files = [
   "package.json",
   "scripts/deploy-crc-dev.mjs",
   "scripts/promote-crc-release-images.mjs",
+  "scripts/verify-crc-deployment.mjs",
   "scripts/verify-pbs-live-smoke.mjs",
   "scripts/verify-pbs-preflight.mjs",
   "apps/gateway/src/server.mjs",
   "apps/knowledge-engine/src/cas_knowledge_engine/engine.py",
   "apps/knowledge-engine/src/cas_knowledge_engine/pbs_client.py",
+  "apps/knowledge-engine/src/cas_knowledge_engine/storage.py",
   "apps/knowledge-engine/src/cas_knowledge_engine/selftest.py",
   "apps/console-plugin/console-extensions.json"
 ];
@@ -671,6 +673,23 @@ for (const file of files) {
         "gateway must enforce configured customer workspace ACL before proxying private knowledge requests"
       );
     }
+    if (file.includes("cas_knowledge_engine/storage.py")) {
+      expect(
+        "knowledge-storage:pbs-compatible-schema",
+        text.includes("PBS_COMPAT_TABLES") &&
+          text.includes("document_sources") &&
+          text.includes("parsed_documents") &&
+          text.includes("document_chunks") &&
+          text.includes("chunk_embeddings") &&
+          text.includes("graph_entities") &&
+          text.includes("graph_entity_mentions") &&
+          text.includes("graph_entity_relations") &&
+          text.includes("embedding vector(768)") &&
+          text.includes("_save_pbs_compat_rows") &&
+          text.includes("cas://knowledge/"),
+        "knowledge Postgres store creates PBS-compatible document, chunk, embedding, and graph schema with local ingest shadow rows"
+      );
+    }
     if (file.includes("cas_knowledge_engine/pbs_client.py")) {
       expect(
         "pbs-client:service-token-required",
@@ -1107,6 +1126,27 @@ for (const file of files) {
           text.includes("already resolves to a different image") &&
           text.includes("forceRelease"),
         "CRC release promotion refuses to mutate existing release tags unless force is explicit"
+      );
+      expect(
+        "release-crc:verified-evidence-bound",
+        text.includes("CAS_RELEASE_EVIDENCE") &&
+          text.includes("cas-crc-deployment.json") &&
+          text.includes("verifiedImages") &&
+          text.includes("assertSourceMatchesDeploymentEvidence") &&
+          text.includes("differs from verified CRC deployment digest"),
+        "CRC release promotion refuses sources that differ from verified CRC deployment digest evidence"
+      );
+    }
+    if (file.includes("verify-crc-deployment")) {
+      expect(
+        "crc-deployment:verified-image-evidence",
+        text.includes("verifiedImages") &&
+          text.includes("appRuntimeImages") &&
+          text.includes("runtime:verified-image:${imageStream}") &&
+          text.includes("runtime:verified-image:cas-knowledge-postgres") &&
+          text.includes("dockerImageReference") &&
+          text.includes("imageID"),
+        "CRC deployment verifier records digest evidence for app ImageStreamTags and running Postgres imageID"
       );
     }
     if (file.includes("verify-pbs-live-smoke")) {
