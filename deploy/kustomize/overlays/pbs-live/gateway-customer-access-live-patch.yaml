@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cas-gateway
+  namespace: cywell-ai-sentinel
+spec:
+  template:
+    spec:
+      containers:
+        - name: gateway
+          env:
+            - name: CAS_KNOWLEDGE_REQUIRE_CUSTOMER_ACCESS
+              value: "true"
+            - name: CAS_KNOWLEDGE_CUSTOMER_ACCESS_JSON
+              valueFrom:
+                configMapKeyRef:
+                  name: cas-knowledge-live-config
+                  key: customer-access-json
+                  optional: false

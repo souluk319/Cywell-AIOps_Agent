@@ -1,3 +1,13 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cas-gateway
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
 metadata:
@@ -21,6 +31,16 @@ spec:
       kind: ImageStreamTag
       name: cas-gateway:dev
 ---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cas-console-plugin
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: console-plugin
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
 metadata:
@@ -43,4 +63,46 @@ spec:
     to:
       kind: ImageStreamTag
       name: cas-console-plugin:dev
-
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cas-knowledge-postgres
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: knowledge-postgres
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cas-knowledge-engine
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: knowledge-engine
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: cas-knowledge-engine
+  namespace: cywell-ai-sentinel
+  labels:
+    app.kubernetes.io/name: cywell-ai-sentinel
+    app.kubernetes.io/component: knowledge-engine
+    app.kubernetes.io/part-of: cywell-ai-sentinel
+spec:
+  runPolicy: Serial
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: apps/knowledge-engine/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: cas-knowledge-engine:dev

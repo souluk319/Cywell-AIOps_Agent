@@ -2,29 +2,43 @@
 
 Cywell AI Sentinel(CAS)는 OpenShift 운영 신호를 근거 기반 RCA와 안전한 조치 가이드로 전환하는 OpenShift-native AIOps Agent 제품입니다.
 
-첫 작업 범위는 다음에 한정합니다.
+v0.1.4 작업 범위는 다음을 포함합니다.
 
-- read-only Tool Plan 계약
-- Evidence Bundle / RCA Result 계약
-- CRC OpenShift Console 연결 검증
-- 최소 namespace/RBAC/NetworkPolicy 배포 골격
-- OOMKilled mock RCA Gateway
-- `/ai-sentinel` Console Plugin shell
+- OpenShift Lightspeed-backed RCA Gateway와 OpenShift API evidence 수집
+- Cywell 하위 고객 데이터 업로드, RAG, LLM Wiki, Topology Console routes
+- PBS-compatible Knowledge Engine local/Postgres runtime
+- PBS shadow/live HTTP adapter, owner-scoped RAG/wiki/topology contracts
+- Gateway SelfSubjectReview owner verification and UserToken boundary
+- pbs-live Gateway customer workspace ACL from `cas-knowledge-live-config/customer-access-json`
+- CRC binary-build deployment for gateway, console-plugin, and knowledge-engine
+- scoped NetworkPolicy for gateway, console-plugin, knowledge-engine, and Postgres
 
-문서 산출물과 민감 설정은 git에 포함하지 않습니다.
+민감 설정과 장기 문서 원본은 git에 포함하지 않습니다. 현재 브랜치 산출물은 `deliverables/active/v0.1.4/`만 추적 대상으로 둡니다.
 
 ```text
 .env
-deliverables/
 docs/
 ```
 
 ## Verification
 
+전체 v0.1.4 로컬 gate:
+
+```bash
+npm run verify
+```
+
+개별 확인이 필요할 때의 구성 명령:
+
 ```bash
 npm run verify:contracts
 npm run verify:gateway
+npm run verify:knowledge-engine
+npm run verify:gateway:brain
+npm run verify:openshift:evidence
 npm run verify:console-plugin
+npm run verify:console:topology-dom
+npm run verify:console:integration
 npm run verify:crc:connection:preview
 npm run verify:deploy:manifests
 ```
@@ -37,14 +51,34 @@ npm run verify:crc:connection
 
 ## Current Boundary
 
-현재 Gateway는 mock read-only mode입니다. 실제 OpenShift Pod/Event/Previous Log 조회는 다음 단계에서 `openshift-adapter`로 교체합니다.
+Gateway knowledge private routes verify the incoming OpenShift Console `UserToken` through Kubernetes `SelfSubjectReview`, strip user bearer tokens before the internal Knowledge Engine hop, check the configured customer workspace ACL when enabled, and inject only the Gateway-derived signed owner header. Public Gateway and knowledge health surfaces are sanitized so provider modes, owner identity mode, storage paths, tenant counts, and PBS internals are not exposed through the Console proxy.
 
-현재 OpenShift manifest는 server-side dry-run까지 검증했습니다. 실제 workload 배포는 `cas-gateway`와 `cas-console-plugin` 이미지를 registry에 push한 뒤 진행합니다.
+The v0.1.4 base deployment uses the local/Postgres PBS-compatible Knowledge Engine. PBS live cutover remains gated on external HTTPS/mTLS `playbookstudio` runtime, `cas-pbs-auth`, live Postgres Secret, reviewed customer ACL mapping, strict `CAS_PBS_SOURCE_HEAD` source pinning, Cywell HEAD remote proof, expected live cluster identity, live overlay application, and PBS runtime/corpus readiness. Local `v0.1.4` release ImageStreamTags can be prepared from the verified CRC images with `npm run release:crc:v0.1.4`; retagging an existing release tag requires `CAS_RELEASE_FORCE=true`.
+
+For PBS live cutover, use:
+
+```bash
+npm run verify:pbs:preflight:shadow
+npm run verify:pbs:preflight:shadow:cluster
+npm run verify:pbs:cutover
+npm run verify:pbs:cutover:cluster
+npm run verify:release
+npm run verify:release:pbs-live
+```
+
+Those commands are expected to fail or warn until HTTPS `CAS_PBS_BASE_URL`, PBS bearer token material, the `playbookstudio` runtime, `cas-pbs-auth`, `cas-knowledge-postgres-live`, reviewed `cas-knowledge-live-config/customer-access-json`, live overlay application, live PBS egress policy, strict pushed-source proof for both Cywell and PBS, and `CAS_RELEASE_EXPECTED_CLUSTER_IDENTITY_JSON` are present. `verify:pbs:cutover` is the local PBS API smoke and requires `CAS_PBS_BASE_URL` plus `CAS_PBS_BEARER_TOKEN`, `CAS_PBS_API_KEY`, or `CAS_PBS_BEARER_TOKEN_FILE`; release readiness is proven by non-skipping `verify:release` / `verify:release:pbs-live`.
+
+Use `npm run render:pbs:live-prereqs:template` to generate non-secret PBS live input templates under ignored `test-results/pbs-live-prereqs-input-template/`; copy them outside the repo and fill approved token, owner-HMAC, ACL, and Postgres values from the secret manager. Before running `npm run render:pbs:live-prereqs`, set `CAS_PBS_LIVE_PREREQS_OUT_DIR` or pass `--out-dir` to an approved secure handoff path outside the repository. The renderer refuses repo-local or repo-root raw Secret output unless the disposable lab override is explicitly enabled.
+
+`npm run verify:pbs:preflight` defaults to pbs-live diagnostics and may exit 0 with WARN entries. Use `npm run verify:pbs:preflight:shadow` for render/config diagnostics and `npm run verify:pbs:preflight:shadow:cluster` after applying `pbs-shadow`. `npm run verify:pbs:live` may exit 0 as SKIP when `CAS_PBS_BASE_URL` is unset. Those are diagnostic states, not PBS live release readiness.
+
+The production runbook is tracked at `deliverables/active/v0.1.4/production-live-cutover-checklist.md`.
 
 Console Plugin 병렬 설치 기준:
 
 - OpsLens path: `/opslens`
-- AI Sentinel path: `/ai-sentinel`
+- AI Sentinel path: `/cywell/ai-sentinel`
+- Cywell knowledge paths: `/cywell/customer-data`, `/cywell/rag`, `/cywell/llm-wiki`, `/cywell/topology`
 - OpsLens proxy alias: `opslens-api`
 - AI Sentinel proxy alias: `cas-api`
 
@@ -54,7 +88,8 @@ Docker push가 CRC route CA 신뢰 문제로 막히는 경우, CRC overlay의 Op
 
 ```bash
 npm run deploy:crc
+npm run release:crc:v0.1.4
 npm run verify:crc:deployment
 ```
 
-`deploy:crc`는 `.env`, `deliverables`, `node_modules`를 제외한 최소 build context를 `test-results/cas-build-context`에 만든 뒤 OpenShift binary build로 `cas-gateway:dev`와 `cas-console-plugin:dev` 이미지를 생성합니다. 이후 manifest 적용, rollout 대기, ConsolePlugin 활성화, deployment 검증을 수행합니다.
+`deploy:crc`는 `.env`, `deliverables`, `node_modules`, generated bytecode를 제외한 최소 build context를 `test-results/cas-build-context`에 만든 뒤 OpenShift binary build로 `cas-gateway:dev`, `cas-console-plugin:dev`, `cas-knowledge-engine:dev` 이미지를 생성합니다. 깨끗한 CRC 클러스터에서도 namespace, local-only dev Postgres Secret, internal owner HMAC Secret, ImageStream을 먼저 만들고, 기존 v0.1.3 operator가 없으면 optional pause를 건너뛴 뒤 manifest 적용, rollout 대기, ConsolePlugin 활성화, deployment 검증을 수행합니다. `release:crc:v0.1.4`는 검증된 `:dev` 앱 이미지와 실행 중인 Postgres digest를 로컬 `v0.1.4` ImageStreamTag로 승격합니다. 기존 `v0.1.4` tag를 다른 image로 바꿔야 하는 재승격은 `CAS_RELEASE_FORCE=true npm run release:crc:v0.1.4`처럼 명시해야 합니다.

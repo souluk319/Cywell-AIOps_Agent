@@ -1,0 +1,871 @@
+#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+
+const args = new Set(process.argv.slice(2).filter((arg) => !arg.startsWith("--source-dir=")));
+const sourceDirArg = process.argv.find((arg) => arg.startsWith("--source-dir="))?.split("=")[1];
+const checkedAt = new Date().toISOString();
+const repoPinnedSourceDir = resolve(process.cwd(), "..", "PBS-Dev3-cywell-v014-source-pin-clone");
+const repoDefaultSourceDir = existsSync(repoPinnedSourceDir) ? repoPinnedSourceDir : resolve(process.cwd(), "..", "PBS-Dev3");
+const sourceDir = resolve(sourceDirArg || process.env.CAS_PBS_SOURCE_DIR || repoDefaultSourceDir);
+const requireSource = args.has("--require-source");
+const requireCleanSource = args.has("--require-clean-source") || /^(1|true|yes|y|on)$/i.test(process.env.CAS_PBS_REQUIRE_CLEAN_SOURCE || "");
+const requireExpectedHead = args.has("--require-expected-head") || /^(1|true|yes|y|on)$/i.test(process.env.CAS_PBS_REQUIRE_SOURCE_HEAD || "");
+const expectedSourceHead = String(process.env.CAS_PBS_SOURCE_HEAD || "").trim();
+const selfTest = args.has("--self-test");
+const approvedPbsSourceHead = "6604777abb9e6bd44a83c6a12f36e31ac396489e";
+const strictApprovedRemotePattern = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)souluk319\/PBS_DEV_Part3(?:\.git)?$/i;
+const defaultApprovedRemotePattern = "^(?:git@github\\.com:|https://github\\.com/|ssh://git@github\\.com/)souluk319/PBS_DEV_Part3(?:\\.git)?$";
+const approvedRemotePatterns = (process.env.CAS_PBS_APPROVED_REMOTE_PATTERN || defaultApprovedRemotePattern)
+  .split(",")
+  .map((pattern) => pattern.trim())
+  .filter(Boolean)
+  .map((pattern) => new RegExp(pattern, "i"));
+const optionalEvidencePath = join("test-results", "cas-pbs-source-contract.json");
+const requiredEvidencePath = join("test-results", "cas-pbs-source-contract-required.json");
+const pinnedEvidencePath = join("test-results", "cas-pbs-source-contract-pinned.json");
+const evidencePath = requireCleanSource && requireExpectedHead ? pinnedEvidencePath : requireSource ? requiredEvidencePath : optionalEvidencePath;
+const checks = [];
+const contractFiles = [
+  "deploy/Dockerfile",
+  "deploy/openshift/core.yaml",
+  "deploy/openshift-cywell-v014/README.md",
+  "deploy/openshift-cywell-v014/kustomization.yaml",
+  "deploy/openshift-cywell-v014/runtime-service.yaml",
+  "deploy/openshift-cywell-v014/runtime-contract-patch.yaml",
+  "deploy/openshift-cywell-v014/runtime-tls-patch.yaml",
+  "deploy/openshift-cywell-v014/configmap-runtime-patch.yaml",
+  "deploy/openshift-cywell-v014/lightspeed-networkpolicy-patch.yaml",
+  "deploy/openshift-cywell-v014/terminal-broker-subject-patch.yaml",
+  "docker-compose.yml",
+  "src/play_book_studio/config/settings.py",
+  "src/play_book_studio/http/server.py",
+  "src/play_book_studio/http/public_chat_gateway.py",
+  "src/play_book_studio/http/server_handler_factory.py",
+  "src/play_book_studio/http/server_handler_base.py",
+  "src/play_book_studio/http/upload_api.py",
+  "src/play_book_studio/http/url_ingest_api.py",
+  "src/play_book_studio/http/server_chat.py",
+  "src/play_book_studio/http/wiki_vault.py",
+  "src/play_book_studio/wiki_loop.py"
+];
+
+function runGitResult(gitArgs, cwd = process.cwd(), timeoutMs = 10000) {
+  const result = spawnSync("git", gitArgs, {
+    cwd,
+    encoding: "utf8",
+    timeout: timeoutMs,
+    windowsHide: true
+  });
+  return {
+    status: result.status ?? 1,
+    ok: result.status === 0,
+    stdout: result.stdout?.trim() ?? "",
+    stderr: (result.stderr ?? result.error?.message ?? "").trim()
+  };
+}
+
+function runGit(gitArgs, cwd = process.cwd()) {
+  const result = runGitResult(gitArgs, cwd);
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function gitMetadata(root) {
+  const inside = runGit(["rev-parse", "--is-inside-work-tree"], root);
+  if (inside !== "true") return { available: false };
+  const status = runGit(["status", "--short"], root);
+  return {
+    available: true,
+    branch: runGit(["branch", "--show-current"], root),
+    head: runGit(["rev-parse", "--short", "HEAD"], root),
+    fullHead: runGit(["rev-parse", "HEAD"], root),
+    remoteOriginUrl: runGit(["config", "--get", "remote.origin.url"], root),
+    treeStatus: status ? "dirty" : "clean",
+    statusShort: status
+  };
+}
+
+function fileSha256(root, relativePath) {
+  const path = join(root, relativePath);
+  if (!existsSync(path)) return "";
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function contractFileHashes(root) {
+  return Object.fromEntries(contractFiles.map((relativePath) => [relativePath, fileSha256(root, relativePath)]));
+}
+
+function record(status, id, detail) {
+  checks.push({ status, id, detail });
+  console.log(`[${status}] ${id}: ${detail}`);
+}
+
+function pass(id, detail) {
+  record("PASS", id, detail);
+}
+
+function warn(id, detail) {
+  record("WARN", id, detail);
+}
+
+function fail(id, detail) {
+  record("FAIL", id, detail);
+}
+
+function expect(id, condition, passDetail, failDetail = passDetail) {
+  if (condition) pass(id, passDetail);
+  else fail(id, failDetail);
+}
+
+function fullGitSha(value) {
+  return /^[a-f0-9]{40}$/i.test(String(value ?? "").trim());
+}
+
+function approvedRemoteUrl(value) {
+  const remote = String(value ?? "").trim();
+  if (requireCleanSource && requireExpectedHead) return strictApprovedRemotePattern.test(remote);
+  return Boolean(remote && approvedRemotePatterns.some((pattern) => pattern.test(remote)));
+}
+
+function remoteRefsContainingExpectedHead(root, expectedHead) {
+  const proof = {
+    remoteContainsExpectedHead: false,
+    remoteRefsContainingExpectedHead: [],
+    remoteVerifiedAt: checkedAt,
+    remoteFetchOk: false,
+    remoteVerificationError: ""
+  };
+  if (!fullGitSha(expectedHead)) {
+    proof.remoteVerificationError = "expected PBS head is not a full 40-character SHA";
+    return proof;
+  }
+  const fetch = runGitResult(["fetch", "--quiet", "--prune", "origin"], root, 60000);
+  proof.remoteFetchOk = fetch.ok;
+  if (!fetch.ok) {
+    proof.remoteVerificationError = fetch.stderr || "git fetch --prune origin failed";
+    return proof;
+  }
+  const contains = runGitResult(["branch", "-r", "--contains", expectedHead], root, 20000);
+  if (!contains.ok) {
+    proof.remoteVerificationError = contains.stderr || `git branch -r --contains ${expectedHead} failed`;
+    return proof;
+  }
+  const refs = contains.stdout
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\*\s*/, "").trim())
+    .filter((line) => line.startsWith("origin/") && !line.includes(" -> "));
+  proof.remoteRefsContainingExpectedHead = refs;
+  proof.remoteContainsExpectedHead = refs.length > 0;
+  if (!proof.remoteContainsExpectedHead) {
+    proof.remoteVerificationError = `no fetched origin branch contains ${expectedHead}`;
+  }
+  return proof;
+}
+
+function readRequired(root, relativePath) {
+  const path = join(root, relativePath);
+  if (!existsSync(path)) {
+    fail(`pbs-source:file:${relativePath}`, `${relativePath} is missing under ${root}`);
+    return "";
+  }
+  pass(`pbs-source:file:${relativePath}`, `${relativePath} exists`);
+  return readFileSync(path, "utf8");
+}
+
+function literal(text, value) {
+  return text.includes(value);
+}
+
+function hasAll(text, values) {
+  return values.every((value) => literal(text, value));
+}
+
+function sourceContractChecks(root) {
+  const dockerfile = readRequired(root, "deploy/Dockerfile");
+  const openshiftCore = readRequired(root, "deploy/openshift/core.yaml");
+  const overlayReadme = readRequired(root, "deploy/openshift-cywell-v014/README.md");
+  const overlayKustomization = readRequired(root, "deploy/openshift-cywell-v014/kustomization.yaml");
+  const overlayRuntimeService = readRequired(root, "deploy/openshift-cywell-v014/runtime-service.yaml");
+  const overlayRuntimeContractPatch = readRequired(root, "deploy/openshift-cywell-v014/runtime-contract-patch.yaml");
+  const overlayRuntimeTlsPatch = readRequired(root, "deploy/openshift-cywell-v014/runtime-tls-patch.yaml");
+  const overlayConfigMapRuntimePatch = readRequired(root, "deploy/openshift-cywell-v014/configmap-runtime-patch.yaml");
+  const overlayLightspeedNetworkPolicyPatch = readRequired(root, "deploy/openshift-cywell-v014/lightspeed-networkpolicy-patch.yaml");
+  const overlayTerminalBrokerSubjectPatch = readRequired(root, "deploy/openshift-cywell-v014/terminal-broker-subject-patch.yaml");
+  const compose = readRequired(root, "docker-compose.yml");
+  const settings = readRequired(root, "src/play_book_studio/config/settings.py");
+  const serverEntry = readRequired(root, "src/play_book_studio/http/server.py");
+  const publicChatGateway = readRequired(root, "src/play_book_studio/http/public_chat_gateway.py");
+  const serverFactory = readRequired(root, "src/play_book_studio/http/server_handler_factory.py");
+  const serverHandlerBase = readRequired(root, "src/play_book_studio/http/server_handler_base.py");
+  const uploadApi = readRequired(root, "src/play_book_studio/http/upload_api.py");
+  const urlIngestApi = readRequired(root, "src/play_book_studio/http/url_ingest_api.py");
+  const serverChat = readRequired(root, "src/play_book_studio/http/server_chat.py");
+  const wikiVault = readRequired(root, "src/play_book_studio/http/wiki_vault.py");
+  const wikiLoop = readRequired(root, "src/play_book_studio/wiki_loop.py");
+  const cywellRuntimeSample = readRequired(process.cwd(), "deliverables/active/v0.1.4/pbs-runtime-service-contract.sample.yaml");
+  const cywellPreflight = readRequired(process.cwd(), "scripts/verify-pbs-preflight.mjs");
+
+  expect(
+    "pbs-source:dockerfile:app-target",
+    /FROM\s+python:3\.11-slim\s+AS\s+app/i.test(dockerfile),
+    "PBS-Dev3 Dockerfile has an app runtime target",
+    "PBS-Dev3 Dockerfile must expose a stable app runtime target"
+  );
+  expect(
+    "pbs-source:dockerfile:runtime-port",
+    /EXPOSE\s+8765/.test(dockerfile),
+    "PBS-Dev3 app runtime exposes port 8765",
+    "PBS-Dev3 app runtime must expose port 8765 to match Cywell pbs-live egress"
+  );
+  expect(
+    "pbs-source:dockerfile:runtime-command",
+    hasAll(dockerfile, ['"play_book_studio.cli"', '"ui"', '"--host"', '"0.0.0.0"', '"--port"', '"8765"']),
+    "PBS-Dev3 app runtime command binds the UI/API server on 0.0.0.0:8765",
+    "PBS-Dev3 app runtime command must bind the API server on 0.0.0.0:8765"
+  );
+  expect(
+    "pbs-source:compose:app-port",
+    compose.includes("${APP_HTTP_PORT:-8765}:8765"),
+    "PBS-Dev3 compose app maps APP_HTTP_PORT to container port 8765",
+    "PBS-Dev3 compose app must map runtime port 8765"
+  );
+  expect(
+    "pbs-source:compose:health-endpoint",
+    hasAll(compose, ["http://127.0.0.1:8765/api/health", "healthcheck"]),
+    "PBS-Dev3 compose healthcheck uses /api/health on port 8765",
+    "PBS-Dev3 compose healthcheck must prove the same /api/health endpoint Cywell probes"
+  );
+  expect(
+    "pbs-source:compose:db-contract",
+    hasAll(compose, ["pgvector/pgvector:pg16", "DATABASE_URL", "db-migrate", "condition: service_completed_successfully"]),
+    "PBS-Dev3 compose declares pgvector, DATABASE_URL, and db-migrate dependency",
+    "PBS-Dev3 compose must keep the database/migration contract explicit for Cywell live cutover"
+  );
+  expect(
+    "pbs-source:openshift-core:no-qdrant",
+    !/QDRANT|qdrant/i.test(openshiftCore),
+    "PBS-Dev3 OpenShift core manifest does not carry an unused Qdrant runtime contract",
+    "PBS-Dev3 OpenShift core manifest must not carry an unused Qdrant runtime contract for Cywell live cutover"
+  );
+  expect(
+    "pbs-source:openshift-core:disabled-namespace-mode",
+    hasAll(openshiftCore, ["PBS_AUTO_CREATE_NAMESPACE: \"false\"", "PBS_NAMESPACE_MODE: disabled"]),
+    "PBS-Dev3 OpenShift core manifest disables runtime namespace auto-management",
+    "PBS-Dev3 OpenShift core manifest must keep namespace auto-management disabled for the Cywell-controlled runtime namespace"
+  );
+  expect(
+    "pbs-source:openshift-overlay:source-stamp-runbook",
+    hasAll(overlayReadme, [
+      "cywell.ai/pbs-source-head",
+      "PLAYBOOKSTUDIO_SOURCE_HEAD",
+      "PBS_SOURCE_HEAD",
+      "oc set env deployment/app",
+      "oc patch deployment/app",
+      "oc rollout status deployment/app"
+    ]),
+    "PBS-Dev3 Cywell overlay runbook stamps live pods with the approved PBS source SHA in annotations and env",
+    "PBS-Dev3 Cywell overlay runbook must stamp live pods with the approved PBS source SHA before Cywell live preflight"
+  );
+  expect(
+    "pbs-source:openshift-overlay:runtime-service",
+    hasAll(overlayRuntimeService, [
+      "name: playbookstudio-runtime",
+      "namespace: playbookstudio",
+      "service.beta.openshift.io/serving-cert-secret-name: playbookstudio-runtime-tls",
+      "name: https-runtime",
+      "port: 8765"
+    ]),
+    "PBS-Dev3 Cywell overlay exposes playbookstudio-runtime as an HTTPS serving-cert Service on port 8765",
+    "PBS-Dev3 Cywell overlay must expose playbookstudio-runtime with an OpenShift serving cert on port 8765"
+  );
+  expect(
+    "pbs-source:openshift-overlay:runtime-labels",
+    hasAll(overlayRuntimeContractPatch, [
+      "app.kubernetes.io/name: playbookstudio",
+      "app.kubernetes.io/component: runtime"
+    ]),
+    "PBS-Dev3 Cywell overlay stamps the runtime workload and Service with the Cywell selector labels",
+    "PBS-Dev3 Cywell overlay must stamp runtime selector labels used by Cywell live preflight"
+  );
+  expect(
+    "pbs-source:openshift-overlay:runtime-tls",
+    hasAll(overlayRuntimeTlsPatch, [
+      "PBS_RUNTIME_TLS_CERT_FILE",
+      "PBS_RUNTIME_TLS_KEY_FILE",
+      "/etc/pki/playbookstudio-runtime/tls.crt",
+      "/etc/pki/playbookstudio-runtime/tls.key",
+      "scheme: HTTPS",
+      "secretName: playbookstudio-runtime-tls"
+    ]),
+    "PBS-Dev3 Cywell overlay mounts the serving cert and probes the runtime over HTTPS",
+    "PBS-Dev3 Cywell overlay must mount the serving cert and probe the runtime over HTTPS"
+  );
+  expect(
+    "pbs-source:openshift-overlay:runtime-namespace-config",
+    hasAll(overlayConfigMapRuntimePatch, ["OCP_DEFAULT_NAMESPACE: playbookstudio"]) &&
+      hasAll(overlayTerminalBrokerSubjectPatch, ["namespace: playbookstudio"]),
+    "PBS-Dev3 Cywell overlay moves runtime namespace defaults and terminal broker subject to playbookstudio",
+    "PBS-Dev3 Cywell overlay must point runtime namespace defaults and terminal broker subject at playbookstudio"
+  );
+  expect(
+    "pbs-source:openshift-overlay:lightspeed-networkpolicy",
+    hasAll(overlayLightspeedNetworkPolicyPatch, [
+      "namespace: openshift-lightspeed",
+      "kubernetes.io/metadata.name: playbookstudio",
+      "port: 8443"
+    ]),
+    "PBS-Dev3 Cywell overlay keeps the Lightspeed ingress NetworkPolicy in openshift-lightspeed and allows playbookstudio",
+    "PBS-Dev3 Cywell overlay must not render the Lightspeed NetworkPolicy into the PBS namespace"
+  );
+  expect(
+    "pbs-source:openshift-overlay:kustomization",
+    hasAll(overlayKustomization, [
+      "../openshift",
+      "runtime-service.yaml",
+      "runtime-tls-patch.yaml",
+      "lightspeed-networkpolicy-patch.yaml",
+      "terminal-broker-subject-patch.yaml"
+    ]) && !/^namespace:\s+playbookstudio\s*$/m.test(overlayKustomization),
+    "PBS-Dev3 Cywell overlay patches PBS workload namespaces without globally rewriting the Lightspeed NetworkPolicy namespace",
+    "PBS-Dev3 Cywell overlay must not use a global namespace transform that rewrites the Lightspeed NetworkPolicy namespace"
+  );
+  expect(
+    "pbs-source:runtime:https-server",
+    hasAll(serverEntry, [
+      "ssl.SSLContext",
+      "PBS runtime TLS requires both PBS_RUNTIME_TLS_CERT_FILE and PBS_RUNTIME_TLS_KEY_FILE",
+      "context.load_cert_chain",
+      "context.wrap_socket",
+      "settings.runtime_tls_cert_file",
+      "settings.runtime_tls_key_file",
+      'backend_url = f"{scheme}://{host}:{port}"'
+    ]),
+    "PBS-Dev3 runtime can serve HTTPS when the OpenShift serving cert files are mounted",
+    "PBS-Dev3 runtime must serve HTTPS when the Cywell overlay mounts serving cert files"
+  );
+  expect(
+    "pbs-source:route:health",
+    serverFactory.includes('request_path == "/api/health"'),
+    "PBS-Dev3 serves GET /api/health",
+    "PBS-Dev3 must serve GET /api/health"
+  );
+  expect(
+    "pbs-source:route:upload-ingest",
+    serverFactory.includes('parsed_request.path == "/api/uploads/ingest"') && uploadApi.includes("def handle_upload_ingest("),
+    "PBS-Dev3 serves POST /api/uploads/ingest through upload_api",
+    "PBS-Dev3 must serve POST /api/uploads/ingest through upload_api"
+  );
+  expect(
+    "pbs-source:route:url-ingest",
+    serverFactory.includes('parsed_request.path == "/api/uploads/url-ingest"') && urlIngestApi.includes("build_url_ingest_response"),
+    "PBS-Dev3 serves POST /api/uploads/url-ingest through url_ingest_api",
+    "PBS-Dev3 must serve POST /api/uploads/url-ingest through url_ingest_api"
+  );
+  expect(
+    "pbs-source:route:chat",
+    serverFactory.includes('parsed_request.path == "/api/chat"') && serverChat.includes("def handle_chat("),
+    "PBS-Dev3 serves POST /api/chat through server_chat",
+    "PBS-Dev3 must serve POST /api/chat through server_chat"
+  );
+  expect(
+    "pbs-source:route:public-chat",
+    serverFactory.includes("PUBLIC_CHAT_PATHS") &&
+      serverFactory.includes("_handle_public_chat_gateway") &&
+      publicChatGateway.includes('PUBLIC_CHAT_PATH = "/api/public/chat"') &&
+      publicChatGateway.includes('PUBLIC_CHAT_STREAM_PATH = "/api/public/chat/stream"') &&
+      publicChatGateway.includes("PUBLIC_CHAT_PATHS = {PUBLIC_CHAT_PATH, PUBLIC_CHAT_STREAM_PATH}") &&
+      publicChatGateway.includes("def authenticate_public_chat(") &&
+      publicChatGateway.includes("def run_public_chat("),
+    "PBS-Dev3 serves the public chat gateway through an explicit guarded route",
+    "PBS-Dev3 must expose the public chat gateway through an explicit guarded route"
+  );
+  expect(
+    "pbs-source:public-chat:closed-authenticated",
+    hasAll(publicChatGateway, [
+      "pbs_public_chat_enabled",
+      "public_chat_disabled",
+      "pbs_public_chat_api_keys",
+      "hmac.compare_digest",
+      "public_chat_unauthorized"
+    ]),
+    "PBS-Dev3 public chat gateway is disabled by default and requires configured API keys",
+    "PBS-Dev3 public chat gateway must be disabled by default and require configured API keys"
+  );
+  expect(
+    "pbs-source:public-chat:body-limit",
+    serverFactory.includes("pbs_public_chat_max_body_bytes") &&
+      serverFactory.includes("max_body_bytes") &&
+      serverHandlerBase.includes("max_body_bytes") &&
+      serverHandlerBase.includes("HTTPStatus.REQUEST_ENTITY_TOO_LARGE"),
+    "PBS-Dev3 public chat gateway enforces a configurable request body limit before chat execution",
+    "PBS-Dev3 public chat gateway must enforce a configurable request body limit before chat execution"
+  );
+  expect(
+    "pbs-source:public-chat:settings",
+    hasAll(settings, [
+      "PBS_PUBLIC_CHAT_ENABLED",
+      "PBS_PUBLIC_CHAT_API_KEYS",
+      "PBS_PUBLIC_CHAT_RATE_LIMIT_PER_MINUTE",
+      "PBS_PUBLIC_CHAT_MAX_CONCURRENT",
+      "PBS_PUBLIC_CHAT_MAX_BODY_BYTES",
+      "PBS_PUBLIC_CHAT_OWNER_USER_ID",
+      "PBS_RUNTIME_TLS_CERT_FILE",
+      "PBS_RUNTIME_TLS_KEY_FILE"
+    ]),
+    "PBS-Dev3 settings expose the public chat gateway and runtime TLS controls",
+    "PBS-Dev3 settings must expose the public chat gateway and runtime TLS controls"
+  );
+  expect(
+    "pbs-source:route:attachment-transcribe-boundary",
+    serverFactory.includes('/api/chat/attachments/transcribe') &&
+      serverChat.includes("def handle_chat_attachment_transcribe(") &&
+      serverChat.includes("chat_attachment_transcribe_not_available"),
+    "PBS-Dev3 attachment transcription route has an explicit unavailable runtime boundary instead of a missing import",
+    "PBS-Dev3 attachment transcription route must not break server import when transcription is unavailable"
+  );
+  expect(
+    "pbs-source:route:wiki-vault",
+    serverFactory.includes('request_path == "/api/wiki-vault"') && wikiVault.includes("def handle_wiki_vault("),
+    "PBS-Dev3 serves GET /api/wiki-vault through wiki_vault",
+    "PBS-Dev3 must serve GET /api/wiki-vault through wiki_vault"
+  );
+  expect(
+    "pbs-source:route:wiki-vault-notes",
+    serverFactory.includes('parsed_request.path == "/api/wiki-vault/notes"') && wikiVault.includes("def handle_wiki_vault_note_save("),
+    "PBS-Dev3 serves POST /api/wiki-vault/notes through wiki_vault",
+    "PBS-Dev3 must serve POST /api/wiki-vault/notes through wiki_vault"
+  );
+  expect(
+    "pbs-source:route:wiki-loop-run",
+    serverFactory.includes('parsed_request.path == "/api/wiki-loop/run"') && wikiLoop.includes("def run_wiki_loop_once("),
+    "PBS-Dev3 serves POST /api/wiki-loop/run through wiki_loop",
+    "PBS-Dev3 must serve POST /api/wiki-loop/run through wiki_loop"
+  );
+  expect(
+    "pbs-source:route:wiki-loop-status",
+    serverFactory.includes('request_path == "/api/wiki-loop/status"') && wikiLoop.includes("def build_wiki_loop_status("),
+    "PBS-Dev3 serves GET /api/wiki-loop/status through wiki_loop",
+    "PBS-Dev3 must serve GET /api/wiki-loop/status through wiki_loop"
+  );
+  expect(
+    "pbs-source:owner-scope:upload-reports",
+    uploadApi.includes("owner_user_id") && uploadApi.includes("upload report is not visible to this session"),
+    "PBS-Dev3 upload reports expose owner-scoped visibility hooks used by Cywell PBS live calls",
+    "PBS-Dev3 upload report route must retain owner-scoped visibility checks"
+  );
+  expect(
+    "pbs-source:wiki-vault:topology-signals",
+    hasAll(wikiVault, ["selected_uploads", "graph", "nodes", "edges", "chunk_previews"]),
+    "PBS-Dev3 wiki vault exposes graph nodes/edges, selected uploads, and chunk previews",
+    "PBS-Dev3 wiki vault must expose topology graph signals that the Cywell dashboard normalizes"
+  );
+  expect(
+    "cywell-contract:runtime-sample",
+    hasAll(cywellRuntimeSample, [
+      "name: playbookstudio",
+      "name: playbookstudio-runtime",
+      "app.kubernetes.io/name: playbookstudio",
+      "app.kubernetes.io/component: runtime",
+      "port: 8765"
+    ]),
+    "Cywell runtime sample matches the PBS namespace/service/label/port contract",
+    "Cywell runtime sample must match the PBS namespace/service/label/port contract"
+  );
+  expect(
+    "cywell-contract:preflight-runtime",
+    hasAll(cywellPreflight, [
+      "playbookstudio-runtime",
+      "app.kubernetes.io/name",
+      "app.kubernetes.io/component",
+      "8765",
+      "cluster:pbs-runtime-service-endpoints"
+    ]),
+    "Cywell strict preflight checks the PBS service selector and ready endpoint contract",
+    "Cywell strict preflight must check PBS service selector and ready endpoint contract"
+  );
+}
+
+async function createSelfTestSource() {
+  const root = await mkdtemp(join(tmpdir(), "cywell-pbs-source-contract-"));
+  const write = async (relativePath, text) => {
+    const path = join(root, relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    await writeFile(path, text);
+  };
+  await write(
+    "deploy/Dockerfile",
+    `FROM python:3.11-slim AS app
+EXPOSE 8765
+CMD ["python", "-m", "play_book_studio.cli", "ui", "--no-browser", "--host", "0.0.0.0", "--port", "8765"]
+`
+  );
+  await write(
+    "deploy/openshift/core.yaml",
+    `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: playbookstudio-config
+  namespace: pbs-ocpops
+data:
+  OCP_DEFAULT_NAMESPACE: pbs-ocpops
+  PBS_AUTO_CREATE_NAMESPACE: "false"
+  PBS_NAMESPACE_MODE: disabled
+`
+  );
+  await write(
+    "deploy/openshift-cywell-v014/README.md",
+    `# Cywell v0.1.4 Runtime Contract Overlay
+
+- runtime pod source stamp cywell.ai/pbs-source-head or PLAYBOOKSTUDIO_SOURCE_HEAD
+
+\`\`\`bash
+PBS_SOURCE_HEAD="<approved-full-pbs-git-sha>"
+oc set env deployment/app -n playbookstudio PLAYBOOKSTUDIO_SOURCE_HEAD="\${PBS_SOURCE_HEAD}"
+oc patch deployment/app -n playbookstudio --type=merge -p "{\\"spec\\":{\\"template\\":{\\"metadata\\":{\\"annotations\\":{\\"cywell.ai/pbs-source-head\\":\\"\${PBS_SOURCE_HEAD}\\"}}}}}"
+oc rollout status deployment/app -n playbookstudio --timeout=600s
+\`\`\`
+`
+  );
+  await write(
+    "deploy/openshift-cywell-v014/kustomization.yaml",
+    `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../openshift
+  - runtime-service.yaml
+patches:
+  - path: runtime-tls-patch.yaml
+  - path: lightspeed-networkpolicy-patch.yaml
+  - path: terminal-broker-subject-patch.yaml
+`
+  );
+  await write(
+    "deploy/openshift-cywell-v014/runtime-service.yaml",
+    `apiVersion: v1
+kind: Service
+metadata:
+  name: playbookstudio-runtime
+  namespace: playbookstudio
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: playbookstudio-runtime-tls
+spec:
+  ports:
+    - name: https-runtime
+      port: 8765
+`
+  );
+  await write(
+    "deploy/openshift-cywell-v014/runtime-contract-patch.yaml",
+    `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels:
+    app.kubernetes.io/name: playbookstudio
+    app.kubernetes.io/component: runtime
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: playbookstudio
+        app.kubernetes.io/component: runtime
+`
+  );
+  await write(
+    "deploy/openshift-cywell-v014/runtime-tls-patch.yaml",
+    `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          env:
+            - name: PBS_RUNTIME_TLS_CERT_FILE
+              value: /etc/pki/playbookstudio-runtime/tls.crt
+            - name: PBS_RUNTIME_TLS_KEY_FILE
+              value: /etc/pki/playbookstudio-runtime/tls.key
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+      volumes:
+        - name: runtime-tls
+          secret:
+            secretName: playbookstudio-runtime-tls
+`
+  );
+  await write("deploy/openshift-cywell-v014/configmap-runtime-patch.yaml", "kind: ConfigMap\nmetadata:\n  name: playbookstudio-config\ndata:\n  OCP_DEFAULT_NAMESPACE: playbookstudio\n");
+  await write(
+    "deploy/openshift-cywell-v014/lightspeed-networkpolicy-patch.yaml",
+    `apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-pbs-to-lightspeed-app-server
+  namespace: openshift-lightspeed
+spec:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: playbookstudio
+      ports:
+        - port: 8443
+`
+  );
+  await write("deploy/openshift-cywell-v014/terminal-broker-subject-patch.yaml", "kind: ClusterRoleBinding\nmetadata:\n  name: pbs-terminal-broker\nsubjects:\n  - namespace: playbookstudio\n");
+  await write(
+    "docker-compose.yml",
+    `services:
+  postgres:
+    image: pgvector/pgvector:pg16
+  app:
+    environment:
+      DATABASE_URL: postgresql://playbookstudio:secret@postgres:5432/playbookstudio
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "\${APP_HTTP_PORT:-8765}:8765"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health', timeout=5)"]
+  db-migrate:
+    command: ["python", "-m", "play_book_studio.cli", "db-migrate"]
+`
+  );
+  await write(
+    "src/play_book_studio/http/server_handler_factory.py",
+    `from play_book_studio.http.public_chat_gateway import PUBLIC_CHAT_PATHS
+if request_path == "/api/health": pass
+if request_path == "/api/wiki-vault": pass
+if request_path == "/api/wiki-loop/status": pass
+if parsed_request.path in PUBLIC_CHAT_PATHS: self._handle_public_chat_gateway(parsed_request.path)
+if parsed_request.path == "/api/chat": pass
+if parsed_request.path == "/api/chat/attachments/transcribe": pass
+if parsed_request.path == "/api/uploads/ingest": pass
+if parsed_request.path == "/api/uploads/url-ingest": pass
+if parsed_request.path == "/api/wiki-vault/notes": pass
+if parsed_request.path == "/api/wiki-loop/run": pass
+payload = self._parse_request_payload(max_body_bytes=settings.pbs_public_chat_max_body_bytes)
+def _handle_public_chat_gateway(): pass
+`
+  );
+  await write(
+    "src/play_book_studio/config/settings.py",
+    `PBS_PUBLIC_CHAT_ENABLED = "PBS_PUBLIC_CHAT_ENABLED"
+PBS_PUBLIC_CHAT_API_KEYS = "PBS_PUBLIC_CHAT_API_KEYS"
+PBS_PUBLIC_CHAT_RATE_LIMIT_PER_MINUTE = "PBS_PUBLIC_CHAT_RATE_LIMIT_PER_MINUTE"
+PBS_PUBLIC_CHAT_MAX_CONCURRENT = "PBS_PUBLIC_CHAT_MAX_CONCURRENT"
+PBS_PUBLIC_CHAT_MAX_BODY_BYTES = "PBS_PUBLIC_CHAT_MAX_BODY_BYTES"
+PBS_PUBLIC_CHAT_OWNER_USER_ID = "PBS_PUBLIC_CHAT_OWNER_USER_ID"
+PBS_RUNTIME_TLS_CERT_FILE = "PBS_RUNTIME_TLS_CERT_FILE"
+PBS_RUNTIME_TLS_KEY_FILE = "PBS_RUNTIME_TLS_KEY_FILE"
+`
+  );
+  await write(
+    "src/play_book_studio/http/server.py",
+    `import ssl
+def _configure_runtime_tls(server, settings):
+  context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+  context.load_cert_chain(certfile=settings.runtime_tls_cert_file, keyfile=settings.runtime_tls_key_file)
+  server.socket = context.wrap_socket(server.socket, server_side=True)
+  raise ValueError("PBS runtime TLS requires both PBS_RUNTIME_TLS_CERT_FILE and PBS_RUNTIME_TLS_KEY_FILE")
+def serve(host, port, settings):
+  backend_url = f"{scheme}://{host}:{port}"
+`
+  );
+  await write(
+    "src/play_book_studio/http/public_chat_gateway.py",
+    `import hmac
+PUBLIC_CHAT_PATH = "/api/public/chat"
+PUBLIC_CHAT_STREAM_PATH = "/api/public/chat/stream"
+PUBLIC_CHAT_PATHS = {PUBLIC_CHAT_PATH, PUBLIC_CHAT_STREAM_PATH}
+pbs_public_chat_enabled = False
+pbs_public_chat_api_keys = ()
+public_chat_disabled = "public_chat_disabled"
+public_chat_unauthorized = "public_chat_unauthorized"
+def authenticate_public_chat(): hmac.compare_digest("a", "a")
+def run_public_chat(): pass
+`
+  );
+  await write(
+    "src/play_book_studio/http/server_handler_base.py",
+    `from http import HTTPStatus
+def _parse_request_payload(max_body_bytes=None):
+  return HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+`
+  );
+  await write("src/play_book_studio/http/upload_api.py", `def handle_upload_ingest(): pass\nowner_user_id = ""\nraise Exception("upload report is not visible to this session")\n`);
+  await write("src/play_book_studio/http/url_ingest_api.py", `def build_url_ingest_response(): pass\n`);
+  await write("src/play_book_studio/http/server_chat.py", `def handle_chat(): pass\ndef handle_chat_attachment_transcribe(): pass\nchat_attachment_transcribe_not_available = "chat_attachment_transcribe_not_available"\n`);
+  await write("src/play_book_studio/http/wiki_vault.py", `def handle_wiki_vault(): pass\ndef handle_wiki_vault_note_save(): pass\nselected_uploads = []\ngraph = {"nodes": [], "edges": [], "chunk_previews": []}\n`);
+  await write("src/play_book_studio/wiki_loop.py", `def run_wiki_loop_once(): pass\ndef build_wiki_loop_status(): pass\n`);
+  return root;
+}
+
+async function runSelfTest() {
+  const root = await createSelfTestSource();
+  const remoteRoot = await createSelfTestSource();
+  const bareRemote = await mkdtemp(join(tmpdir(), "cywell-pbs-source-remote-"));
+  try {
+    const before = checks.length;
+    sourceContractChecks(root);
+    const selfFailures = checks.slice(before).filter((check) => check.status === "FAIL");
+    if (selfFailures.length === 0) pass("pbs-source:self-test", "synthetic PBS source contract fixture passes");
+    else fail("pbs-source:self-test", `synthetic PBS source contract fixture failed: ${selfFailures.map((check) => check.id).join(", ")}`);
+
+    runGitResult(["init", "-b", "main"], remoteRoot);
+    runGitResult(["config", "user.email", "cywell-selftest@example.invalid"], remoteRoot);
+    runGitResult(["config", "user.name", "Cywell Self Test"], remoteRoot);
+    runGitResult(["add", "."], remoteRoot);
+    runGitResult(["commit", "-m", "initial PBS contract fixture"], remoteRoot);
+    runGitResult(["init", "--bare"], bareRemote);
+    runGitResult(["remote", "add", "origin", bareRemote], remoteRoot);
+    runGitResult(["push", "-u", "origin", "main"], remoteRoot, 60000);
+    const pushedHead = runGit(["rev-parse", "HEAD"], remoteRoot);
+    const pushedProof = remoteRefsContainingExpectedHead(remoteRoot, pushedHead);
+    await writeFile(join(remoteRoot, "local-only-change.txt"), "not pushed\n");
+    runGitResult(["add", "local-only-change.txt"], remoteRoot);
+    runGitResult(["commit", "-m", "local only fixture change"], remoteRoot);
+    const localOnlyHead = runGit(["rev-parse", "HEAD"], remoteRoot);
+    const localOnlyProof = remoteRefsContainingExpectedHead(remoteRoot, localOnlyHead);
+    expect(
+      "pbs-source:self-test-remote-head-contained",
+      pushedProof.remoteContainsExpectedHead === true && pushedProof.remoteRefsContainingExpectedHead.includes("origin/main"),
+      "synthetic approved remote branch contains the pushed PBS source SHA",
+      `expected pushed fixture SHA to be contained in origin/main: ${JSON.stringify(pushedProof)}`
+    );
+    expect(
+      "pbs-source:self-test-local-only-head-rejected",
+      localOnlyProof.remoteContainsExpectedHead === false,
+      "synthetic local-only PBS source SHA is rejected because no origin branch contains it",
+      `expected local-only fixture SHA to be rejected: ${JSON.stringify(localOnlyProof)}`
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(remoteRoot, { recursive: true, force: true });
+    await rm(bareRemote, { recursive: true, force: true });
+  }
+}
+
+if (selfTest) {
+  await runSelfTest();
+}
+
+let remoteHeadProof = null;
+if (!existsSync(sourceDir)) {
+  const detail = `PBS source directory not found at ${sourceDir}; set CAS_PBS_SOURCE_DIR or pass --source-dir`;
+  if (requireSource) fail("pbs-source:source-dir", detail);
+  else warn("pbs-source:source-dir", detail);
+} else {
+  pass("pbs-source:source-dir", `using PBS source directory ${sourceDir}`);
+  const metadata = gitMetadata(sourceDir);
+  if (requireExpectedHead && !expectedSourceHead) {
+    fail("pbs-source:git-head-expected-required", "CAS_PBS_SOURCE_HEAD is required when --require-expected-head is set");
+  } else if (requireExpectedHead && !fullGitSha(expectedSourceHead)) {
+    fail("pbs-source:git-head-expected-full-sha", "CAS_PBS_SOURCE_HEAD must be the approved full 40-character PBS git SHA when --require-expected-head is set");
+  } else if (requireExpectedHead && expectedSourceHead !== approvedPbsSourceHead) {
+    fail("pbs-source:git-head-approved-release", `CAS_PBS_SOURCE_HEAD must match the v0.1.4 approved PBS SHA ${approvedPbsSourceHead}`);
+  }
+  if (metadata.available) {
+    pass("pbs-source:git-head", `PBS source git head ${metadata.head} on ${metadata.branch || "detached"}`);
+    if (requireCleanSource && requireExpectedHead) {
+      expect(
+        "pbs-source:git-remote-approved",
+        approvedRemoteUrl(metadata.remoteOriginUrl),
+        `PBS source remote is approved: ${metadata.remoteOriginUrl}`,
+        `PBS source remote.origin.url must match an approved PBS repository pattern; found ${metadata.remoteOriginUrl || "missing"}`
+      );
+    } else if (approvedRemoteUrl(metadata.remoteOriginUrl)) {
+      pass("pbs-source:git-remote-approved", `PBS source remote is approved: ${metadata.remoteOriginUrl}`);
+    } else {
+      warn("pbs-source:git-remote-unverified", `PBS source remote.origin.url is not approved for strict release pinning: ${metadata.remoteOriginUrl || "missing"}`);
+    }
+    if (expectedSourceHead) {
+      expect(
+        "pbs-source:git-head-expected",
+        fullGitSha(expectedSourceHead) && metadata.fullHead === expectedSourceHead,
+        `PBS source head matches CAS_PBS_SOURCE_HEAD ${expectedSourceHead}`,
+        `PBS source head ${metadata.fullHead || metadata.head} does not match CAS_PBS_SOURCE_HEAD ${expectedSourceHead}`
+      );
+    }
+    if (requireCleanSource && requireExpectedHead && fullGitSha(expectedSourceHead) && approvedRemoteUrl(metadata.remoteOriginUrl)) {
+      remoteHeadProof = remoteRefsContainingExpectedHead(sourceDir, expectedSourceHead);
+      expect(
+        "pbs-source:git-head-expected-remote-ref",
+        remoteHeadProof.remoteContainsExpectedHead === true,
+        `CAS_PBS_SOURCE_HEAD is contained in approved remote ref ${remoteHeadProof.remoteRefsContainingExpectedHead[0]}`,
+        `CAS_PBS_SOURCE_HEAD ${expectedSourceHead} must be contained in at least one fetched approved origin branch ref: ${remoteHeadProof.remoteVerificationError || "no remote proof"}`
+      );
+    }
+    if (requireCleanSource) {
+      expect(
+        "pbs-source:git-tree-clean",
+        metadata.treeStatus === "clean",
+        "PBS source git tree is clean",
+        `PBS source git tree is dirty: ${metadata.statusShort}`
+      );
+    } else if (metadata.treeStatus !== "clean") {
+      warn("pbs-source:git-tree-dirty", "PBS source git tree is dirty; evidence records file hashes for the checked contract files");
+    } else {
+      pass("pbs-source:git-tree-clean", "PBS source git tree is clean");
+    }
+  } else {
+    warn("pbs-source:git-metadata", "PBS source directory is not a git worktree; evidence records file hashes only");
+    if (requireExpectedHead) fail("pbs-source:git-head-expected", "PBS source must be a git worktree when --require-expected-head is set");
+  }
+  sourceContractChecks(sourceDir);
+}
+
+mkdirSync(dirname(evidencePath), { recursive: true });
+const summary = {
+  total: checks.length,
+  passed: checks.filter((check) => check.status === "PASS").length,
+  warned: checks.filter((check) => check.status === "WARN").length,
+  failed: checks.filter((check) => check.status === "FAIL").length
+};
+const status = summary.failed ? "FAIL" : "PASS";
+const cywellGit = gitMetadata(process.cwd());
+const pbsSourceGit = existsSync(sourceDir) ? gitMetadata(sourceDir) : null;
+writeFileSync(
+  evidencePath,
+  JSON.stringify(
+    {
+      status,
+      checkedAt,
+      branch: cywellGit.branch,
+      head: cywellGit.head,
+      fullHead: cywellGit.fullHead,
+      treeStatus: cywellGit.treeStatus,
+      statusShort: cywellGit.statusShort,
+      sourceDir,
+      pbsSource: existsSync(sourceDir)
+        ? {
+            ...pbsSourceGit,
+            ...(typeof remoteHeadProof === "object" && remoteHeadProof ? remoteHeadProof : {}),
+            expectedHead: expectedSourceHead || null,
+            approvedHead: approvedPbsSourceHead,
+            requireCleanSource,
+            contractFileSha256: contractFileHashes(sourceDir)
+          }
+        : null,
+      requireSource,
+      requireCleanSource,
+      requireExpectedHead,
+      selfTest,
+      summary,
+      checks
+    },
+    null,
+    2
+  )
+);
+
+console.log(`PBS source contract verification final status: ${status}`);
+console.log(`Evidence: ${evidencePath}`);
+if (status !== "PASS") process.exit(1);

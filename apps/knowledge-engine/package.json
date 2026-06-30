@@ -1,0 +1,9 @@
+{
+  "name": "@cywell-ai-sentinel/knowledge-engine",
+  "version": "0.1.4",
+  "private": true,
+  "scripts": {
+    "start": "python -m cas_knowledge_engine.app",
+    "verify": "python -m cas_knowledge_engine.selftest"
+  }
+}

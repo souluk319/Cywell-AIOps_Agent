@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../pbs-shadow
+images:
+  - name: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-gateway
+    newTag: v0.1.4
+  - name: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-console-plugin
+    newTag: v0.1.4
+  - name: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-knowledge-engine
+    newTag: v0.1.4
+  - name: pgvector/pgvector
+    newName: image-registry.openshift-image-registry.svc:5000/cywell-ai-sentinel/cas-knowledge-postgres
+    newTag: v0.1.4
+configMapGenerator:
+  - name: cas-knowledge-live-config
+    namespace: cywell-ai-sentinel
+    literals:
+      - service-owner=cas-pbs-live
+      - customer-access-json=__GENERATED_PBS_LIVE_SITE_OVERLAY_REQUIRED__
+generatorOptions:
+  disableNameSuffixHash: true
+patches:
+  - path: delete-dev-knowledge-env-patch.yaml
+  - path: gateway-customer-access-live-patch.yaml
+  - path: knowledge-engine-pbs-live-patch.yaml
+  - path: knowledge-postgres-live-secretrefs-patch.yaml

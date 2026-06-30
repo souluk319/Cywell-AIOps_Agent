@@ -12,4 +12,6 @@ coverage/
 *.tsbuildinfo
 *.log
 desktop.ini
+__pycache__/
+*.pyc
 

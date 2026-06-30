@@ -1,5 +1,6 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { existsSync, readFileSync } from "node:fs";
 import {
   PRODUCT,
   assertReadOnlyToolPlan,
@@ -16,7 +17,8 @@ export function getBrainConfig(env = process.env) {
     provider: env.CAS_BRAIN_PROVIDER ?? "mock",
     lightspeedUrl: (env.CAS_LIGHTSPEED_URL ?? defaultLightspeedUrl).replace(/\/+$/, ""),
     timeoutMs: Number(env.CAS_LIGHTSPEED_TIMEOUT_MS ?? 90000),
-    tlsInsecure: env.CAS_LIGHTSPEED_TLS_INSECURE === "true"
+    tlsInsecure: env.CAS_LIGHTSPEED_TLS_INSECURE === "true",
+    caFile: env.CAS_LIGHTSPEED_CA_FILE ?? ""
   };
 }
 
@@ -110,6 +112,7 @@ function requestText(url, options) {
   const isHttps = target.protocol === "https:";
   const body = options.body ?? "";
   const transport = isHttps ? httpsRequest : httpRequest;
+  const ca = isHttps && options.caFile && existsSync(options.caFile) ? readFileSync(options.caFile) : undefined;
 
   return new Promise((resolve, reject) => {
     const request = transport(
@@ -120,6 +123,7 @@ function requestText(url, options) {
           ...options.headers,
           "content-length": Buffer.byteLength(body)
         },
+        ca,
         rejectUnauthorized: isHttps ? !options.tlsInsecure : undefined,
         timeout: options.timeoutMs
       },
@@ -164,7 +168,8 @@ export async function queryLightspeed(input = {}, options = {}) {
     },
     body,
     timeoutMs: config.timeoutMs,
-    tlsInsecure: config.tlsInsecure
+    tlsInsecure: config.tlsInsecure,
+    caFile: config.caFile
   });
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -341,7 +346,8 @@ export async function checkLightspeedReadiness(options = {}) {
         accept: "application/json"
       },
       timeoutMs: Math.min(config.timeoutMs, 15000),
-      tlsInsecure: config.tlsInsecure
+      tlsInsecure: config.tlsInsecure,
+      caFile: config.caFile
     });
     return {
       ok: response.statusCode >= 200 && response.statusCode < 300,

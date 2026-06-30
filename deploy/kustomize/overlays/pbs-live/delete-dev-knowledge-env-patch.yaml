@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cas-knowledge-engine
+  namespace: cywell-ai-sentinel
+spec:
+  template:
+    spec:
+      containers:
+        - name: knowledge-engine
+          env:
+            - name: CAS_KNOWLEDGE_SINGLE_OWNER
+              $patch: delete
+            - name: DATABASE_URL
+              $patch: delete

@@ -5,5 +5,84 @@
       "provider": { "$codeRef": "CASContextProvider" },
       "useValueHook": { "$codeRef": "useCASLauncher" }
     }
+  },
+  {
+    "type": "console.navigation/section",
+    "properties": {
+      "id": "cywell",
+      "perspective": "admin",
+      "name": "Cywell"
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "cywell-ai-sentinel",
+      "perspective": "admin",
+      "section": "cywell",
+      "name": "AI Sentinel",
+      "href": "/cywell/ai-sentinel",
+      "startsWith": ["/cywell/ai-sentinel"]
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "cywell-customer-data",
+      "perspective": "admin",
+      "section": "cywell",
+      "name": "고객 데이터",
+      "href": "/cywell/customer-data",
+      "startsWith": ["/cywell/customer-data"]
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "cywell-rag",
+      "perspective": "admin",
+      "section": "cywell",
+      "name": "RAG",
+      "href": "/cywell/rag",
+      "startsWith": ["/cywell/rag"]
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "cywell-llm-wiki",
+      "perspective": "admin",
+      "section": "cywell",
+      "name": "LLM Wiki",
+      "href": "/cywell/llm-wiki",
+      "startsWith": ["/cywell/llm-wiki"]
+    }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "cywell-topology",
+      "perspective": "admin",
+      "section": "cywell",
+      "name": "Topology",
+      "href": "/cywell/topology",
+      "startsWith": ["/cywell/topology"]
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": "/cywell/ai-sentinel",
+      "exact": true,
+      "component": { "$codeRef": "AISentinelRoute" }
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "path": ["/cywell", "/cywell/customer-data", "/cywell/rag", "/cywell/llm-wiki", "/cywell/topology"],
+      "exact": true,
+      "component": { "$codeRef": "CywellKnowledgeRoute" }
+    }
   }
 ]

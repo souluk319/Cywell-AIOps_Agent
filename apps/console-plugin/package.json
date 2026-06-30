@@ -1,6 +1,6 @@
 {
   "name": "@cywell-ai-sentinel/console-plugin",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,11 +9,13 @@
   },
   "consolePlugin": {
     "name": "cywell-ai-sentinel",
-    "version": "0.1.0",
+    "version": "0.1.4",
     "displayName": "AI Sentinel",
     "description": "Evidence-based AIOps Agent for OpenShift operations.",
     "exposedModules": {
+      "AISentinelRoute": "./src/plugin/AISentinelRoute",
       "CASContextProvider": "./src/plugin/CASContextProvider",
+      "CywellKnowledgeRoute": "./src/plugin/CywellKnowledgeRoute",
       "useCASLauncher": "./src/plugin/useCASLauncher"
     },
     "dependencies": {
@@ -21,6 +23,6 @@
     }
   },
   "dependencies": {
-    "@cywell-ai-sentinel/contracts": "0.1.0"
+    "@cywell-ai-sentinel/contracts": "0.1.4"
   }
 }

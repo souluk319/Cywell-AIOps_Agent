@@ -1,5 +1,4 @@
 import * as React from "react";
-import { useModal } from "@openshift-console/dynamic-plugin-sdk";
 
 const API_BASE = "/api/proxy/plugin/cywell-ai-sentinel/cas-api";
 
@@ -56,6 +55,36 @@ type ChatMessage = {
 };
 
 const initialQuestion = "ClusterVersion 상태를 한 문장으로 요약해줘.";
+const lightspeedLauncherSelectors = [
+  '[data-test="lightspeed-launcher-button"]',
+  '[data-test="lightspeed-chat-button"]',
+  '[data-test="ols-chatbot-button"]',
+  '[data-test*="lightspeed" i]',
+  '[data-test*="ols-chatbot" i]',
+  '[data-test*="openshift-lightspeed" i]',
+  '[aria-label*="Lightspeed" i]',
+  '[title*="Lightspeed" i]',
+  '[id*="lightspeed" i]',
+  '[id*="ols-chatbot" i]',
+  '[class*="lightspeed" i]',
+  '[class*="ols-chatbot" i]',
+  ".ols-chatbot-button",
+  "#ols-chatbot-button"
+];
+const lightspeedLauncherRootSelector = [
+  "button",
+  '[role="button"]',
+  "a",
+  '[data-test*="launcher" i]',
+  '[data-test*="lightspeed" i]',
+  '[data-test*="ols-chatbot" i]',
+  '[data-test*="openshift-lightspeed" i]',
+  '[id*="lightspeed" i]',
+  '[id*="ols-chatbot" i]',
+  '[class*="launcher" i]',
+  '[class*="lightspeed" i]',
+  '[class*="ols-chatbot" i]'
+].join(",");
 
 const styles = `
 .cas-launcher-root {
@@ -71,6 +100,11 @@ const styles = `
   --cas-danger: #b1382e;
   color: var(--cas-ink);
   font-family: var(--pf-t--global--font--family--body, "Red Hat Text", "Noto Sans KR", "Segoe UI", Arial, sans-serif);
+}
+
+.cas-launcher-root,
+.cas-launcher-root * {
+  box-sizing: border-box;
 }
 
 .cas-launcher-button {
@@ -100,8 +134,12 @@ const styles = `
   outline-offset: 2px;
 }
 
-.cas-launcher-button svg {
+.cas-launcher-icon {
+  display: block;
+  flex: 0 0 30px;
   height: 30px;
+  max-height: 30px;
+  max-width: 30px;
   width: 30px;
 }
 
@@ -124,12 +162,36 @@ const styles = `
   border-bottom: 1px solid var(--cas-line);
   display: flex;
   gap: 12px;
+  min-height: 65px;
+  overflow: hidden;
   padding: 14px 16px;
+}
+
+.cas-panel-icon {
+  display: block;
+  flex: 0 0 34px;
+  height: 34px;
+  max-height: 34px;
+  max-width: 34px;
+  width: 34px;
 }
 
 .cas-panel-title {
   flex: 1;
   min-width: 0;
+}
+
+.cas-panel-title strong {
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.cas-panel-title span {
+  display: block;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cas-panel-title strong,
@@ -155,8 +217,10 @@ const styles = `
   cursor: pointer;
   display: inline-flex;
   font: inherit;
+  font-size: 18px;
   height: 32px;
   justify-content: center;
+  line-height: 1;
   padding: 0;
   width: 32px;
 }
@@ -330,9 +394,9 @@ const styles = `
 }
 `;
 
-function SentinelIcon() {
+function SentinelIcon({ className }: { className?: string }) {
   return (
-    <svg aria-hidden="true" viewBox="0 0 48 48" role="img">
+    <svg aria-hidden="true" className={className} focusable="false" height="48" viewBox="0 0 48 48" width="48" role="img">
       <path
         d="M24 5.5 38 10v11.4c0 9.1-5.4 16.8-14 21.1-8.6-4.3-14-12-14-21.1V10l14-4.5Z"
         fill="currentColor"
@@ -418,7 +482,7 @@ function EvidenceSummary({ result }: { result: RCAResult }) {
   );
 }
 
-function CASLauncher() {
+export function CASLauncher() {
   const [isOpen, setIsOpen] = React.useState(false);
   const [question, setQuestion] = React.useState(initialQuestion);
   const [namespace, setNamespace] = React.useState("default");
@@ -437,6 +501,39 @@ function CASLauncher() {
       content: "CAS가 OpenShift Lightspeed 기능을 내부 뇌로 사용해 읽기 전용 분석을 수행합니다."
     }
   ]);
+
+  React.useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const suppressed = new Map<HTMLElement, { display: string; ariaHidden: string | null }>();
+    const suppressLightspeedLaunchers = () => {
+      for (const selector of lightspeedLauncherSelectors) {
+        document.querySelectorAll<HTMLElement>(selector).forEach((element) => {
+          const launcher = element.closest<HTMLElement>(lightspeedLauncherRootSelector) ?? element;
+          if (launcher.closest(".cas-launcher-root") || suppressed.has(launcher)) return;
+          suppressed.set(launcher, {
+            display: launcher.style.getPropertyValue("display"),
+            ariaHidden: launcher.getAttribute("aria-hidden")
+          });
+          launcher.style.setProperty("display", "none", "important");
+          launcher.setAttribute("aria-hidden", "true");
+          launcher.setAttribute("data-cas-suppressed-lightspeed", "true");
+        });
+      }
+    };
+    suppressLightspeedLaunchers();
+    const observer = new MutationObserver(suppressLightspeedLaunchers);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      suppressed.forEach((previous, element) => {
+        if (previous.display) element.style.setProperty("display", previous.display);
+        else element.style.removeProperty("display");
+        if (previous.ariaHidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", previous.ariaHidden);
+        element.removeAttribute("data-cas-suppressed-lightspeed");
+      });
+    };
+  }, []);
 
   const refreshBrainStatus = React.useCallback(async () => {
     setBrainStatus((current) => ({ ...current, state: "checking", detail: "연결 확인 중" }));
@@ -569,7 +666,7 @@ function CASLauncher() {
       {isOpen && (
         <section aria-label="Cywell AI Sentinel" className="cas-panel" data-test="cas-launcher-panel" role="dialog">
           <header className="cas-panel-header">
-            <SentinelIcon />
+            <SentinelIcon className="cas-panel-icon" />
             <div className="cas-panel-title">
               <strong>Cywell AI Sentinel</strong>
               <span>OpenShift RCA Agent · Lightspeed replacement</span>
@@ -667,27 +764,13 @@ function CASLauncher() {
         title="Cywell AI Sentinel"
         type="button"
       >
-        <SentinelIcon />
+        <SentinelIcon className="cas-launcher-icon" />
       </button>
     </div>
   );
 }
 
-function CASLauncherMount() {
-  return <CASLauncher />;
-}
-
 export function useCASLauncher() {
-  const launchModal = useModal();
-  const launchedRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!launchedRef.current && launchModal) {
-      launchModal(CASLauncherMount, {}, "cywell-ai-sentinel-launcher");
-      launchedRef.current = true;
-    }
-  }, [launchModal]);
-
   return null;
 }
 
