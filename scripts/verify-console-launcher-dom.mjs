@@ -373,6 +373,40 @@ async function run() {
     ]);
     await page.waitForSelector('[data-test="cas-launcher-panel"]', { timeout: 15000 });
     expect("console-launcher-dom:panel-opens", (await page.locator('[data-test="cas-launcher-panel"]').count()) === 1, "launcher click opens the CAS panel");
+    const panelLayout = await page.locator('[data-test="cas-launcher-panel"]').evaluate((panel) => {
+      const header = panel.querySelector(".cas-panel-header");
+      const icon = panel.querySelector(".cas-panel-icon");
+      const body = panel.querySelector(".cas-panel-body");
+      const textarea = panel.querySelector('textarea[aria-label="AI Sentinel question"]');
+      const panelRect = panel.getBoundingClientRect();
+      const headerRect = header?.getBoundingClientRect();
+      const iconRect = icon?.getBoundingClientRect();
+      const bodyRect = body?.getBoundingClientRect();
+      const textareaRect = textarea?.getBoundingClientRect();
+      return {
+        panelHeight: Math.round(panelRect.height),
+        viewportHeight: window.innerHeight,
+        headerHeight: Math.round(headerRect?.height ?? 0),
+        iconWidth: Math.round(iconRect?.width ?? 0),
+        iconHeight: Math.round(iconRect?.height ?? 0),
+        bodyTop: Math.round(bodyRect?.top ?? 0),
+        headerBottom: Math.round(headerRect?.bottom ?? 0),
+        textareaWidth: Math.round(textareaRect?.width ?? 0),
+        textareaHeight: Math.round(textareaRect?.height ?? 0)
+      };
+    });
+    expect(
+      "console-launcher-dom:panel-layout-contained",
+      panelLayout.panelHeight <= panelLayout.viewportHeight - 80 &&
+        panelLayout.headerHeight <= 72 &&
+        panelLayout.iconWidth <= 40 &&
+        panelLayout.iconHeight <= 40 &&
+        panelLayout.bodyTop >= panelLayout.headerBottom &&
+        panelLayout.textareaWidth > 300 &&
+        panelLayout.textareaHeight >= 80,
+      "launcher panel keeps the brand icon constrained and the chat composer visible",
+      JSON.stringify(panelLayout)
+    );
     expect(
       "console-launcher-dom:brainz-on-open",
       calls.some((call) => call.method === "GET" && call.path === "/api/aiops/brainz"),

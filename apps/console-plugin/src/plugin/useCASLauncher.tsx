@@ -102,6 +102,11 @@ const styles = `
   font-family: var(--pf-t--global--font--family--body, "Red Hat Text", "Noto Sans KR", "Segoe UI", Arial, sans-serif);
 }
 
+.cas-launcher-root,
+.cas-launcher-root * {
+  box-sizing: border-box;
+}
+
 .cas-launcher-button {
   align-items: center;
   background: var(--cas-surface);
@@ -129,8 +134,12 @@ const styles = `
   outline-offset: 2px;
 }
 
-.cas-launcher-button svg {
+.cas-launcher-icon {
+  display: block;
+  flex: 0 0 30px;
   height: 30px;
+  max-height: 30px;
+  max-width: 30px;
   width: 30px;
 }
 
@@ -153,12 +162,36 @@ const styles = `
   border-bottom: 1px solid var(--cas-line);
   display: flex;
   gap: 12px;
+  min-height: 65px;
+  overflow: hidden;
   padding: 14px 16px;
+}
+
+.cas-panel-icon {
+  display: block;
+  flex: 0 0 34px;
+  height: 34px;
+  max-height: 34px;
+  max-width: 34px;
+  width: 34px;
 }
 
 .cas-panel-title {
   flex: 1;
   min-width: 0;
+}
+
+.cas-panel-title strong {
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.cas-panel-title span {
+  display: block;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cas-panel-title strong,
@@ -184,8 +217,10 @@ const styles = `
   cursor: pointer;
   display: inline-flex;
   font: inherit;
+  font-size: 18px;
   height: 32px;
   justify-content: center;
+  line-height: 1;
   padding: 0;
   width: 32px;
 }
@@ -359,9 +394,9 @@ const styles = `
 }
 `;
 
-function SentinelIcon() {
+function SentinelIcon({ className }: { className?: string }) {
   return (
-    <svg aria-hidden="true" viewBox="0 0 48 48" role="img">
+    <svg aria-hidden="true" className={className} focusable="false" height="48" viewBox="0 0 48 48" width="48" role="img">
       <path
         d="M24 5.5 38 10v11.4c0 9.1-5.4 16.8-14 21.1-8.6-4.3-14-12-14-21.1V10l14-4.5Z"
         fill="currentColor"
@@ -631,7 +666,7 @@ export function CASLauncher() {
       {isOpen && (
         <section aria-label="Cywell AI Sentinel" className="cas-panel" data-test="cas-launcher-panel" role="dialog">
           <header className="cas-panel-header">
-            <SentinelIcon />
+            <SentinelIcon className="cas-panel-icon" />
             <div className="cas-panel-title">
               <strong>Cywell AI Sentinel</strong>
               <span>OpenShift RCA Agent · Lightspeed replacement</span>
@@ -729,7 +764,7 @@ export function CASLauncher() {
         title="Cywell AI Sentinel"
         type="button"
       >
-        <SentinelIcon />
+        <SentinelIcon className="cas-launcher-icon" />
       </button>
     </div>
   );
